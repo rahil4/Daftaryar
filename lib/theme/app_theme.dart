@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// پالت رنگی یکپارچه برنامه — تم تیره، مینیمال و واضح با لهجه برند برنزی/طلایی
 class AppColors {
@@ -20,13 +19,17 @@ class AppColors {
   static const teal = Color(0xFF14B8A6); // فیروزه‌ای — برای شاخص‌های ثانویه مثل حقوق سهام
 }
 
+/// نام خانواده فونت محلی که در assets/fonts باندل شده (بدون نیاز به اینترنت)
+const String kAppFontFamily = 'Vazirmatn';
+
 class AppTheme {
   static ThemeData get theme {
-    final fontFamily = GoogleFonts.vazirmatn().fontFamily;
-    final baseText = GoogleFonts.vazirmatnTextTheme(ThemeData.dark().textTheme).apply(
-      bodyColor: AppColors.textPrimary,
-      displayColor: AppColors.textPrimary,
-    );
+    const fontFamily = kAppFontFamily;
+    final baseText = ThemeData.dark().textTheme.apply(
+          fontFamily: fontFamily,
+          bodyColor: AppColors.textPrimary,
+          displayColor: AppColors.textPrimary,
+        );
 
     return ThemeData(
       useMaterial3: true,

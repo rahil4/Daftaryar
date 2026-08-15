@@ -20,7 +20,6 @@ dependencies:
   fl_chart: ^0.68.0
   share_plus: ^7.2.2
   file_picker: ^8.1.4
-  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
@@ -29,3 +28,14 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Vazirmatn-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Vazirmatn-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Vazirmatn-Bold.ttf
+          weight: 700

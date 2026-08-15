@@ -1,0 +1,40 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: دریافت کد
+        uses: actions/checkout@v4
+
+      - name: نصب جاوا
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: نصب فلاتر
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: ساخت پوسته اندروید (بدون تغییر pubspec.yaml و lib/ موجود)
+        run: flutter create --platforms=android --org com.parshan --project-name daftaryar .
+
+      - name: دریافت بسته‌ها
+        run: flutter pub get
+
+      - name: ساخت APK ریلیز
+        run: flutter build apk --release --split-per-abi
+
+      - name: بارگذاری APK به عنوان artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daftaryar-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 30

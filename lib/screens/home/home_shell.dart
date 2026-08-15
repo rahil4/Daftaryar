@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../dashboard/dashboard_screen.dart';
 import '../journal/journal_list_screen.dart';
@@ -95,7 +94,6 @@ class _NavItem extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontFamily: GoogleFonts.vazirmatn().fontFamily,
                 color: color,
                 fontSize: 10,
                 fontWeight: active ? FontWeight.bold : FontWeight.normal,

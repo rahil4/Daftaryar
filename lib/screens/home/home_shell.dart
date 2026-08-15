@@ -5,6 +5,7 @@ import '../journal/journal_list_screen.dart';
 import '../projects/projects_screen.dart';
 import '../accounts/accounts_screen.dart';
 import '../reports/reports_screen.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/quick_add_sheet.dart';
 
 class HomeShell extends StatefulWidget {
@@ -39,8 +40,8 @@ class _HomeShellState extends State<HomeShell> {
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: BottomAppBar(
-        color: Colors.white,
-        elevation: 10,
+        color: AppColors.surface,
+        elevation: 4,
         shape: const CircularNotchedRectangle(),
         notchMargin: 8,
         child: SizedBox(
@@ -75,12 +76,9 @@ class _NavItem extends StatelessWidget {
     required this.onTap,
   });
 
-  static const _brand = Color(0xFFC9A227); // برنز — رنگ برند دفتریار
-  static const _inactive = Color(0xFFB0B8C1);
-
   @override
   Widget build(BuildContext context) {
-    final color = active ? _brand : _inactive;
+    final color = active ? AppColors.brass : AppColors.textSecondary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),

@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-/// کارت آماری استاندارد برنامه: آیکون در جعبه پاستلی، عنوان خاکستری،
-/// مقدار درشت و تیره، و واحد اختیاری زیر آن. در داشبورد، جزئیات پروژه
-/// و گزارش‌ها به‌صورت یکسان استفاده می‌شود.
+/// کارت آماری استاندارد برنامه: آیکون در جعبه کم‌رنگِ هم‌رنگ خودش،
+/// عنوان خاکستری، مقدار درشت روشن. برای هر شاخص فقط یک رنگ لهجه کافی است؛
+/// در داشبورد، جزئیات پروژه و گزارش‌ها به‌صورت یکسان استفاده می‌شود.
 class StatCard extends StatelessWidget {
   final String title;
   final String value;
   final IconData icon;
+  final Color? color; // رنگ لهجه آیکون و مقدار (پیش‌فرض: برنز برند)
   final Color? valueColor;
-  final Color? iconBg;
-  final Color? iconColor;
   final String? unit;
 
   const StatCard({
@@ -18,39 +17,33 @@ class StatCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.icon,
+    this.color,
     this.valueColor,
-    this.iconBg,
-    this.iconColor,
     this.unit,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accent = color ?? AppColors.brass;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.gridLine),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: iconBg ?? AppColors.pastelAmberBg,
-              borderRadius: BorderRadius.circular(12),
+              color: accent.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: iconColor ?? AppColors.brass, size: 20),
+            child: Icon(icon, color: accent, size: 19),
           ),
           const SizedBox(height: 12),
           Text(

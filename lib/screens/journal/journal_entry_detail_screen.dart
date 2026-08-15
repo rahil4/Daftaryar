@@ -65,7 +65,7 @@ class _JournalEntryDetailScreenState extends State<JournalEntryDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('سند شماره ${widget.entryId}'),
+        title: Text('سند شماره ${pn(widget.entryId)}'),
         actions: [IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete)],
       ),
       body: _loading || _entry == null

@@ -4,6 +4,7 @@ import '../../db/database_helper.dart';
 import '../../models/client.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/formatters.dart';
 import 'client_form_screen.dart';
 import '../projects/project_detail_screen.dart';
 import '../projects/project_form_screen.dart';
@@ -105,7 +106,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('پروژه‌های این کارفرما (${_projects.length})',
+                  Text('پروژه‌های این کارفرما (${pn(_projects.length)})',
                       style: Theme.of(context).textTheme.titleMedium),
                   TextButton.icon(
                     onPressed: () async {

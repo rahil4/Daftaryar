@@ -1,59 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// پالت رنگی یکپارچه برنامه — طراحی روشن، مینیمال و مدرن با لهجه برند برنزی/طلایی
+/// پالت رنگی یکپارچه برنامه — تم تیره، مینیمال و واضح با لهجه برند برنزی/طلایی
 class AppColors {
-  static const background = Color(0xFFF5F7FA); // پس‌زمینه اصلی صفحات
-  static const surface = Colors.white; // کارت‌ها و نوار بالا
-  static const surfaceAlt = Color(0xFFF1F5F9); // فیلدهای ورودی و کارت‌های ثانویه
-  static const gridLine = Color(0xFFE2E8F0); // حاشیه/جداکننده بسیار ملایم
+  static const background = Color(0xFF0F1115); // پس‌زمینه اصلی صفحات (تقریباً مشکی)
+  static const surface = Color(0xFF1A1D23); // کارت‌ها و نوار بالا/پایین
+  static const surfaceAlt = Color(0xFF23262D); // فیلدهای ورودی و کارت‌های ثانویه
+  static const gridLine = Color(0xFF2A2E37); // حاشیه/جداکننده ملایم برای وضوح در تم تیره
 
-  static const brass = Color(0xFFC9A227); // رنگ برند دفتریار
+  static const brass = Color(0xFFC9A227); // رنگ برند دفتریار — تنها لهجه رنگی اصلی
   static const brassLight = Color(0xFFE0C05C);
 
-  static const textPrimary = Color(0xFF1E293B);
-  static const textSecondary = Color(0xFF94A3B8);
+  static const textPrimary = Color(0xFFF1F5F9);
+  static const textSecondary = Color(0xFF8B93A1);
 
-  static const positive = Color(0xFF16A34A); // سبز — دریافت/سود
-  static const negative = Color(0xFFDC2626); // قرمز — پرداخت/زیان
-
-  // پس‌زمینه‌های پاستلی برای آیکون‌های کارت (سبک fintech مدرن)
-  static const pastelGreenBg = Color(0xFFDCFCE7);
-  static const pastelRedBg = Color(0xFFFEE2E2);
-  static const pastelBlueBg = Color(0xFFDBEAFE);
-  static const pastelBlueFg = Color(0xFF2563EB);
-  static const pastelTealBg = Color(0xFFCCFBF1);
-  static const pastelTealFg = Color(0xFF0D9488);
-  static const pastelAmberBg = Color(0xFFFEF3C7);
+  static const positive = Color(0xFF22C55E); // سبز — دریافت/سود
+  static const negative = Color(0xFFEF4444); // قرمز — پرداخت/زیان
+  static const info = Color(0xFF3B82F6); // آبی — برای شاخص‌های خنثی مثل خالص ارزش
+  static const teal = Color(0xFF14B8A6); // فیروزه‌ای — برای شاخص‌های ثانویه مثل حقوق سهام
 }
 
 class AppTheme {
   static ThemeData get theme {
     final fontFamily = GoogleFonts.vazirmatn().fontFamily;
-    final baseText = GoogleFonts.vazirmatnTextTheme(ThemeData.light().textTheme).apply(
+    final baseText = GoogleFonts.vazirmatnTextTheme(ThemeData.dark().textTheme).apply(
       bodyColor: AppColors.textPrimary,
       displayColor: AppColors.textPrimary,
     );
 
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: Brightness.dark,
       scaffoldBackgroundColor: AppColors.background,
       fontFamily: fontFamily,
       textTheme: baseText,
-      colorScheme: const ColorScheme.light(
+      colorScheme: const ColorScheme.dark(
         primary: AppColors.brass,
         secondary: AppColors.brassLight,
         surface: AppColors.surface,
         error: AppColors.negative,
+        onPrimary: Color(0xFF15100A),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        scrolledUnderElevation: 1,
-        shadowColor: Colors.black.withOpacity(0.06),
         centerTitle: true,
         titleTextStyle: TextStyle(
           fontFamily: fontFamily,
@@ -62,49 +54,53 @@ class AppTheme {
           color: AppColors.textPrimary,
         ),
       ),
-      // کارت‌های سراسر برنامه: گوشه گرد ۲۰ و سایه بسیار نرم (بدون حاشیه خط)
+      // کارت‌های سراسر برنامه: تخت و واضح با حاشیه ملایم (سایه در تم تیره کم‌اثر است)
       cardTheme: CardThemeData(
         color: AppColors.surface,
-        elevation: 3,
-        shadowColor: Colors.black.withOpacity(0.06),
+        elevation: 0,
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: AppColors.gridLine),
+        ),
         margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 0),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surfaceAlt,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.gridLine),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.gridLine),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.brass, width: 1.6),
         ),
         labelStyle: const TextStyle(color: AppColors.textSecondary),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       ),
+      // دکمه اصلی: پرکاربردترین اکشن‌ها (ذخیره، ثبت) — پس‌زمینه برنزی با متن تیره پرکنتراست
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.brass,
-          foregroundColor: Colors.white,
+          foregroundColor: const Color(0xFF15100A),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
+      // دکمه فرعی: اکشن‌های کم‌اهمیت‌تر — فقط حاشیه، بدون پرکردن پس‌زمینه
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.brass,
           side: const BorderSide(color: AppColors.brass),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
@@ -112,14 +108,14 @@ class AppTheme {
       ),
       floatingActionButtonTheme: const FloatingActionButtonThemeData(
         backgroundColor: AppColors.brass,
-        foregroundColor: Colors.white,
-        elevation: 4,
+        foregroundColor: Color(0xFF15100A),
+        elevation: 2,
       ),
       dividerTheme: const DividerThemeData(color: AppColors.gridLine, thickness: 1),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.surfaceAlt,
         labelStyle: const TextStyle(color: AppColors.textPrimary),
-        side: BorderSide.none,
+        side: const BorderSide(color: AppColors.gridLine),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       tabBarTheme: const TabBarThemeData(
@@ -134,20 +130,24 @@ class AppTheme {
         type: BottomNavigationBarType.fixed,
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: AppColors.textPrimary,
-        contentTextStyle: const TextStyle(color: Colors.white),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        backgroundColor: AppColors.surfaceAlt,
+        contentTextStyle: const TextStyle(color: AppColors.textPrimary),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: AppColors.gridLine),
+        ),
         behavior: SnackBarBehavior.floating,
       ),
       listTileTheme: const ListTileThemeData(
         iconColor: AppColors.brass,
         textColor: AppColors.textPrimary,
       ),
+      iconTheme: const IconThemeData(color: AppColors.textSecondary),
     );
   }
 }
 
-/// پس‌زمینه استاندارد صفحات برنامه — رنگ ملایم یکدست، بدون گرافیک اضافه
+/// پس‌زمینه استاندارد صفحات برنامه
 class BlueprintGridBackground extends StatelessWidget {
   final Widget child;
   const BlueprintGridBackground({super.key, required this.child});

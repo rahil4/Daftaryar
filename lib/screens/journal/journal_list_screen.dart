@@ -66,9 +66,9 @@ class _JournalListScreenState extends State<JournalListScreen> {
                         return Card(
                           child: ListTile(
                             leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
-                            title: Text(e.description ?? 'سند شماره ${e.id}'),
+                            title: Text(e.description ?? 'سند شماره ${pn(e.id)}'),
                             subtitle: Text(
-                                '${formatJalaliLong(e.date)} · ${e.lines.length} سطر · ${formatMoney(e.totalDebit)}'),
+                                '${formatJalaliLong(e.date)} · ${pn(e.lines.length)} سطر · ${formatMoney(e.totalDebit)}'),
                             trailing: const Icon(Icons.chevron_left),
                             onTap: () async {
                               await Navigator.push(

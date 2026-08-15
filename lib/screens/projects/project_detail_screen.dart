@@ -182,7 +182,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('اسناد این پروژه (${_entries.length})',
+                        Text('اسناد این پروژه (${pn(_entries.length)})',
                             style: Theme.of(context).textTheme.titleMedium),
                         TextButton.icon(
                           onPressed: _showAddOptions,
@@ -201,7 +201,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                       ..._entries.map((e) => Card(
                             child: ListTile(
                               leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
-                              title: Text(e.description ?? 'سند شماره ${e.id}'),
+                              title: Text(e.description ?? 'سند شماره ${pn(e.id)}'),
                               subtitle: Text(
                                   '${formatJalaliLong(e.date)} · ${formatMoney(e.totalDebit)}'),
                               trailing: const Icon(Icons.chevron_left),

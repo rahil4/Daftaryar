@@ -132,7 +132,7 @@ class _JalaliPickerSheetState extends State<_JalaliPickerSheet> {
       value: value,
       decoration: InputDecoration(labelText: label, isDense: true),
       items: items
-          .map((e) => DropdownMenuItem(value: e, child: Text(display != null ? display(e) : '$e')))
+          .map((e) => DropdownMenuItem(value: e, child: Text(display != null ? display(e) : pn(e))))
           .toList(),
       onChanged: (v) {
         if (v != null) onChanged(v);

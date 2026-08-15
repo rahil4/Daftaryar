@@ -1,15 +1,42 @@
-import 'package:intl/intl.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
-final NumberFormat _moneyFormat = NumberFormat.decimalPattern('en');
+const _persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
 
-/// عدد را با جداکننده هزارگان و پسوند «تومان» نمایش می‌دهد
-String formatMoney(num amount, {bool withSuffix = true}) {
-  final formatted = _moneyFormat.format(amount);
-  return withSuffix ? '$formatted تومان' : formatted;
+/// تبدیل هر رشته حاوی اعداد لاتین به ارقام فارسی (فقط برای نمایش)
+String toPersianDigits(Object input) {
+  final s = input.toString();
+  final buffer = StringBuffer();
+  for (final ch in s.split('')) {
+    final code = ch.codeUnitAt(0);
+    if (code >= 48 && code <= 57) {
+      buffer.write(_persianDigits[code - 48]);
+    } else {
+      buffer.write(ch);
+    }
+  }
+  return buffer.toString();
 }
 
-/// امروز را به صورت رشته شمسی yyyy/mm/dd برمی‌گرداند
+/// میان‌بر کوتاه برای تبدیل هر مقدار (عدد/شناسه) به ارقام فارسی جهت نمایش
+String pn(Object value) => toPersianDigits(value);
+
+/// مبلغ را با جداکننده سه‌رقمی فارسی («٬») و ارقام فارسی نمایش می‌دهد،
+/// مثال: ۱٬۲۳۴٬۵۶۷ تومان
+String formatMoney(num amount, {bool withSuffix = true}) {
+  final isNegative = amount < 0;
+  final rounded = amount.abs().round();
+  final digits = rounded.toString();
+  final buffer = StringBuffer();
+  for (int i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write('٬');
+    buffer.write(digits[i]);
+  }
+  var result = toPersianDigits(buffer.toString());
+  if (isNegative) result = '−$result';
+  return withSuffix ? '$result تومان' : result;
+}
+
+/// امروز را به صورت رشته شمسی yyyy/mm/dd (ارقام لاتین، برای ذخیره‌سازی و مرتب‌سازی) برمی‌گرداند
 String todayJalaliString() {
   final j = Jalali.now();
   return jalaliToString(j);
@@ -43,8 +70,9 @@ String jalaliMonthName(int month) {
   return names[month - 1];
 }
 
+/// نمایش تاریخ شمسی با ارقام فارسی، مثال: «۵ مرداد ۱۴۰۴»
 String formatJalaliLong(String s) {
   final j = parseJalaliString(s);
-  if (j == null) return s;
-  return '${j.day} ${jalaliMonthName(j.month)} ${j.year}';
+  if (j == null) return toPersianDigits(s);
+  return '${toPersianDigits(j.day)} ${jalaliMonthName(j.month)} ${toPersianDigits(j.year)}';
 }

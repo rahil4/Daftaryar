@@ -207,7 +207,7 @@ class _ProfitLossTabState extends State<_ProfitLossTab> {
       return PieChartSectionData(
         value: e.value,
         color: _chartColors[i % _chartColors.length],
-        title: '${pct.toStringAsFixed(0)}٪',
+        title: '${pn(pct.toStringAsFixed(0))}٪',
         radius: 60,
         titleStyle:
             const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF15100A)),

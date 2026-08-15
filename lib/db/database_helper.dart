@@ -426,11 +426,16 @@ class DatabaseHelper {
     }
 
     final assetBalance = await sumByType(kAccountAsset, true);
+    final liabilityBalance = await sumByType(kAccountLiability, false);
+    final equityBalance = await sumByType(kAccountEquity, false);
     final income = await sumByType(kAccountIncome, false);
     final expense = await sumByType(kAccountExpense, true);
 
     return {
       'assetBalance': assetBalance,
+      'liabilityBalance': liabilityBalance,
+      'equityBalance': equityBalance,
+      'netWorth': assetBalance - liabilityBalance,
       'income': income,
       'expense': expense,
       'netProfit': income - expense,

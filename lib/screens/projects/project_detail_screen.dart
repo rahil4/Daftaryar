@@ -7,9 +7,8 @@ import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
+import '../../widgets/quick_add_sheet.dart';
 import '../journal/journal_entry_detail_screen.dart';
-import '../journal/quick_receipt_screen.dart';
-import '../journal/quick_expense_screen.dart';
 import 'project_form_screen.dart';
 
 class ProjectDetailScreen extends StatefulWidget {
@@ -71,39 +70,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   }
 
   void _showAddOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.south_west_rounded, color: AppColors.positive),
-              title: const Text('ثبت دریافت از این پروژه'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final result = await Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => QuickReceiptScreen(presetProjectId: _project.id)));
-                if (result == true) _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.north_east_rounded, color: AppColors.negative),
-              title: const Text('ثبت هزینه این پروژه'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final result = await Navigator.push(context,
-                    MaterialPageRoute(builder: (_) => QuickExpenseScreen(presetProjectId: _project.id)));
-                if (result == true) _load();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+    showQuickAddSheet(context, presetProjectId: _project.id, onDone: _load);
   }
 
   @override

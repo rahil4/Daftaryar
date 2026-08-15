@@ -4,10 +4,8 @@ import '../../db/database_helper.dart';
 import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../widgets/quick_add_sheet.dart';
 import 'journal_entry_detail_screen.dart';
-import 'journal_form_screen.dart';
-import 'quick_receipt_screen.dart';
-import 'quick_expense_screen.dart';
 
 class JournalListScreen extends StatefulWidget {
   const JournalListScreen({super.key});
@@ -37,52 +35,7 @@ class _JournalListScreenState extends State<JournalListScreen> {
   }
 
   void _showAddOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.south_west_rounded, color: AppColors.positive),
-              title: const Text('ثبت دریافت وجه'),
-              subtitle: const Text('دریافت از کارفرما یا سایر منابع'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final result = await Navigator.push(
-                    context, MaterialPageRoute(builder: (_) => const QuickReceiptScreen()));
-                if (result == true) _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.north_east_rounded, color: AppColors.negative),
-              title: const Text('ثبت هزینه / پرداخت'),
-              subtitle: const Text('هزینه عمومی دفتر یا هزینه پروژه'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final result = await Navigator.push(
-                    context, MaterialPageRoute(builder: (_) => const QuickExpenseScreen()));
-                if (result == true) _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
-              title: const Text('سند حسابداری دستی'),
-              subtitle: const Text('برای ثبت‌های چندسطری یا خاص'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final result = await Navigator.push(
-                    context, MaterialPageRoute(builder: (_) => const JournalFormScreen()));
-                if (result == true) _load();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
+    showQuickAddSheet(context, onDone: _load);
   }
 
   @override

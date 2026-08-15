@@ -51,7 +51,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.people_alt_outlined),
-            tooltip: 'کارفرمایان',
+            tooltip: 'اشخاص',
             onPressed: () async {
               await Navigator.push(
                   context, MaterialPageRoute(builder: (_) => const ClientsScreen()));

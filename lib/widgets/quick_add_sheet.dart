@@ -25,7 +25,7 @@ Future<void> showQuickAddSheet(
           ListTile(
             leading: const Icon(Icons.south_west_rounded, color: AppColors.positive),
             title: const Text('ثبت دریافت وجه'),
-            subtitle: const Text('دریافت از کارفرما یا سایر منابع'),
+            subtitle: const Text('دریافت از شخص یا سایر منابع'),
             onTap: () async {
               Navigator.pop(ctx);
               final result = await Navigator.push(

@@ -37,7 +37,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('کارفرمایان')),
+      appBar: AppBar(title: const Text('اشخاص')),
       body: BlueprintGridBackground(
         child: Column(
           children: [
@@ -59,7 +59,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   ? const Center(child: CircularProgressIndicator())
                   : _clients.isEmpty
                       ? const Center(
-                          child: Text('هنوز کارفرمایی ثبت نشده است',
+                          child: Text('هنوز شخصی ثبت نشده است',
                               style: TextStyle(color: AppColors.textSecondary)))
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 12),

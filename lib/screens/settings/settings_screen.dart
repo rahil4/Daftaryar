@@ -66,7 +66,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('پاک‌سازی کامل'),
         content: const Text(
-            'تمام کارفرمایان، پروژه‌ها، تراکنش‌ها و هزینه‌ها برای همیشه حذف می‌شود. این عمل غیرقابل بازگشت است. مطمئن هستید؟'),
+            'تمام اشخاص، پروژه‌ها، تراکنش‌ها و هزینه‌ها برای همیشه حذف می‌شود. این عمل غیرقابل بازگشت است. مطمئن هستید؟'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
           TextButton(
@@ -105,8 +105,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.people_alt_outlined, color: AppColors.brass),
-                    title: const Text('کارفرمایان'),
-                    subtitle: const Text('مدیریت لیست کارفرمایان'),
+                    title: const Text('اشخاص'),
+                    subtitle: const Text('مدیریت لیست اشخاص'),
                     onTap: () => Navigator.push(
                         context, MaterialPageRoute(builder: (_) => const ClientsScreen())),
                   ),

@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../../widgets/quick_add_sheet.dart';
+import '../journal/quick_receipt_screen.dart';
+import '../journal/quick_expense_screen.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/action_button.dart';
-import '../settings/settings_screen.dart';
 
 /// داشبورد اصلی دفتریار — طراحی روشن، مدرن و مینیمال
 class DashboardScreen extends StatefulWidget {
@@ -55,8 +55,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
                     _DashboardHeader(
-                      onNotificationTap: () => Navigator.push(
-                          context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+                      onNotificationTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('اعلان جدیدی وجود ندارد')),
+                        );
+                      },
                     ),
                     const SizedBox(height: 20),
                     GridView.count(
@@ -105,7 +108,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             label: 'دریافت',
                             icon: Icons.arrow_downward_rounded,
                             color: AppColors.positive,
-                            onTap: () => showQuickAddSheet(context, onDone: _load),
+                            onTap: () async {
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const QuickReceiptScreen()),
+                              );
+                              if (result == true) _load();
+                            },
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -114,7 +123,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             label: 'پرداخت',
                             icon: Icons.arrow_upward_rounded,
                             color: AppColors.negative,
-                            onTap: () => showQuickAddSheet(context, onDone: _load),
+                            onTap: () async {
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const QuickExpenseScreen()),
+                              );
+                              if (result == true) _load();
+                            },
                           ),
                         ),
                       ],

@@ -48,7 +48,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     return Scaffold(
-      appBar: AppBar(title: Text(isEdit ? 'ویرایش کارفرما' : 'کارفرمای جدید')),
+      appBar: AppBar(title: Text(isEdit ? 'ویرایش شخص' : 'شخص جدید')),
       body: Form(
         key: _formKey,
         child: ListView(

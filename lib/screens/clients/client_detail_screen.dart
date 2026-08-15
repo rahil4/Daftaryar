@@ -43,7 +43,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف کارفرما'),
+        title: const Text('حذف شخص'),
         content: Text(
             'با حذف «${_client.name}» تمام پروژه‌ها و تراکنش‌های مرتبط با آن نیز حذف خواهد شد. ادامه می‌دهید؟'),
         actions: [
@@ -106,7 +106,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('پروژه‌های این کارفرما (${pn(_projects.length)})',
+                  Text('پروژه‌های این شخص (${pn(_projects.length)})',
                       style: Theme.of(context).textTheme.titleMedium),
                   TextButton.icon(
                     onPressed: () async {
@@ -130,7 +130,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
               else if (_projects.isEmpty)
                 const Padding(
                   padding: EdgeInsets.only(top: 20),
-                  child: Text('پروژه‌ای برای این کارفرما ثبت نشده',
+                  child: Text('پروژه‌ای برای این شخص ثبت نشده',
                       style: TextStyle(color: AppColors.textSecondary)),
                 )
               else

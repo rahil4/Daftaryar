@@ -34,10 +34,15 @@ jobs:
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
-              afterEvaluate {
+              val applyCompileSdkFix: () -> Unit = {
                   extensions.findByType(BaseExtension::class.java)?.let {
                       it.compileSdkVersion(36)
                   }
+              }
+              if (state.executed) {
+                  applyCompileSdkFix()
+              } else {
+                  afterEvaluate { applyCompileSdkFix() }
               }
           }
           EOF

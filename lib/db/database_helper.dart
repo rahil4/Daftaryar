@@ -456,6 +456,37 @@ class DatabaseHelper {
     return breakdown;
   }
 
+  /// مانده حساب‌های دارایی که نام‌شان شامل کلمه کلیدی است (مثلاً «بانک» یا «صندوق»)
+  /// برای جمع کردن چند حساب بانکی/صندوق احتمالی
+  Future<double> assetBalanceByKeyword(String keyword) async {
+    final accounts = await getAccounts(type: kAccountAsset);
+    final matches = accounts.where((a) => a.name.contains(keyword));
+    double total = 0;
+    for (final a in matches) {
+      final bal = await accountBalance(a.id!);
+      total += bal['balance']!;
+    }
+    return total;
+  }
+
+  /// جمع مانده تمام حساب‌های یک نوع در بازه تاریخ اختیاری (برای درآمد/هزینه امروز یا هفته)
+  Future<double> totalAccountTypeBalance(String type, {String? fromDate, String? toDate}) async {
+    final accounts = await getAccounts(type: type);
+    double total = 0;
+    for (final a in accounts) {
+      final bal = await accountBalance(a.id!, fromDate: fromDate, toDate: toDate);
+      total += bal['balance']!;
+    }
+    return total;
+  }
+
+  /// سود/زیان خالص یک بازه تاریخ (درآمد منهای هزینه)
+  Future<double> netProfitForRange({String? fromDate, String? toDate}) async {
+    final income = await totalAccountTypeBalance(kAccountIncome, fromDate: fromDate, toDate: toDate);
+    final expense = await totalAccountTypeBalance(kAccountExpense, fromDate: fromDate, toDate: toDate);
+    return income - expense;
+  }
+
   Future<void> wipeAll() async {
     final db = await database;
     await db.delete('journal_lines');

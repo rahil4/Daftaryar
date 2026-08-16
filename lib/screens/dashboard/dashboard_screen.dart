@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../db/database_helper.dart';
+import '../../models/account.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../journal/quick_receipt_screen.dart';
@@ -19,12 +22,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DatabaseHelper.instance;
   bool _loading = true;
 
-  double _assets = 0;
-  double _liabilities = 0;
-  double _netWorth = 0;
-  double _equity = 0;
+  double _bankBalance = 0;
+  double _cashBalance = 0;
+  double _todayIncome = 0;
+  double _todayExpense = 0;
   int _activeProjectsCount = 0;
   int _clientsCount = 0;
+
+  // عملکرد ۴ هفته اخیر: هفته جاری + ۳ هفته قبل
+  List<double> _weeklyProfits = [0, 0, 0, 0];
+  static const _weekLabels = ['۳ هفته قبل', '۲ هفته قبل', '۱ هفته قبل', 'هفته جاری'];
 
   @override
   void initState() {
@@ -34,22 +41,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final summary = await _db.dashboardSummary();
+
+    final bank = await _db.assetBalanceByKeyword('بانک');
+    final cash = await _db.assetBalanceByKeyword('صندوق');
+    final today = todayJalaliString();
+    final income = await _db.totalAccountTypeBalance(kAccountIncome, fromDate: today, toDate: today);
+    final expense = await _db.totalAccountTypeBalance(kAccountExpense, fromDate: today, toDate: today);
     final projects = await _db.getProjects();
     final clients = await _db.getClients();
+
+    // محاسبه سود/زیان ۴ هفته اخیر (شنبه تا جمعه شمسی)
+    final now = Jalali.now();
+    final thisWeek = jalaliWeekRange(now);
+    final weeklyProfits = <double>[];
+    for (int i = 3; i >= 0; i--) {
+      final weekStart = thisWeek[0].addDays(-7 * i);
+      final weekEnd = weekStart.addDays(6);
+      final profit = await _db.netProfitForRange(
+        fromDate: jalaliToString(weekStart),
+        toDate: jalaliToString(weekEnd),
+      );
+      weeklyProfits.add(profit);
+    }
+
     setState(() {
-      _assets = summary['assetBalance']!;
-      _liabilities = summary['liabilityBalance']!;
-      _netWorth = summary['netWorth']!;
-      _equity = summary['equityBalance']!;
+      _bankBalance = bank;
+      _cashBalance = cash;
+      _todayIncome = income;
+      _todayExpense = expense;
       _activeProjectsCount = projects.where((p) => p.status == 'در حال انجام').length;
       _clientsCount = clients.length;
+      _weeklyProfits = weeklyProfits;
       _loading = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final liquidAssets = _bankBalance + _cashBalance;
+    final todayProfit = _todayIncome - _todayExpense;
+
     return Scaffold(
       body: SafeArea(
         child: _loading
@@ -62,53 +93,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const _PageHeader(),
                     const SizedBox(height: 22),
 
-                    const SectionTitle('ترازنامه خلاصه'),
-                    _LedgerDivider.top(),
-                    _LedgerRow(label: 'جمع دارایی‌ها', value: formatMoney(_assets)),
-                    _LedgerRow(label: 'جمع بدهی‌ها', value: formatMoney(_liabilities)),
+                    const SectionTitle('نقدینگی'),
+                    const Divider(color: AppColors.gridLine, height: 1),
+                    _LedgerRow(label: 'موجودی بانک‌ها', value: formatMoney(_bankBalance)),
+                    _LedgerRow(label: 'موجودی صندوق', value: formatMoney(_cashBalance)),
                     _LedgerRow(
-                      label: 'خالص ارزش',
-                      value: formatMoney(_netWorth),
+                      label: 'جمع دارایی‌های نقدی',
+                      value: formatMoney(liquidAssets),
                       isTotal: true,
-                      valueColor: _netWorth >= 0 ? AppColors.positive : AppColors.negative,
                     ),
-                    _LedgerRow(label: 'حقوق صاحبان سهام', value: formatMoney(_equity)),
+
+                    const SizedBox(height: 22),
+                    const SectionTitle('عملکرد روز جاری'),
+                    const Divider(color: AppColors.gridLine, height: 1),
+                    _LedgerRow(label: 'میزان درآمد روز جاری', value: formatMoney(_todayIncome)),
+                    _LedgerRow(label: 'میزان هزینه روز جاری', value: formatMoney(_todayExpense)),
+                    _LedgerRow(
+                      label: 'سود روز جاری',
+                      value: formatMoney(todayProfit),
+                      isTotal: true,
+                      valueColor: todayProfit >= 0 ? AppColors.positive : AppColors.negative,
+                    ),
+
+                    const SizedBox(height: 22),
+                    const SectionTitle('عملکرد هفتگی (سود/زیان)'),
+                    const SizedBox(height: 8),
+                    _WeeklyProfitChart(values: _weeklyProfits, labels: _weekLabels),
+                    const SizedBox(height: 10),
+                    ...List.generate(_weeklyProfits.length, (i) {
+                      final v = _weeklyProfits[i];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_weekLabels[i],
+                                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                            Text(
+                              formatMoney(v),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: v >= 0 ? AppColors.positive : AppColors.negative,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
 
                     const SizedBox(height: 22),
                     const SectionTitle('وضعیت کلی'),
+                    const Divider(color: AppColors.gridLine, height: 1),
                     _StatLine(label: 'پروژه‌های در حال انجام', value: '${pn(_activeProjectsCount)} مورد'),
                     _StatLine(label: 'تعداد اشخاص ثبت‌شده', value: '${pn(_clientsCount)} نفر'),
 
                     const SizedBox(height: 26),
                     Container(
                       decoration: const BoxDecoration(
-                        border: Border(top: BorderSide(color: AppColors.gridLine)),
+                        border: Border(
+                          top: BorderSide(color: AppColors.gridLine),
+                          bottom: BorderSide(color: AppColors.gridLine),
+                        ),
                       ),
-                      child: Column(
-                        children: [
-                          _ActionRow(
-                            label: 'ثبت دریافت وجه',
-                            color: AppColors.positive,
-                            onTap: () async {
-                              final result = await Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const QuickReceiptScreen()),
-                              );
-                              if (result == true) _load();
-                            },
-                          ),
-                          _ActionRow(
-                            label: 'ثبت پرداخت / هزینه',
-                            color: AppColors.negative,
-                            onTap: () async {
-                              final result = await Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => const QuickExpenseScreen()),
-                              );
-                              if (result == true) _load();
-                            },
-                          ),
-                        ],
+                      child: IntrinsicHeight(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _ActionCell(
+                                label: 'ثبت دریافت',
+                                color: AppColors.positive,
+                                onTap: () async {
+                                  final result = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const QuickReceiptScreen()),
+                                  );
+                                  if (result == true) _load();
+                                },
+                              ),
+                            ),
+                            const VerticalDivider(color: AppColors.gridLine, width: 1),
+                            Expanded(
+                              child: _ActionCell(
+                                label: 'ثبت پرداخت',
+                                color: AppColors.negative,
+                                onTap: () async {
+                                  final result = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const QuickExpenseScreen()),
+                                  );
+                                  if (result == true) _load();
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -152,17 +231,6 @@ class _PageHeader extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-/// خط باریک بالای بخش دفترداری (مثل خط بالای جدول در دفتر کل)
-class _LedgerDivider extends StatelessWidget {
-  const _LedgerDivider();
-  factory _LedgerDivider.top() => const _LedgerDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Divider(color: AppColors.gridLine, height: 1);
   }
 }
 
@@ -240,29 +308,86 @@ class _StatLine extends StatelessWidget {
   }
 }
 
-/// ردیف اقدام متنی قابل‌کلیک (ثبت دریافت / پرداخت) بدون آیکون یا پس‌زمینه رنگی
-class _ActionRow extends StatelessWidget {
+/// ردیف اقدام متنی قابل‌کلیک، برای قرارگیری کنار هم در یک ردیف (دریافت | پرداخت)
+class _ActionCell extends StatelessWidget {
   final String label;
   final Color color;
   final VoidCallback onTap;
 
-  const _ActionRow({required this.label, required this.color, required this.onTap});
+  const _ActionCell({required this.label, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppColors.gridLine)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Center(
+          child: Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: color)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
-            const Text('‹', style: TextStyle(fontSize: 16, color: AppColors.textSecondary)),
-          ],
+      ),
+    );
+  }
+}
+
+/// نمودار میله‌ای سود/زیان ۴ هفته اخیر
+class _WeeklyProfitChart extends StatelessWidget {
+  final List<double> values;
+  final List<String> labels;
+  const _WeeklyProfitChart({required this.values, required this.labels});
+
+  @override
+  Widget build(BuildContext context) {
+    final maxAbs = values.fold<double>(1, (m, v) => v.abs() > m ? v.abs() : m);
+    final ceiling = maxAbs * 1.25;
+
+    return SizedBox(
+      height: 150,
+      child: BarChart(
+        BarChartData(
+          maxY: ceiling,
+          minY: -ceiling,
+          barTouchData: BarTouchData(enabled: false),
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: ceiling,
+            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.gridLine, strokeWidth: 1),
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final i = value.toInt();
+                  if (i < 0 || i >= labels.length) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(labels[i],
+                        style: const TextStyle(fontSize: 9.5, color: AppColors.textSecondary)),
+                  );
+                },
+              ),
+            ),
+          ),
+          barGroups: List.generate(values.length, (i) {
+            final v = values[i];
+            return BarChartGroupData(
+              x: i,
+              barRods: [
+                BarChartRodData(
+                  toY: v,
+                  color: v >= 0 ? AppColors.positive : AppColors.negative,
+                  width: 22,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ],
+            );
+          }),
         ),
       ),
     );

@@ -76,3 +76,11 @@ String formatJalaliLong(String s) {
   if (j == null) return toPersianDigits(s);
   return '${toPersianDigits(j.day)} ${jalaliMonthName(j.month)} ${toPersianDigits(j.year)}';
 }
+
+/// شروع و پایان هفته شمسی (شنبه تا جمعه) حاوی تاریخ داده‌شده را برمی‌گرداند
+List<Jalali> jalaliWeekRange(Jalali date) {
+  // در پکیج shamsi_date: weekDay از ۱ (شنبه) تا ۷ (جمعه) شماره‌گذاری می‌شود
+  final start = date.addDays(-(date.weekDay - 1));
+  final end = start.addDays(6);
+  return [start, end];
+}

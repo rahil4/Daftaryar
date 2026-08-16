@@ -5,10 +5,8 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
-import '../../widgets/stat_card.dart';
-import '../../widgets/action_button.dart';
 
-/// داشبورد اصلی دفتریار — طراحی روشن، مدرن و مینیمال
+/// داشبورد اصلی دفتریار — سبک سنتی حسابداری: فقط متن و ردیف، بدون آیکون و کارت
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -24,6 +22,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _liabilities = 0;
   double _netWorth = 0;
   double _equity = 0;
+  int _activeProjectsCount = 0;
+  int _clientsCount = 0;
 
   @override
   void initState() {
@@ -34,11 +34,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final summary = await _db.dashboardSummary();
+    final projects = await _db.getProjects();
+    final clients = await _db.getClients();
     setState(() {
       _assets = summary['assetBalance']!;
       _liabilities = summary['liabilityBalance']!;
       _netWorth = summary['netWorth']!;
       _equity = summary['equityBalance']!;
+      _activeProjectsCount = projects.where((p) => p.status == 'در حال انجام').length;
+      _clientsCount = clients.length;
       _loading = false;
     });
   }
@@ -52,61 +56,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
             : RefreshIndicator(
                 onRefresh: _load,
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                   children: [
-                    _DashboardHeader(
-                      onNotificationTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('اعلان جدیدی وجود ندارد')),
-                        );
-                      },
+                    const _PageHeader(),
+                    const SizedBox(height: 22),
+
+                    const _SectionTitle('ترازنامه خلاصه'),
+                    _LedgerDivider.top(),
+                    _LedgerRow(label: 'جمع دارایی‌ها', value: formatMoney(_assets)),
+                    _LedgerRow(label: 'جمع بدهی‌ها', value: formatMoney(_liabilities)),
+                    _LedgerRow(
+                      label: 'خالص ارزش',
+                      value: formatMoney(_netWorth),
+                      isTotal: true,
+                      valueColor: _netWorth >= 0 ? AppColors.positive : AppColors.negative,
                     ),
-                    const SizedBox(height: 20),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 14,
-                      crossAxisSpacing: 14,
-                      childAspectRatio: 1.35,
-                      children: [
-                        StatCard(
-                          icon: Icons.account_balance_wallet_outlined,
-                          color: AppColors.positive,
-                          title: 'دارایی‌ها',
-                          value: formatMoney(_assets, withSuffix: false),
-                          unit: 'تومان',
-                        ),
-                        StatCard(
-                          icon: Icons.credit_card_outlined,
-                          color: AppColors.negative,
-                          title: 'بدهی‌ها',
-                          value: formatMoney(_liabilities, withSuffix: false),
-                          unit: 'تومان',
-                        ),
-                        StatCard(
-                          icon: Icons.show_chart_rounded,
-                          color: AppColors.info,
-                          title: 'خالص ارزش',
-                          value: formatMoney(_netWorth, withSuffix: false),
-                          unit: 'تومان',
-                        ),
-                        StatCard(
-                          icon: Icons.balance_outlined,
-                          color: AppColors.teal,
-                          title: 'حقوق صاحبان سهام',
-                          value: formatMoney(_equity, withSuffix: false),
-                          unit: 'تومان',
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: AppActionButton(
-                            label: 'دریافت',
-                            icon: Icons.arrow_downward_rounded,
+                    _LedgerRow(label: 'حقوق صاحبان سهام', value: formatMoney(_equity)),
+
+                    const SizedBox(height: 22),
+                    const _SectionTitle('وضعیت کلی'),
+                    _StatLine(label: 'پروژه‌های در حال انجام', value: '${pn(_activeProjectsCount)} مورد'),
+                    _StatLine(label: 'تعداد اشخاص ثبت‌شده', value: '${pn(_clientsCount)} نفر'),
+
+                    const SizedBox(height: 26),
+                    Container(
+                      decoration: const BoxDecoration(
+                        border: Border(top: BorderSide(color: AppColors.gridLine)),
+                      ),
+                      child: Column(
+                        children: [
+                          _ActionRow(
+                            label: 'ثبت دریافت وجه',
                             color: AppColors.positive,
                             onTap: () async {
                               final result = await Navigator.push(
@@ -116,12 +96,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               if (result == true) _load();
                             },
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: AppActionButton(
-                            label: 'پرداخت',
-                            icon: Icons.arrow_upward_rounded,
+                          _ActionRow(
+                            label: 'ثبت پرداخت / هزینه',
                             color: AppColors.negative,
                             onTap: () async {
                               final result = await Navigator.push(
@@ -131,8 +107,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               if (result == true) _load();
                             },
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -142,61 +118,167 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// هدر داشبورد: عنوان و زیرعنوان + دکمه اعلان دایره‌ای
-class _DashboardHeader extends StatelessWidget {
-  final VoidCallback onNotificationTap;
-  const _DashboardHeader({required this.onNotificationTap});
+/// عنوان برنامه + عنوان صفحه + تاریخ گزارش، با خط جداکننده زیر
+class _PageHeader extends StatelessWidget {
+  const _PageHeader();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+      padding: const EdgeInsets.only(bottom: 16),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.gridLine)),
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'دفتریار',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: AppColors.textSecondary, letterSpacing: 1),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'صورت وضعیت مالی',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'تاریخ گزارش: ${formatJalaliLong(todayJalaliString())}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.brass),
+      ),
+    );
+  }
+}
+
+/// خط باریک بالای بخش دفترداری (مثل خط بالای جدول در دفتر کل)
+class _LedgerDivider extends StatelessWidget {
+  const _LedgerDivider();
+  factory _LedgerDivider.top() => const _LedgerDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Divider(color: AppColors.gridLine, height: 1);
+  }
+}
+
+/// ردیف متنی ساده «عنوان — مبلغ»، مشابه سطر در دفتر حسابداری کاغذی
+class _LedgerRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool isTotal;
+  final Color? valueColor;
+
+  const _LedgerRow({
+    required this.label,
+    required this.value,
+    this.isTotal = false,
+    this.valueColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(top: isTotal ? 14 : 11, bottom: 11),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: isTotal ? AppColors.brass : AppColors.gridLine,
+            width: isTotal ? 2 : 1,
+          ),
+        ),
+      ),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'داشبورد',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(
-                  'نمای کلی کسب‌وکار',
-                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-                ),
-              ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 14.5,
+              color: isTotal ? AppColors.textPrimary : AppColors.textSecondary,
+              fontWeight: isTotal ? FontWeight.w700 : FontWeight.normal,
             ),
           ),
-          InkWell(
-            onTap: onNotificationTap,
-            borderRadius: BorderRadius.circular(24),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: const BoxDecoration(color: AppColors.surfaceAlt, shape: BoxShape.circle),
-              child: const Icon(Icons.notifications_none_rounded,
-                  color: AppColors.textPrimary, size: 22),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: isTotal ? 17 : 14.5,
+              fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600,
+              color: valueColor ?? AppColors.textPrimary,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// ردیف آمار کلی بدون خط جداکننده - برای اطلاعات فرعی
+class _StatLine extends StatelessWidget {
+  final String label;
+  final String value;
+  const _StatLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 12.5, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+/// ردیف اقدام متنی قابل‌کلیک (ثبت دریافت / پرداخت) بدون آیکون یا پس‌زمینه رنگی
+class _ActionRow extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ActionRow({required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: AppColors.gridLine)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+            const Text('‹', style: TextStyle(fontSize: 16, color: AppColors.textSecondary)),
+          ],
+        ),
       ),
     );
   }

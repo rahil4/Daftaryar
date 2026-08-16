@@ -109,30 +109,29 @@ class DatabaseHelper {
       });
     }
 
+    // دارایی
     await add('1000', 'صندوق', kAccountAsset);
     await add('1010', 'بانک', kAccountAsset);
-    await add('1100', 'حساب‌های دریافتنی (بدهکاران)', kAccountAsset);
+    await add('1100', 'حساب‌های دریافتنی', kAccountAsset);
 
-    await add('2000', 'حساب‌های پرداختنی (بستانکاران)', kAccountLiability);
+    // بدهی
+    await add('2000', 'حساب‌های پرداختنی', kAccountLiability);
 
+    // حقوق صاحبان سرمایه
     await add('3000', 'سرمایه', kAccountEquity);
 
-    await add('4000', 'درآمد خدمات نقشه‌برداری و ثبتی', kAccountIncome);
+    // درآمد
+    await add('4000', 'درآمد نقشه‌برداری', kAccountIncome);
+    await add('4010', 'درآمد پیگیری ثبتی', kAccountIncome);
+    await add('4090', 'سایر درآمدها', kAccountIncome);
 
-    final officeGroupId = await add('5000', 'هزینه‌های عمومی دفتر', kAccountExpense);
-    await add('5001', 'اجاره', kAccountExpense, parentId: officeGroupId);
-    await add('5002', 'حقوق و دستمزد', kAccountExpense, parentId: officeGroupId);
-    await add('5003', 'قبوض و انشعابات', kAccountExpense, parentId: officeGroupId);
-    await add('5004', 'تجهیزات و نرم‌افزار', kAccountExpense, parentId: officeGroupId);
-    await add('5005', 'حمل و نقل', kAccountExpense, parentId: officeGroupId);
-    await add('5006', 'پذیرایی و اداری', kAccountExpense, parentId: officeGroupId);
-    await add('5007', 'سایر هزینه‌های عمومی', kAccountExpense, parentId: officeGroupId);
-
-    final projectGroupId = await add('5100', 'هزینه‌های مستقیم پروژه', kAccountExpense);
-    await add('5101', 'حق‌الزحمه همکار', kAccountExpense, parentId: projectGroupId);
-    await add('5102', 'هزینه نقشه‌برداری میدانی', kAccountExpense, parentId: projectGroupId);
-    await add('5103', 'هزینه اداری/ثبتی پروژه', kAccountExpense, parentId: projectGroupId);
-    await add('5104', 'سایر هزینه‌های پروژه', kAccountExpense, parentId: projectGroupId);
+    // هزینه
+    await add('5000', 'هزینه‌های دفتر', kAccountExpense);
+    await add('5010', 'هزینه‌های ثبتی/اداری پروژه', kAccountExpense);
+    await add('5020', 'حقوق و دستمزد', kAccountExpense);
+    await add('5030', 'هزینه‌های نقشه‌برداری', kAccountExpense);
+    await add('5040', 'حمل و نقل', kAccountExpense);
+    await add('5090', 'سایر هزینه‌های عمومی', kAccountExpense);
   }
 
   // ---------------- Clients ----------------

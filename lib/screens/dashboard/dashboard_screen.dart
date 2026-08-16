@@ -5,6 +5,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
+import '../../widgets/section_title.dart';
 
 /// داشبورد اصلی دفتریار — سبک سنتی حسابداری: فقط متن و ردیف، بدون آیکون و کارت
 class DashboardScreen extends StatefulWidget {
@@ -61,7 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const _PageHeader(),
                     const SizedBox(height: 22),
 
-                    const _SectionTitle('ترازنامه خلاصه'),
+                    const SectionTitle('ترازنامه خلاصه'),
                     _LedgerDivider.top(),
                     _LedgerRow(label: 'جمع دارایی‌ها', value: formatMoney(_assets)),
                     _LedgerRow(label: 'جمع بدهی‌ها', value: formatMoney(_liabilities)),
@@ -74,7 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     _LedgerRow(label: 'حقوق صاحبان سهام', value: formatMoney(_equity)),
 
                     const SizedBox(height: 22),
-                    const _SectionTitle('وضعیت کلی'),
+                    const SectionTitle('وضعیت کلی'),
                     _StatLine(label: 'پروژه‌های در حال انجام', value: '${pn(_activeProjectsCount)} مورد'),
                     _StatLine(label: 'تعداد اشخاص ثبت‌شده', value: '${pn(_clientsCount)} نفر'),
 
@@ -149,22 +150,6 @@ class _PageHeader extends StatelessWidget {
             style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String text;
-  const _SectionTitle(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        text,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.brass),
       ),
     );
   }

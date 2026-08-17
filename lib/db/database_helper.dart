@@ -20,7 +20,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v2.db');
+    final path = join(dbPath, 'daftaryar_v3.db');
     return openDatabase(
       path,
       version: 1,
@@ -90,6 +90,13 @@ class DatabaseHelper {
         FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE,
         FOREIGN KEY (accountId) REFERENCES accounts (id),
         FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE SET NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
       )
     ''');
 
@@ -442,18 +449,50 @@ class DatabaseHelper {
   }
 
   /// توزیع مانده حساب‌های هزینه (برای نمودار)، در بازه تاریخ اختیاری
-  Future<Map<String, double>> expenseBreakdown({String? fromDate, String? toDate}) async {
-    final expenseAccounts = await getAccounts(type: kAccountExpense);
+  Future<Map<String, double>> expenseBreakdown({String? fromDate, String? toDate}) {
+    return accountTypeBreakdown(kAccountExpense, fromDate: fromDate, toDate: toDate);
+  }
+
+  /// مانده حساب‌های برگ (بدون زیرحساب) یک نوع خاص در بازه تاریخ اختیاری،
+  /// برای فهرست‌کردن ردیف‌های صورت سود و زیان (درآمدها/هزینه‌ها)
+  Future<Map<String, double>> accountTypeBreakdown(
+    String type, {
+    String? fromDate,
+    String? toDate,
+    bool includeZero = false,
+  }) async {
+    final typeAccounts = await getAccounts(type: type);
     final Map<String, double> breakdown = {};
-    for (final acc in expenseAccounts) {
-      // فقط حساب‌های برگ (بدون زیرحساب) را برای جلوگیری از شمارش دوباره لحاظ می‌کنیم
-      final hasChildren = expenseAccounts.any((a) => a.parentId == acc.id);
+    for (final acc in typeAccounts) {
+      final hasChildren = typeAccounts.any((a) => a.parentId == acc.id);
       if (hasChildren) continue;
       final bal = await accountBalance(acc.id!, fromDate: fromDate, toDate: toDate);
       final balance = bal['balance']!;
-      if (balance != 0) breakdown[acc.name] = balance;
+      if (balance != 0 || includeZero) breakdown[acc.name] = balance;
     }
     return breakdown;
+  }
+
+  /// موجودی بانک‌ها به تفکیک زیرحساب: اگر حساب «بانک» زیرحساب داشته باشد
+  /// (مثلاً بانک ملی، بانک صادرات)، هرکدام جداگانه برگردانده می‌شود؛
+  /// در غیر این صورت خود حساب «بانک» به‌عنوان یک ردیف برگردانده می‌شود.
+  Future<List<Map<String, dynamic>>> bankBalances() async {
+    final assetAccounts = await getAccounts(type: kAccountAsset);
+    final bankRoots = assetAccounts.where((a) => a.parentId == null && a.name.contains('بانک'));
+    final result = <Map<String, dynamic>>[];
+    for (final root in bankRoots) {
+      final children = assetAccounts.where((a) => a.parentId == root.id).toList();
+      if (children.isEmpty) {
+        final bal = await accountBalance(root.id!);
+        result.add({'name': root.name, 'balance': bal['balance']!});
+      } else {
+        for (final c in children) {
+          final bal = await accountBalance(c.id!);
+          result.add({'name': c.name, 'balance': bal['balance']!});
+        }
+      }
+    }
+    return result;
   }
 
   /// مانده حساب‌های دارایی که نام‌شان شامل کلمه کلیدی است (مثلاً «بانک» یا «صندوق»)
@@ -485,6 +524,40 @@ class DatabaseHelper {
     final income = await totalAccountTypeBalance(kAccountIncome, fromDate: fromDate, toDate: toDate);
     final expense = await totalAccountTypeBalance(kAccountExpense, fromDate: fromDate, toDate: toDate);
     return income - expense;
+  }
+
+  // ---------------- تنظیمات برنامه (کلید-مقدار) ----------------
+  Future<void> setSetting(String key, String value) async {
+    final db = await database;
+    await db.insert('app_settings', {'key': key, 'value': value},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String?> getSetting(String key) async {
+    final db = await database;
+    final maps = await db.query('app_settings', where: 'key = ?', whereArgs: [key]);
+    if (maps.isEmpty) return null;
+    return maps.first['value'] as String?;
+  }
+
+  // ---------------- سال مالی ----------------
+  Future<bool> isFiscalYearConfigured() async {
+    return (await getSetting('fy_start_month')) != null;
+  }
+
+  Future<void> setFiscalYearStart(int month, int day) async {
+    await setSetting('fy_start_month', month.toString());
+    await setSetting('fy_start_day', day.toString());
+  }
+
+  /// روز و ماه شروع سال مالی (پیش‌فرض ۱ فروردین تا زمانی که کاربر تنظیم نکرده)
+  Future<Map<String, int>> getFiscalYearStart() async {
+    final m = await getSetting('fy_start_month');
+    final d = await getSetting('fy_start_day');
+    return {
+      'month': m != null ? int.parse(m) : 1,
+      'day': d != null ? int.parse(d) : 1,
+    };
   }
 
   Future<void> wipeAll() async {

@@ -77,6 +77,28 @@ String formatJalaliLong(String s) {
   return '${toPersianDigits(j.day)} ${jalaliMonthName(j.month)} ${toPersianDigits(j.year)}';
 }
 
+/// بازه سال مالی جاری را بر اساس روز/ماه شروع سال مالی و تاریخ امروز محاسبه می‌کند.
+/// اگر امروز از تاریخ شروع سال مالی در همین سال شمسی گذشته باشد، سال مالی
+/// جاری همان سال است؛ در غیر این صورت سال مالی از سال قبل شروع شده.
+List<Jalali> currentFiscalYearRange(int startMonth, int startDay, Jalali today) {
+  Jalali candidate;
+  try {
+    candidate = Jalali(today.year, startMonth, startDay);
+  } catch (_) {
+    candidate = Jalali(today.year, startMonth, 1);
+  }
+  final fyStart = today.compareTo(candidate) >= 0
+      ? candidate
+      : Jalali(today.year - 1, startMonth, startDay > 29 ? 29 : startDay);
+  final fyEnd = fyStart.addYears(1).addDays(-1);
+  return [fyStart, fyEnd];
+}
+
+/// بازه ماه جاری شمسی (از روز اول ماه تا امروز)
+List<Jalali> currentMonthToDateRange(Jalali today) {
+  return [Jalali(today.year, today.month, 1), today];
+}
+
 /// شروع و پایان هفته شمسی (شنبه تا جمعه) حاوی تاریخ داده‌شده را برمی‌گرداند
 List<Jalali> jalaliWeekRange(Jalali date) {
   // در پکیج shamsi_date: weekDay از ۱ (شنبه) تا ۷ (جمعه) شماره‌گذاری می‌شود

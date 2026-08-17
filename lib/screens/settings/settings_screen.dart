@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../services/backup_service.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/formatters.dart';
 import '../accounts/accounts_screen.dart';
 import '../clients/clients_screen.dart';
+import '../onboarding/fiscal_year_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,6 +18,34 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _backup = BackupService();
   bool _busy = false;
+  int _fyMonth = 1;
+  int _fyDay = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFiscalYear();
+  }
+
+  Future<void> _loadFiscalYear() async {
+    final fy = await DatabaseHelper.instance.getFiscalYearStart();
+    if (mounted) {
+      setState(() {
+        _fyMonth = fy['month']!;
+        _fyDay = fy['day']!;
+      });
+    }
+  }
+
+  Future<void> _editFiscalYear() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FiscalYearSetupScreen(initialMonth: _fyMonth, initialDay: _fyDay),
+      ),
+    );
+    if (result == true) _loadFiscalYear();
+  }
 
   void _snack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -109,6 +139,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: const Text('مدیریت لیست اشخاص'),
                     onTap: () => Navigator.push(
                         context, MaterialPageRoute(builder: (_) => const ClientsScreen())),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.event_repeat_outlined, color: AppColors.brass),
+                    title: const Text('سال مالی'),
+                    subtitle: Text('شروع از ${pn(_fyDay)} ${jalaliMonthName(_fyMonth)}'),
+                    onTap: _editFiscalYear,
                   ),
                 ),
                 const SizedBox(height: 12),

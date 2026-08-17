@@ -22,7 +22,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DatabaseHelper.instance;
   bool _loading = true;
 
-  double _bankBalance = 0;
+  List<Map<String, dynamic>> _bankLines = [];
   double _cashBalance = 0;
   double _todayIncome = 0;
   double _todayExpense = 0;
@@ -42,7 +42,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
 
-    final bank = await _db.assetBalanceByKeyword('بانک');
+    final bankLines = await _db.bankBalances();
     final cash = await _db.assetBalanceByKeyword('صندوق');
     final today = todayJalaliString();
     final income = await _db.totalAccountTypeBalance(kAccountIncome, fromDate: today, toDate: today);
@@ -65,7 +65,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     setState(() {
-      _bankBalance = bank;
+      _bankLines = bankLines;
       _cashBalance = cash;
       _todayIncome = income;
       _todayExpense = expense;
@@ -78,7 +78,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final liquidAssets = _bankBalance + _cashBalance;
+    final bankTotal = _bankLines.fold<double>(0, (s, b) => s + (b['balance'] as double));
+    final liquidAssets = bankTotal + _cashBalance;
     final todayProfit = _todayIncome - _todayExpense;
 
     return Scaffold(
@@ -95,7 +96,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                     const SectionTitle('نقدینگی'),
                     const Divider(color: AppColors.gridLine, height: 1),
-                    _LedgerRow(label: 'موجودی بانک‌ها', value: formatMoney(_bankBalance)),
+                    for (final b in _bankLines)
+                      _LedgerRow(
+                        label: b['name'] as String,
+                        value: formatMoney(b['balance'] as double),
+                      ),
                     _LedgerRow(label: 'موجودی صندوق', value: formatMoney(_cashBalance)),
                     _LedgerRow(
                       label: 'جمع دارایی‌های نقدی',

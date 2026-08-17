@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'theme/app_theme.dart';
-import 'screens/home/home_shell.dart';
+import 'screens/onboarding/app_root.dart';
 
 void main() {
   runApp(const DaftaryarApp());
@@ -30,7 +30,7 @@ class DaftaryarApp extends StatelessWidget {
           child: child ?? const SizedBox.shrink(),
         );
       },
-      home: const HomeShell(),
+      home: const AppRoot(),
     );
   }
 }

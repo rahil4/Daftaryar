@@ -6,6 +6,7 @@ import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
+import '../../widgets/persian_amount_field.dart';
 
 /// ثبت سریع پرداخت/هزینه: بدهکار حساب هزینه، بستانکار صندوق/بانک
 class QuickExpenseScreen extends StatefulWidget {
@@ -61,7 +62,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_cashAccountId == null || _expenseAccountId == null) return;
     setState(() => _saving = true);
-    final amount = double.tryParse(_amount.text.trim()) ?? 0;
+    final amount = parsePersianAmount(_amount.text) ?? 0;
     final entry = JournalEntryModel(
       date: _date,
       description: _description.text.trim().isEmpty ? 'پرداخت هزینه' : _description.text.trim(),
@@ -93,11 +94,10 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  TextFormField(
+                  PersianAmountField(
                     controller: _amount,
-                    decoration: const InputDecoration(labelText: 'مبلغ (تومان) *'),
-                    keyboardType: TextInputType.number,
-                    validator: (v) => (v == null || double.tryParse(v.trim()) == null)
+                    label: 'مبلغ (تومان) *',
+                    validator: (v) => (v == null || parsePersianAmount(v) == null)
                         ? 'مبلغ معتبر وارد کنید'
                         : null,
                   ),

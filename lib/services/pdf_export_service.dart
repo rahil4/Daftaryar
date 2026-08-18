@@ -193,4 +193,114 @@ class PdfExportService {
 
     await Printing.sharePdf(bytes: await doc.save(), filename: 'تراز_آزمایشی.pdf');
   }
+
+  Future<void> exportClientStatement({
+    required String clientName,
+    String? clientPhone,
+    required List<Map<String, dynamic>> projectRows, // {title, agreedAmount, received, spent, remaining}
+    required List<Map<String, dynamic>> transactions, // {date, description, type, amount}
+  }) async {
+    await _loadFonts();
+    final totalAgreed = projectRows.fold<double>(0, (s, r) => s + (r['agreedAmount'] as double));
+    final totalReceived = projectRows.fold<double>(0, (s, r) => s + (r['received'] as double));
+    final totalRemaining = projectRows.fold<double>(0, (s, r) => s + (r['remaining'] as double));
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        textDirection: pw.TextDirection.rtl,
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(28),
+        build: (ctx) => [
+          pw.Directionality(
+            textDirection: pw.TextDirection.rtl,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                _header('صورتحساب $clientName', clientPhone != null ? 'شماره تماس: $clientPhone' : ''),
+                pw.Text('تاریخ صدور: ${formatJalaliLong(todayJalaliString())}',
+                    style: pw.TextStyle(font: _regularFont, fontSize: 9, color: PdfColors.grey600)),
+                pw.SizedBox(height: 14),
+
+                _sectionTitle('خلاصه پروژه‌ها'),
+                pw.Table(
+                  border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                  columnWidths: const {
+                    0: pw.FlexColumnWidth(2.2),
+                    1: pw.FlexColumnWidth(1),
+                    2: pw.FlexColumnWidth(1),
+                    3: pw.FlexColumnWidth(1),
+                  },
+                  children: [
+                    pw.TableRow(
+                      decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                      children: [
+                        _cell('پروژه', bold: true),
+                        _cell('مبلغ قرارداد', bold: true),
+                        _cell('دریافتی', bold: true),
+                        _cell('باقی‌مانده', bold: true),
+                      ],
+                    ),
+                    for (final r in projectRows)
+                      pw.TableRow(children: [
+                        _cell(r['title'] as String),
+                        _cell(formatMoney(r['agreedAmount'] as double, withSuffix: false)),
+                        _cell(formatMoney(r['received'] as double, withSuffix: false)),
+                        _cell(formatMoney(r['remaining'] as double, withSuffix: false)),
+                      ]),
+                  ],
+                ),
+                pw.SizedBox(height: 10),
+                _row('جمع مبلغ قرارداد', formatMoney(totalAgreed)),
+                _row('جمع دریافتی', formatMoney(totalReceived)),
+                _row('جمع باقی‌مانده', formatMoney(totalRemaining), bold: true),
+
+                if (transactions.isNotEmpty) ...[
+                  _sectionTitle('گردش تراکنش‌ها'),
+                  pw.Table(
+                    border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                    columnWidths: const {
+                      0: pw.FlexColumnWidth(1),
+                      1: pw.FlexColumnWidth(1),
+                      2: pw.FlexColumnWidth(2),
+                      3: pw.FlexColumnWidth(1.2),
+                    },
+                    children: [
+                      pw.TableRow(
+                        decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                        children: [
+                          _cell('تاریخ', bold: true),
+                          _cell('نوع', bold: true),
+                          _cell('شرح', bold: true),
+                          _cell('مبلغ', bold: true),
+                        ],
+                      ),
+                      for (final t in transactions)
+                        pw.TableRow(children: [
+                          _cell(formatJalaliLong(t['date'] as String)),
+                          _cell(t['type'] as String),
+                          _cell((t['description'] as String?) ?? '—'),
+                          _cell(formatMoney(t['amount'] as double, withSuffix: false)),
+                        ]),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$clientName.pdf');
+  }
+
+  pw.Widget _cell(String text, {bool bold = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(6),
+      child: pw.Text(text,
+          style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: 9.5),
+          textAlign: pw.TextAlign.center),
+    );
+  }
 }

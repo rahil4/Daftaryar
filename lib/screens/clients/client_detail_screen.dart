@@ -5,6 +5,7 @@ import '../../models/client.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../services/pdf_export_service.dart';
 import 'client_form_screen.dart';
 import '../projects/project_detail_screen.dart';
 import '../projects/project_form_screen.dart';
@@ -19,9 +20,11 @@ class ClientDetailScreen extends StatefulWidget {
 
 class _ClientDetailScreenState extends State<ClientDetailScreen> {
   final _db = DatabaseHelper.instance;
+  final _pdf = PdfExportService();
   List<ProjectModel> _projects = [];
   late ClientModel _client;
   bool _loading = true;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -37,6 +40,49 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       _projects = list;
       _loading = false;
     });
+  }
+
+  Future<void> _exportStatement() async {
+    setState(() => _exporting = true);
+    try {
+      final projectRows = <Map<String, dynamic>>[];
+      final transactions = <Map<String, dynamic>>[];
+
+      for (final p in _projects) {
+        final fin = await _db.projectFinancials(p.id!);
+        final received = fin['received']!;
+        projectRows.add({
+          'title': p.title,
+          'agreedAmount': p.agreedAmount,
+          'received': received,
+          'remaining': p.agreedAmount - received,
+        });
+
+        final entries = await _db.getJournalEntries(projectId: p.id);
+        for (final e in entries) {
+          for (final l in e.lines) {
+            if (l.projectId != p.id) continue;
+            if (l.debit == 0 && l.credit == 0) continue;
+            transactions.add({
+              'date': e.date,
+              'description': e.description ?? p.title,
+              'type': l.credit > 0 ? 'دریافت' : 'پرداخت',
+              'amount': l.credit > 0 ? l.credit : l.debit,
+            });
+          }
+        }
+      }
+      transactions.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+      await _pdf.exportClientStatement(
+        clientName: _client.name,
+        clientPhone: _client.phone,
+        projectRows: projectRows,
+        transactions: transactions,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   Future<void> _deleteClient() async {
@@ -79,6 +125,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
           ),
           IconButton(icon: const Icon(Icons.delete_outline), onPressed: _deleteClient),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _exporting ? null : _exportStatement,
+        icon: _exporting
+            ? const SizedBox(
+                height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.picture_as_pdf_outlined),
+        label: const Text('خروجی صورتحساب'),
       ),
       body: BlueprintGridBackground(
         child: RefreshIndicator(

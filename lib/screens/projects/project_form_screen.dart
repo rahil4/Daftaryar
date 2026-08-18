@@ -6,6 +6,7 @@ import '../../models/project.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
+import '../../widgets/persian_amount_field.dart';
 import '../clients/client_form_screen.dart';
 
 class ProjectFormScreen extends StatefulWidget {
@@ -22,8 +23,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   final _db = DatabaseHelper.instance;
 
   late final _title = TextEditingController(text: widget.existing?.title ?? '');
-  late final _amount =
-      TextEditingController(text: widget.existing?.agreedAmount.toStringAsFixed(0) ?? '');
+  late final _amount = TextEditingController(
+      text: widget.existing != null
+          ? formatMoney(widget.existing!.agreedAmount, withSuffix: false)
+          : '');
   late final _description = TextEditingController(text: widget.existing?.description ?? '');
 
   String _startDate = '';
@@ -79,7 +82,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       projectType: _projectType,
       status: _status,
       startDate: _startDate,
-      agreedAmount: double.tryParse(_amount.text.trim()) ?? 0,
+      agreedAmount: parsePersianAmount(_amount.text) ?? 0,
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
       createdAt: widget.existing?.createdAt ?? todayJalaliString(),
     );
@@ -155,10 +158,9 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     onChanged: (v) => setState(() => _startDate = v),
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
+                  PersianAmountField(
                     controller: _amount,
-                    decoration: const InputDecoration(labelText: 'مبلغ کل قرارداد (تومان)'),
-                    keyboardType: TextInputType.number,
+                    label: 'مبلغ کل قرارداد (تومان)',
                   ),
                   const SizedBox(height: 12),
                   TextFormField(

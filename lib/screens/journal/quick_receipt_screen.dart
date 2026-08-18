@@ -6,6 +6,7 @@ import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
+import '../../widgets/persian_amount_field.dart';
 
 /// ثبت سریع دریافت وجه: بدهکار صندوق/بانک، بستانکار حساب درآمد
 class QuickReceiptScreen extends StatefulWidget {
@@ -58,7 +59,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_cashAccountId == null || _incomeAccountId == null) return;
     setState(() => _saving = true);
-    final amount = double.tryParse(_amount.text.trim()) ?? 0;
+    final amount = parsePersianAmount(_amount.text) ?? 0;
     final entry = JournalEntryModel(
       date: _date,
       description: _description.text.trim().isEmpty ? 'دریافت وجه' : _description.text.trim(),
@@ -90,11 +91,10 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  TextFormField(
+                  PersianAmountField(
                     controller: _amount,
-                    decoration: const InputDecoration(labelText: 'مبلغ دریافتی (تومان) *'),
-                    keyboardType: TextInputType.number,
-                    validator: (v) => (v == null || double.tryParse(v.trim()) == null)
+                    label: 'مبلغ دریافتی (تومان) *',
+                    validator: (v) => (v == null || parsePersianAmount(v) == null)
                         ? 'مبلغ معتبر وارد کنید'
                         : null,
                   ),

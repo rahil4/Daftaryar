@@ -71,6 +71,7 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surfaceAlt,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.gridLine),

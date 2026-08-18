@@ -36,6 +36,17 @@ String formatMoney(num amount, {bool withSuffix = true}) {
   return withSuffix ? '$result تومان' : result;
 }
 
+/// رشته ورودی (با ارقام فارسی/لاتین و جداکننده سه‌رقمی) را به عدد خام تبدیل می‌کند
+double? parsePersianAmount(String text) {
+  final latinDigitsOnly = text.split('').map((ch) {
+    final idx = _persianDigits.indexOf(ch);
+    return idx >= 0 ? idx.toString() : ch;
+  }).join();
+  final digitsOnly = latinDigitsOnly.replaceAll(RegExp(r'[^0-9]'), '');
+  if (digitsOnly.isEmpty) return null;
+  return double.tryParse(digitsOnly);
+}
+
 /// امروز را به صورت رشته شمسی yyyy/mm/dd (ارقام لاتین، برای ذخیره‌سازی و مرتب‌سازی) برمی‌گرداند
 String todayJalaliString() {
   final j = Jalali.now();

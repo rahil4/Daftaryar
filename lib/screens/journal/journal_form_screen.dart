@@ -7,6 +7,7 @@ import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
+import '../../widgets/persian_amount_field.dart';
 
 /// سند حسابداری دستی با چند سطر بدهکار/بستانکار دلخواه
 class JournalFormScreen extends StatefulWidget {
@@ -65,15 +66,15 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
 
   double get _totalDebit => _lines
       .where((l) => l.side == 'debit')
-      .fold(0.0, (s, l) => s + (double.tryParse(l.amount.text.trim()) ?? 0));
+      .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
 
   double get _totalCredit => _lines
       .where((l) => l.side == 'credit')
-      .fold(0.0, (s, l) => s + (double.tryParse(l.amount.text.trim()) ?? 0));
+      .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
 
   Future<void> _save() async {
     final validLines = _lines.where((l) {
-      final amount = double.tryParse(l.amount.text.trim()) ?? 0;
+      final amount = parsePersianAmount(l.amount.text) ?? 0;
       return l.accountId != null && amount > 0;
     }).toList();
 
@@ -85,10 +86,10 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
 
     final totalDebit = validLines
         .where((l) => l.side == 'debit')
-        .fold(0.0, (s, l) => s + (double.tryParse(l.amount.text.trim()) ?? 0));
+        .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
     final totalCredit = validLines
         .where((l) => l.side == 'credit')
-        .fold(0.0, (s, l) => s + (double.tryParse(l.amount.text.trim()) ?? 0));
+        .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
 
     if ((totalDebit - totalCredit).abs() > 0.01) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -105,8 +106,8 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
       lines: validLines
           .map((l) => JournalLineModel(
                 accountId: l.accountId!,
-                debit: l.side == 'debit' ? (double.tryParse(l.amount.text.trim()) ?? 0) : 0,
-                credit: l.side == 'credit' ? (double.tryParse(l.amount.text.trim()) ?? 0) : 0,
+                debit: l.side == 'debit' ? (parsePersianAmount(l.amount.text) ?? 0) : 0,
+                credit: l.side == 'credit' ? (parsePersianAmount(l.amount.text) ?? 0) : 0,
                 description: l.description.text.trim().isEmpty ? null : l.description.text.trim(),
                 projectId: l.projectId,
               ))
@@ -245,10 +246,10 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            TextFormField(
+            PersianAmountField(
               controller: line.amount,
-              decoration: const InputDecoration(labelText: 'مبلغ (تومان)', isDense: true),
-              keyboardType: TextInputType.number,
+              label: 'مبلغ (تومان)',
+              isDense: true,
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 8),

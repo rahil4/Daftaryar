@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../db/database_helper.dart';
@@ -18,7 +19,7 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 2, vsync: this);
+  late final TabController _tab = TabController(length: 3, vsync: this);
 
   @override
   Widget build(BuildContext context) {
@@ -27,15 +28,18 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
         title: const Text('گزارش‌ها'),
         bottom: TabBar(
           controller: _tab,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(text: 'سود و زیان'),
             Tab(text: 'تراز آزمایشی'),
+            Tab(text: 'تحلیل و روند'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tab,
-        children: const [_ProfitLossTab(), _TrialBalanceTab()],
+        children: const [_ProfitLossTab(), _TrialBalanceTab(), _AnalysisTab()],
       ),
     );
   }
@@ -445,6 +449,332 @@ class _TrialBalanceRow extends StatelessWidget {
               style: const TextStyle(fontSize: 13, color: AppColors.negative, fontWeight: FontWeight.w600),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ---------------- تب تحلیل و روند ----------------
+class _AnalysisTab extends StatefulWidget {
+  const _AnalysisTab();
+
+  @override
+  State<_AnalysisTab> createState() => _AnalysisTabState();
+}
+
+class _AnalysisTabState extends State<_AnalysisTab> {
+  final _db = DatabaseHelper.instance;
+  bool _loading = true;
+
+  List<Map<String, dynamic>> _trend = [];
+  Map<String, double> _comparison = {};
+  double _avgFixedCost = 0;
+  double _avgRevenuePerProject = 0;
+
+  static const _monthNamesShort = [
+    'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final trend = await _db.monthlyTrend(6);
+    final comparison = await _db.monthOverMonthComparison();
+    final avgFixed = await _db.avgMonthlyFixedCost(6);
+    final avgRevenue = await _db.avgRevenuePerProject();
+    setState(() {
+      _trend = trend;
+      _comparison = comparison;
+      _avgFixedCost = avgFixed;
+      _avgRevenuePerProject = avgRevenue;
+      _loading = false;
+    });
+  }
+
+  double _pctChange(double now, double prev) {
+    if (prev == 0) return now == 0 ? 0 : 100;
+    return ((now - prev) / prev.abs()) * 100;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final thisIncome = _comparison['thisIncome'] ?? 0;
+    final thisExpense = _comparison['thisExpense'] ?? 0;
+    final thisProfit = _comparison['thisProfit'] ?? 0;
+    final prevIncome = _comparison['prevIncome'] ?? 0;
+    final prevExpense = _comparison['prevExpense'] ?? 0;
+    final prevProfit = _comparison['prevProfit'] ?? 0;
+
+    final expenseRatio = thisIncome == 0 ? 0.0 : (thisExpense / thisIncome) * 100;
+    final profitMargin = thisIncome == 0 ? 0.0 : (thisProfit / thisIncome) * 100;
+
+    return BlueprintGridBackground(
+      child: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            const SectionTitle('روند ۶ ماه اخیر'),
+            const SizedBox(height: 10),
+            _MonthlyTrendChart(trend: _trend, monthNames: _monthNamesShort),
+            const SizedBox(height: 10),
+            for (final m in _trend)
+              _TrendRow(
+                label: _monthNamesShort[(m['month'] as int) - 1],
+                income: m['income'] as double,
+                expense: m['expense'] as double,
+                profit: m['profit'] as double,
+              ),
+
+            const SizedBox(height: 24),
+            const SectionTitle('مقایسه با ماه قبل (تا همین روز از ماه)'),
+            const Divider(color: AppColors.gridLine, height: 1),
+            _ComparisonRow(label: 'درآمد', now: thisIncome, prev: prevIncome, pct: _pctChange(thisIncome, prevIncome)),
+            _ComparisonRow(label: 'هزینه', now: thisExpense, prev: prevExpense, pct: _pctChange(thisExpense, prevExpense), lowerIsBetter: true),
+            _ComparisonRow(label: 'سود', now: thisProfit, prev: prevProfit, pct: _pctChange(thisProfit, prevProfit)),
+
+            const SizedBox(height: 24),
+            const SectionTitle('تحلیل هزینه (ماه جاری)'),
+            const Divider(color: AppColors.gridLine, height: 1),
+            _RatioRow(label: 'نسبت هزینه به درآمد', percent: expenseRatio, color: AppColors.negative),
+            _RatioRow(label: 'حاشیه سود', percent: profitMargin, color: AppColors.positive),
+
+            const SizedBox(height: 24),
+            const SectionTitle('شاخص‌های کلیدی (KPI)'),
+            const Divider(color: AppColors.gridLine, height: 1),
+            _KpiRow(label: 'میانگین دریافتی هر پروژه', value: formatMoney(_avgRevenuePerProject)),
+            _KpiRow(
+              label: 'نقطه سربه‌سر ماهانه (تقریبی)',
+              value: formatMoney(_avgFixedCost),
+              hint: 'میانگین هزینه‌های ثابت دفتر در ۶ ماه اخیر — حداقل درآمدی که باید کسب شود',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// نمودار میله‌ای گروهی درآمد/هزینه ۶ ماه اخیر
+class _MonthlyTrendChart extends StatelessWidget {
+  final List<Map<String, dynamic>> trend;
+  final List<String> monthNames;
+  const _MonthlyTrendChart({required this.trend, required this.monthNames});
+
+  @override
+  Widget build(BuildContext context) {
+    if (trend.isEmpty) return const SizedBox.shrink();
+    final maxVal = trend.fold<double>(1, (m, t) {
+      final i = t['income'] as double;
+      final e = t['expense'] as double;
+      return [m, i, e].reduce((a, b) => a > b ? a : b);
+    });
+    final ceiling = maxVal * 1.2;
+
+    return SizedBox(
+      height: 160,
+      child: BarChart(
+        BarChartData(
+          maxY: ceiling,
+          minY: 0,
+          barTouchData: BarTouchData(enabled: false),
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.gridLine, strokeWidth: 1),
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final i = value.toInt();
+                  if (i < 0 || i >= trend.length) return const SizedBox.shrink();
+                  final monthIdx = (trend[i]['month'] as int) - 1;
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(monthNames[monthIdx],
+                        style: const TextStyle(fontSize: 9, color: AppColors.textSecondary)),
+                  );
+                },
+              ),
+            ),
+          ),
+          barGroups: List.generate(trend.length, (i) {
+            final income = trend[i]['income'] as double;
+            final expense = trend[i]['expense'] as double;
+            return BarChartGroupData(
+              x: i,
+              barRods: [
+                BarChartRodData(toY: income, color: AppColors.positive, width: 8, borderRadius: BorderRadius.circular(3)),
+                BarChartRodData(toY: expense, color: AppColors.negative, width: 8, borderRadius: BorderRadius.circular(3)),
+              ],
+              barsSpace: 4,
+            );
+          }),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrendRow extends StatelessWidget {
+  final String label;
+  final double income;
+  final double expense;
+  final double profit;
+  const _TrendRow({required this.label, required this.income, required this.expense, required this.profit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          SizedBox(width: 56, child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+          Expanded(
+            child: Text('${formatMoney(income, withSuffix: false)} / ${formatMoney(expense, withSuffix: false)}',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary), textAlign: TextAlign.center),
+          ),
+          SizedBox(
+            width: 90,
+            child: Text(
+              formatMoney(profit),
+              textAlign: TextAlign.left,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: profit >= 0 ? AppColors.positive : AppColors.negative,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ردیف مقایسه با ماه قبل، با درصد تغییر و رنگ‌بندی مناسب
+class _ComparisonRow extends StatelessWidget {
+  final String label;
+  final double now;
+  final double prev;
+  final double pct;
+  final bool lowerIsBetter;
+
+  const _ComparisonRow({
+    required this.label,
+    required this.now,
+    required this.prev,
+    required this.pct,
+    this.lowerIsBetter = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isGood = lowerIsBetter ? pct <= 0 : pct >= 0;
+    final color = pct == 0 ? AppColors.textSecondary : (isGood ? AppColors.positive : AppColors.negative);
+    final arrow = pct > 0 ? '▲' : (pct < 0 ? '▼' : '—');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.gridLine))),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+          Row(
+            children: [
+              Text(formatMoney(now), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              const SizedBox(width: 8),
+              Text('$arrow ${pn(pct.abs().toStringAsFixed(0))}٪', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ردیف نسبت درصدی با نوار افقی ساده
+class _RatioRow extends StatelessWidget {
+  final String label;
+  final double percent;
+  final Color color;
+  const _RatioRow({required this.label, required this.percent, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final clamped = percent.clamp(0, 100).toDouble();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
+              Text('${pn(percent.toStringAsFixed(0))}٪',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: clamped / 100,
+              minHeight: 5,
+              backgroundColor: AppColors.surfaceAlt,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KpiRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final String? hint;
+  const _KpiRow({required this.label, required this.value, this.hint});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.gridLine))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+              Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            ],
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 4),
+            Text(hint!, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+          ],
         ],
       ),
     );

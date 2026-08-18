@@ -1,10 +1,12 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:shamsi_date/shamsi_date.dart';
 
 import '../models/client.dart';
 import '../models/project.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
+import '../utils/formatters.dart';
 
 class DatabaseHelper {
   DatabaseHelper._internal();
@@ -558,6 +560,126 @@ class DatabaseHelper {
       'month': m != null ? int.parse(m) : 1,
       'day': d != null ? int.parse(d) : 1,
     };
+  }
+
+  // ---------------- تحلیل و روند ----------------
+
+  /// روند درآمد/هزینه/سود ماه به ماه برای N ماه اخیر (شامل ماه جاری تا امروز)
+  Future<List<Map<String, dynamic>>> monthlyTrend(int months) async {
+    final today = Jalali.now();
+    final result = <Map<String, dynamic>>[];
+    for (int i = months - 1; i >= 0; i--) {
+      var y = today.year;
+      var m = today.month - i;
+      while (m < 1) {
+        m += 12;
+        y -= 1;
+      }
+      final monthStart = Jalali(y, m, 1);
+      final isCurrentMonth = (y == today.year && m == today.month);
+      final monthEnd = isCurrentMonth ? today : Jalali(y, m, monthStart.monthLength);
+      final income = await totalAccountTypeBalance(kAccountIncome,
+          fromDate: jalaliToString(monthStart), toDate: jalaliToString(monthEnd));
+      final expense = await totalAccountTypeBalance(kAccountExpense,
+          fromDate: jalaliToString(monthStart), toDate: jalaliToString(monthEnd));
+      result.add({
+        'year': y,
+        'month': m,
+        'income': income,
+        'expense': expense,
+        'profit': income - expense,
+      });
+    }
+    return result;
+  }
+
+  /// مقایسه درآمد/هزینه/سود «از اول ماه جاری تا امروز» با «همان تعداد روز از ماه قبل»
+  Future<Map<String, double>> monthOverMonthComparison() async {
+    final today = Jalali.now();
+    final thisStart = Jalali(today.year, today.month, 1);
+
+    var prevYear = today.year;
+    var prevMonth = today.month - 1;
+    if (prevMonth < 1) {
+      prevMonth = 12;
+      prevYear -= 1;
+    }
+    final prevStart = Jalali(prevYear, prevMonth, 1);
+    final prevMonthLen = prevStart.monthLength;
+    final dayNum = today.day > prevMonthLen ? prevMonthLen : today.day;
+    final prevEnd = Jalali(prevYear, prevMonth, dayNum);
+
+    final thisIncome = await totalAccountTypeBalance(kAccountIncome,
+        fromDate: jalaliToString(thisStart), toDate: jalaliToString(today));
+    final thisExpense = await totalAccountTypeBalance(kAccountExpense,
+        fromDate: jalaliToString(thisStart), toDate: jalaliToString(today));
+    final prevIncome = await totalAccountTypeBalance(kAccountIncome,
+        fromDate: jalaliToString(prevStart), toDate: jalaliToString(prevEnd));
+    final prevExpense = await totalAccountTypeBalance(kAccountExpense,
+        fromDate: jalaliToString(prevStart), toDate: jalaliToString(prevEnd));
+
+    return {
+      'thisIncome': thisIncome,
+      'thisExpense': thisExpense,
+      'thisProfit': thisIncome - thisExpense,
+      'prevIncome': prevIncome,
+      'prevExpense': prevExpense,
+      'prevProfit': prevIncome - prevExpense,
+    };
+  }
+
+  /// مانده حساب‌هایی که دقیقاً با یکی از نام‌های داده‌شده مطابقت دارند (برای هزینه‌های ثابت دفتر)
+  Future<double> accountsBalanceByNames(List<String> names,
+      {String? fromDate, String? toDate}) async {
+    final allAccounts = await getAccounts();
+    double total = 0;
+    for (final name in names) {
+      for (final a in allAccounts.where((x) => x.name == name)) {
+        final bal = await accountBalance(a.id!, fromDate: fromDate, toDate: toDate);
+        total += bal['balance']!;
+      }
+    }
+    return total;
+  }
+
+  /// میانگین هزینه‌های نسبتاً ثابت دفتر (هزینه‌های دفتر + حقوق و دستمزد) در N ماه اخیر
+  /// به‌عنوان تقریبی از نقطه سربه‌سر ماهانه
+  Future<double> avgMonthlyFixedCost(int months) async {
+    final today = Jalali.now();
+    double total = 0;
+    for (int i = 0; i < months; i++) {
+      var y = today.year;
+      var m = today.month - i;
+      while (m < 1) {
+        m += 12;
+        y -= 1;
+      }
+      final monthStart = Jalali(y, m, 1);
+      final isCurrentMonth = (y == today.year && m == today.month);
+      final monthEnd = isCurrentMonth ? today : Jalali(y, m, monthStart.monthLength);
+      final cost = await accountsBalanceByNames(
+        ['هزینه‌های دفتر', 'حقوق و دستمزد'],
+        fromDate: jalaliToString(monthStart),
+        toDate: jalaliToString(monthEnd),
+      );
+      total += cost;
+    }
+    return months == 0 ? 0 : total / months;
+  }
+
+  /// میانگین دریافتی هر پروژه، فقط در بین پروژه‌هایی که دریافتی ثبت‌شده دارند
+  Future<double> avgRevenuePerProject() async {
+    final projects = await getProjects();
+    double total = 0;
+    int count = 0;
+    for (final p in projects) {
+      final fin = await projectFinancials(p.id!);
+      if (fin['received']! > 0) {
+        total += fin['received']!;
+        count++;
+      }
+    }
+    return count == 0 ? 0 : total / count;
   }
 
   Future<void> wipeAll() async {

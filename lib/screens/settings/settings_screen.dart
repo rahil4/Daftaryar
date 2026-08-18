@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../services/backup_service.dart';
+import '../../services/security_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../accounts/accounts_screen.dart';
 import '../clients/clients_screen.dart';
 import '../onboarding/fiscal_year_setup_screen.dart';
+import '../lock/pin_setup_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,14 +19,51 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _backup = BackupService();
+  final _security = SecurityService();
   bool _busy = false;
   int _fyMonth = 1;
   int _fyDay = 1;
+  bool _lockEnabled = false;
+  bool _biometricEnabled = false;
+  bool _biometricAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _loadFiscalYear();
+    _loadSecurity();
+  }
+
+  Future<void> _loadSecurity() async {
+    final lockEnabled = await _security.isLockEnabled();
+    final bioEnabled = await _security.isBiometricEnabled();
+    final bioAvailable = await _security.deviceSupportsBiometrics();
+    if (mounted) {
+      setState(() {
+        _lockEnabled = lockEnabled;
+        _biometricEnabled = bioEnabled;
+        _biometricAvailable = bioAvailable;
+      });
+    }
+  }
+
+  Future<void> _toggleLock(bool value) async {
+    if (value) {
+      final result = await Navigator.push(
+          context, MaterialPageRoute(builder: (_) => const PinSetupScreen()));
+      if (result == true) {
+        _snack('قفل پین فعال شد.');
+      }
+    } else {
+      await _security.disableLock();
+      _snack('قفل امنیتی غیرفعال شد.');
+    }
+    _loadSecurity();
+  }
+
+  Future<void> _toggleBiometric(bool value) async {
+    await _security.setBiometricEnabled(value);
+    _loadSecurity();
   }
 
   Future<void> _loadFiscalYear() async {
@@ -150,6 +189,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _editFiscalYear,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Card(
+                  child: SwitchListTile(
+                    secondary: const Icon(Icons.lock_outline, color: AppColors.brass),
+                    title: const Text('قفل امنیتی با پین'),
+                    subtitle: Text(_lockEnabled ? 'فعال' : 'غیرفعال'),
+                    value: _lockEnabled,
+                    onChanged: _toggleLock,
+                  ),
+                ),
+                if (_lockEnabled) ...[
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.password_outlined, color: AppColors.brass),
+                      title: const Text('تغییر پین'),
+                      onTap: () async {
+                        final result = await Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => const PinSetupScreen()));
+                        if (result == true) _snack('پین به‌روزرسانی شد.');
+                      },
+                    ),
+                  ),
+                  if (_biometricAvailable)
+                    Card(
+                      child: SwitchListTile(
+                        secondary: const Icon(Icons.fingerprint, color: AppColors.brass),
+                        title: const Text('ورود با اثر انگشت'),
+                        subtitle: const Text('علاوه بر پین، امکان ورود سریع با اثر انگشت'),
+                        value: _biometricEnabled,
+                        onChanged: _toggleBiometric,
+                      ),
+                    ),
+                ],
                 const SizedBox(height: 12),
                 Card(
                   child: ListTile(

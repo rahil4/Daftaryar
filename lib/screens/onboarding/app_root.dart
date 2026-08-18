@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
+import '../../services/security_service.dart';
 import '../../theme/app_theme.dart';
 import '../home/home_shell.dart';
+import '../lock/lock_screen.dart';
 import 'fiscal_year_setup_screen.dart';
 
-/// نقطه ورود برنامه پس از splash: اگر سال مالی هنوز تعریف نشده،
-/// قبل از نمایش برنامه اصلی، تعریف آن را از کاربر می‌خواهد.
+/// نقطه ورود برنامه پس از splash: ابتدا قفل امنیتی (در صورت فعال بودن)،
+/// سپس تعریف سال مالی (فقط بار اول)، سپس برنامه اصلی.
 class AppRoot extends StatefulWidget {
   const AppRoot({super.key});
 
@@ -16,7 +18,9 @@ class AppRoot extends StatefulWidget {
 
 class _AppRootState extends State<AppRoot> {
   final _db = DatabaseHelper.instance;
+  final _security = SecurityService();
   bool _loading = true;
+  bool _locked = false;
   bool _configured = false;
 
   @override
@@ -26,9 +30,11 @@ class _AppRootState extends State<AppRoot> {
   }
 
   Future<void> _check() async {
-    final configured = await _db.isFiscalYearConfigured();
+    final lockEnabled = await _security.isLockEnabled();
+    final fyConfigured = await _db.isFiscalYearConfigured();
     setState(() {
-      _configured = configured;
+      _locked = lockEnabled;
+      _configured = fyConfigured;
       _loading = false;
     });
   }
@@ -40,6 +46,9 @@ class _AppRootState extends State<AppRoot> {
         backgroundColor: AppColors.background,
         body: Center(child: CircularProgressIndicator()),
       );
+    }
+    if (_locked) {
+      return LockScreen(onUnlocked: () => setState(() => _locked = false));
     }
     if (!_configured) {
       return FiscalYearSetupScreen(

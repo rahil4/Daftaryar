@@ -8,6 +8,8 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/section_title.dart';
+import '../../services/pdf_export_service.dart';
+import '../../services/excel_export_service.dart';
 
 enum _RangeMode { month, fiscalYear, custom }
 
@@ -55,6 +57,8 @@ class _ProfitLossTab extends StatefulWidget {
 
 class _ProfitLossTabState extends State<_ProfitLossTab> {
   final _db = DatabaseHelper.instance;
+  final _pdf = PdfExportService();
+  final _excelExport = ExcelExportService();
   _RangeMode _mode = _RangeMode.month;
   String _fromDate = '';
   String _toDate = '';
@@ -62,6 +66,7 @@ class _ProfitLossTabState extends State<_ProfitLossTab> {
   Map<String, double> _incomeLines = {};
   Map<String, double> _expenseLines = {};
   bool _loading = true;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -97,6 +102,34 @@ class _ProfitLossTabState extends State<_ProfitLossTab> {
       _expenseLines = expense;
       _loading = false;
     });
+  }
+
+  Future<void> _exportPdf() async {
+    setState(() => _exporting = true);
+    try {
+      await _pdf.exportProfitLoss(
+        fromDate: _fromDate,
+        toDate: _toDate,
+        incomeLines: _incomeLines,
+        expenseLines: _expenseLines,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _exportExcel() async {
+    setState(() => _exporting = true);
+    try {
+      await _excelExport.exportProfitLoss(
+        fromDate: _fromDate,
+        toDate: _toDate,
+        incomeLines: _incomeLines,
+        expenseLines: _expenseLines,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
@@ -159,6 +192,23 @@ class _ProfitLossTabState extends State<_ProfitLossTab> {
                       Text(
                         'از ${formatJalaliLong(_fromDate)} تا ${formatJalaliLong(_toDate)}',
                         style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          TextButton.icon(
+                            onPressed: _exporting ? null : _exportPdf,
+                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                            label: const Text('خروجی PDF', style: TextStyle(fontSize: 12)),
+                          ),
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            onPressed: _exporting ? null : _exportExcel,
+                            icon: const Icon(Icons.table_chart_outlined, size: 16),
+                            label: const Text('خروجی اکسل', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -322,8 +372,11 @@ class _TrialBalanceTab extends StatefulWidget {
 
 class _TrialBalanceTabState extends State<_TrialBalanceTab> {
   final _db = DatabaseHelper.instance;
+  final _pdf = PdfExportService();
+  final _excelExport = ExcelExportService();
   List<Map<String, dynamic>> _rows = [];
   bool _loading = true;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -338,6 +391,33 @@ class _TrialBalanceTabState extends State<_TrialBalanceTab> {
       _rows = rows;
       _loading = false;
     });
+  }
+
+  List<Map<String, dynamic>> get _nonZeroRows => _rows
+      .where((r) => (r['debit'] as double) != 0 || (r['credit'] as double) != 0)
+      .map((r) => {
+            'name': (r['account'] as AccountModel).name,
+            'debit': r['debit'] as double,
+            'credit': r['credit'] as double,
+          })
+      .toList();
+
+  Future<void> _exportPdf() async {
+    setState(() => _exporting = true);
+    try {
+      await _pdf.exportTrialBalance(rows: _nonZeroRows);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _exportExcel() async {
+    setState(() => _exporting = true);
+    try {
+      await _excelExport.exportTrialBalance(_nonZeroRows);
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
@@ -361,6 +441,23 @@ class _TrialBalanceTabState extends State<_TrialBalanceTab> {
                   const Text('مانده تجمعی همه حساب‌ها تا امروز',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton.icon(
+                        onPressed: _exporting ? null : _exportPdf,
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                        label: const Text('خروجی PDF', style: TextStyle(fontSize: 12)),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: _exporting ? null : _exportExcel,
+                        icon: const Icon(Icons.table_chart_outlined, size: 16),
+                        label: const Text('خروجی اکسل', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 18),
                   for (final type in kAccountTypes)
                     if (_rows.any((r) => (r['account'] as AccountModel).type == type &&

@@ -24,6 +24,7 @@ dependencies:
   excel: ^4.0.2
   local_auth: ^2.3.0
   crypto: ^3.0.3
+  another_telephony: ^0.4.1
   file_picker: ^8.1.4
 
 dev_dependencies:

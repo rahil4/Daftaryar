@@ -6,6 +6,7 @@ import '../models/client.dart';
 import '../models/project.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
+import '../models/sms_draft.dart';
 import '../utils/formatters.dart';
 
 class DatabaseHelper {
@@ -22,7 +23,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v3.db');
+    final path = join(dbPath, 'daftaryar_v4.db');
     return openDatabase(
       path,
       version: 1,
@@ -99,6 +100,19 @@ class DatabaseHelper {
       CREATE TABLE app_settings (
         key TEXT PRIMARY KEY,
         value TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE sms_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rawBody TEXT NOT NULL,
+        sender TEXT,
+        amount REAL NOT NULL,
+        type TEXT NOT NULL,
+        date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        createdAt TEXT NOT NULL
       )
     ''');
 
@@ -682,6 +696,39 @@ class DatabaseHelper {
     return count == 0 ? 0 : total / count;
   }
 
+  // ---------------- پیش‌نویس‌های پیامک بانکی ----------------
+  Future<int> insertSmsDraft(SmsDraftModel d) async {
+    final db = await database;
+    return db.insert('sms_drafts', d.toMap()..remove('id'));
+  }
+
+  Future<List<SmsDraftModel>> getSmsDrafts({String status = kSmsDraftPending}) async {
+    final db = await database;
+    final maps = await db.query('sms_drafts',
+        where: 'status = ?', whereArgs: [status], orderBy: 'id DESC');
+    return maps.map((m) => SmsDraftModel.fromMap(m)).toList();
+  }
+
+  Future<int> countPendingSmsDrafts() async {
+    final db = await database;
+    final result = await db.rawQuery(
+        "SELECT COUNT(*) as c FROM sms_drafts WHERE status = ?", [kSmsDraftPending]);
+    return (result.first['c'] as int?) ?? 0;
+  }
+
+  Future<void> updateSmsDraftStatus(int id, String status) async {
+    final db = await database;
+    await db.update('sms_drafts', {'status': status}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// جلوگیری از ثبت پیش‌نویس تکراری برای همان پیامک
+  Future<bool> smsDraftExists(String rawBody) async {
+    final db = await database;
+    final maps =
+        await db.query('sms_drafts', where: 'rawBody = ?', whereArgs: [rawBody], limit: 1);
+    return maps.isNotEmpty;
+  }
+
   Future<void> wipeAll() async {
     final db = await database;
     await db.delete('journal_lines');
@@ -689,6 +736,7 @@ class DatabaseHelper {
     await db.delete('projects');
     await db.delete('clients');
     await db.delete('accounts');
+    await db.delete('sms_drafts');
     await _seedDefaultAccounts(db);
   }
 }

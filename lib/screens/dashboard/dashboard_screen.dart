@@ -7,6 +7,7 @@ import '../../utils/formatters.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
 import '../../widgets/section_title.dart';
+import '../sms_drafts/sms_drafts_screen.dart';
 
 /// داشبورد اصلی دفتریار — سبک سنتی حسابداری: فقط متن و ردیف، بدون آیکون و کارت
 class DashboardScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _cashBalance = 0;
   double _todayIncome = 0;
   double _todayExpense = 0;
+  int _pendingSmsDrafts = 0;
 
   @override
   void initState() {
@@ -39,12 +41,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final today = todayJalaliString();
     final income = await _db.totalAccountTypeBalance(kAccountIncome, fromDate: today, toDate: today);
     final expense = await _db.totalAccountTypeBalance(kAccountExpense, fromDate: today, toDate: today);
+    final pendingDrafts = await _db.countPendingSmsDrafts();
 
     setState(() {
       _bankLines = bankLines;
       _cashBalance = cash;
       _todayIncome = income;
       _todayExpense = expense;
+      _pendingSmsDrafts = pendingDrafts;
       _loading = false;
     });
   }
@@ -65,6 +69,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                   children: [
                     const _PageHeader(),
+                    if (_pendingSmsDrafts > 0) ...[
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () async {
+                          await Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const SmsDraftsScreen()));
+                          _load();
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.brass.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.brass),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '${pn(_pendingSmsDrafts)} پیش‌نویس پیامکی در انتظار تأیید',
+                                style: const TextStyle(
+                                    fontSize: 13, color: AppColors.brass, fontWeight: FontWeight.w700),
+                              ),
+                              const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 22),
 
                     const SectionTitle('نقدینگی'),

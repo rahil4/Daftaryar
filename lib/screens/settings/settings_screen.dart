@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../services/backup_service.dart';
 import '../../services/security_service.dart';
+import '../../services/sms_listener_service.dart';
+import '../sms_drafts/sms_drafts_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../accounts/accounts_screen.dart';
@@ -26,12 +28,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _lockEnabled = false;
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
+  bool _smsReadingEnabled = false;
 
   @override
   void initState() {
     super.initState();
     _loadFiscalYear();
     _loadSecurity();
+    _loadSmsSetting();
+  }
+
+  Future<void> _loadSmsSetting() async {
+    final value = await DatabaseHelper.instance.getSetting('sms_reading_enabled');
+    if (mounted) setState(() => _smsReadingEnabled = value == '1');
+  }
+
+  Future<void> _toggleSmsReading(bool value) async {
+    if (value) {
+      final granted = await SmsListenerService.hasPermission();
+      if (!granted) {
+        _snack('برای این قابلیت باید دسترسی پیامک را تأیید کنید.');
+        return;
+      }
+      await DatabaseHelper.instance.setSetting('sms_reading_enabled', '1');
+      SmsListenerService.startListening();
+      _snack('خواندن خودکار پیامک بانکی فعال شد.');
+    } else {
+      await DatabaseHelper.instance.setSetting('sms_reading_enabled', '0');
+      _snack('خواندن خودکار پیامک بانکی غیرفعال شد.');
+    }
+    _loadSmsSetting();
   }
 
   Future<void> _loadSecurity() async {
@@ -222,6 +248,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                 ],
+                const SizedBox(height: 12),
+                Card(
+                  child: SwitchListTile(
+                    secondary: const Icon(Icons.sms_outlined, color: AppColors.brass),
+                    title: const Text('خواندن خودکار پیامک بانکی'),
+                    subtitle: const Text(
+                        'با ورود پیامک واریز/برداشت، پیش‌نویس سند آماده تأیید ساخته می‌شود'),
+                    value: _smsReadingEnabled,
+                    onChanged: _toggleSmsReading,
+                  ),
+                ),
+                if (_smsReadingEnabled)
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.drafts_outlined, color: AppColors.brass),
+                      title: const Text('پیش‌نویس‌های پیامکی'),
+                      subtitle: const Text('بررسی، تأیید یا رد پیش‌نویس‌های شناسایی‌شده'),
+                      onTap: () => Navigator.push(
+                          context, MaterialPageRoute(builder: (_) => const SmsDraftsScreen())),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 Card(
                   child: ListTile(

@@ -36,7 +36,7 @@ jobs:
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
-              val applyCompileSdkFix: () -> Unit = {
+              val applyFixes: () -> Unit = {
                   extensions.findByName("android")?.let { ext ->
                       val method = ext.javaClass.methods.firstOrNull {
                           it.name == "setCompileSdkVersion" &&
@@ -45,18 +45,18 @@ jobs:
                       }
                       method?.invoke(ext, 36)
                   }
+                  tasks.withType<JavaCompile>().configureEach {
+                      sourceCompatibility = "11"
+                      targetCompatibility = "11"
+                  }
+                  tasks.withType<KotlinCompile>().configureEach {
+                      compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
+                  }
               }
               if (state.executed) {
-                  applyCompileSdkFix()
+                  applyFixes()
               } else {
-                  afterEvaluate { applyCompileSdkFix() }
-              }
-              tasks.withType<KotlinCompile>().configureEach {
-                  compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
-              }
-              tasks.withType<JavaCompile>().configureEach {
-                  sourceCompatibility = "11"
-                  targetCompatibility = "11"
+                  afterEvaluate { applyFixes() }
               }
           }
           EOF

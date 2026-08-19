@@ -30,14 +30,19 @@ jobs:
         run: |
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle.kts
-          sed -i '1i import com.android.build.gradle.BaseExtension' android/build.gradle.kts
-          sed -i '2i import org.jetbrains.kotlin.gradle.tasks.KotlinCompile' android/build.gradle.kts
+          sed -i '1i import org.jetbrains.kotlin.gradle.tasks.KotlinCompile' android/build.gradle.kts
+          sed -i '2i import org.jetbrains.kotlin.gradle.dsl.JvmTarget' android/build.gradle.kts
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
               val applyCompileSdkFix: () -> Unit = {
-                  extensions.findByType(BaseExtension::class.java)?.let {
-                      it.compileSdkVersion(36)
+                  extensions.findByName("android")?.let { ext ->
+                      val method = ext.javaClass.methods.firstOrNull {
+                          it.name == "setCompileSdkVersion" &&
+                              it.parameterTypes.size == 1 &&
+                              it.parameterTypes[0] == Int::class.java
+                      }
+                      method?.invoke(ext, 36)
                   }
               }
               if (state.executed) {
@@ -46,7 +51,7 @@ jobs:
                   afterEvaluate { applyCompileSdkFix() }
               }
               tasks.withType<KotlinCompile>().configureEach {
-                  kotlinOptions.jvmTarget = "11"
+                  compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
               }
           }
           EOF

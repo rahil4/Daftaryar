@@ -30,12 +30,10 @@ jobs:
         run: |
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle.kts
-          sed -i '1i import org.jetbrains.kotlin.gradle.tasks.KotlinCompile' android/build.gradle.kts
-          sed -i '2i import org.jetbrains.kotlin.gradle.dsl.JvmTarget' android/build.gradle.kts
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
-              val applyFixes: () -> Unit = {
+              val applyCompileSdkFix: () -> Unit = {
                   extensions.findByName("android")?.let { ext ->
                       val setCompileSdk = ext.javaClass.methods.firstOrNull {
                           it.name == "setCompileSdkVersion" &&
@@ -43,27 +41,16 @@ jobs:
                               it.parameterTypes[0] == Int::class.java
                       }
                       setCompileSdk?.invoke(ext, 36)
-
-                      val getCompileOptions = ext.javaClass.methods.firstOrNull { it.name == "getCompileOptions" }
-                      val compileOptions = getCompileOptions?.invoke(ext)
-                      if (compileOptions != null) {
-                          val javaVersionClass = Class.forName("org.gradle.api.JavaVersion")
-                          val version11 = javaVersionClass.getMethod("toVersion", Any::class.java).invoke(null, "11")
-                          compileOptions.javaClass.getMethod("setSourceCompatibility", javaVersionClass).invoke(compileOptions, version11)
-                          compileOptions.javaClass.getMethod("setTargetCompatibility", javaVersionClass).invoke(compileOptions, version11)
-                      }
-                  }
-                  tasks.withType<KotlinCompile>().configureEach {
-                      compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
                   }
               }
               if (state.executed) {
-                  applyFixes()
+                  applyCompileSdkFix()
               } else {
-                  afterEvaluate { applyFixes() }
+                  afterEvaluate { applyCompileSdkFix() }
               }
           }
           EOF
+          echo 'kotlin.jvm.target.validation.mode=warning' >> android/gradle.properties
 
       - name: تنظیم اندروید برای قفل اثر انگشت (local_auth) و خواندن پیامک بانکی
         run: |

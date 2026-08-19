@@ -32,6 +32,7 @@ jobs:
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle.kts
           sed -i '1i import org.jetbrains.kotlin.gradle.tasks.KotlinCompile' android/build.gradle.kts
           sed -i '2i import org.jetbrains.kotlin.gradle.dsl.JvmTarget' android/build.gradle.kts
+          sed -i '3i import org.gradle.api.tasks.compile.JavaCompile' android/build.gradle.kts
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
@@ -52,6 +53,10 @@ jobs:
               }
               tasks.withType<KotlinCompile>().configureEach {
                   compilerOptions.jvmTarget.set(JvmTarget.JVM_11)
+              }
+              tasks.withType<JavaCompile>().configureEach {
+                  sourceCompatibility = "11"
+                  targetCompatibility = "11"
               }
           }
           EOF

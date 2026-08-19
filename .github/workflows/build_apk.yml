@@ -31,6 +31,7 @@ jobs:
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' android/app/build.gradle.kts
           sed -i '1i import com.android.build.gradle.BaseExtension' android/build.gradle.kts
+          sed -i '2i import org.jetbrains.kotlin.gradle.tasks.KotlinCompile' android/build.gradle.kts
           cat >> android/build.gradle.kts << 'EOF'
 
           subprojects {
@@ -43,6 +44,9 @@ jobs:
                   applyCompileSdkFix()
               } else {
                   afterEvaluate { applyCompileSdkFix() }
+              }
+              tasks.withType<KotlinCompile>().configureEach {
+                  kotlinOptions.jvmTarget = "11"
               }
           }
           EOF

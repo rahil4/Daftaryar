@@ -29,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
   bool _smsReadingEnabled = false;
+  final _allowedSenderController = TextEditingController();
 
   @override
   void initState() {
@@ -40,7 +41,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSmsSetting() async {
     final value = await DatabaseHelper.instance.getSetting('sms_reading_enabled');
-    if (mounted) setState(() => _smsReadingEnabled = value == '1');
+    final sender = await DatabaseHelper.instance.getSetting('sms_allowed_sender');
+    if (mounted) {
+      setState(() {
+        _smsReadingEnabled = value == '1';
+        _allowedSenderController.text = sender ?? '';
+      });
+    }
+  }
+
+  Future<void> _saveAllowedSender(String value) async {
+    await DatabaseHelper.instance.setSetting('sms_allowed_sender', value.trim());
   }
 
   Future<void> _toggleSmsReading(bool value) async {
@@ -259,7 +270,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: _toggleSmsReading,
                   ),
                 ),
-                if (_smsReadingEnabled)
+                if (_smsReadingEnabled) ...[
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      child: TextFormField(
+                        controller: _allowedSenderController,
+                        decoration: const InputDecoration(
+                          labelText: 'شماره/فرستنده مجاز پیامک بانک',
+                          hintText: 'مثلاً bki.ir یا شماره فرستنده',
+                        ),
+                        onChanged: _saveAllowedSender,
+                      ),
+                    ),
+                  ),
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.drafts_outlined, color: AppColors.brass),
@@ -269,6 +293,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           context, MaterialPageRoute(builder: (_) => const SmsDraftsScreen())),
                     ),
                   ),
+                ],
                 const SizedBox(height: 12),
                 Card(
                   child: ListTile(

@@ -4,6 +4,7 @@ import '../db/database_helper.dart';
 import '../models/sms_draft.dart';
 import '../utils/formatters.dart';
 import 'bank_sms_parser.dart';
+import 'notification_service.dart';
 
 /// این تابع باید سطح بالا (top-level) بماند تا در ایزوله پس‌زمینه پیامک قابل اجرا باشد
 @pragma('vm:entry-point')
@@ -38,6 +39,14 @@ class SmsListenerService {
     final enabled = await db.getSetting('sms_reading_enabled');
     if (enabled != '1') return;
 
+    // فقط به شماره/فرستنده‌ای که کاربر تعیین کرده حساس باشد (در صورت تنظیم‌شدن)
+    final allowedSender = await db.getSetting('sms_allowed_sender');
+    if (allowedSender != null && allowedSender.trim().isNotEmpty) {
+      final normalizedSender = (sender ?? '').replaceAll(RegExp(r'\s'), '').toLowerCase();
+      final normalizedAllowed = allowedSender.trim().replaceAll(RegExp(r'\s'), '').toLowerCase();
+      if (!normalizedSender.contains(normalizedAllowed)) return;
+    }
+
     final alreadyExists = await db.smsDraftExists(body);
     if (alreadyExists) return;
 
@@ -52,5 +61,10 @@ class SmsListenerService {
       date: todayJalaliString(),
       createdAt: todayJalaliString(),
     ));
+
+    await NotificationService.showTransactionDetected(
+      title: 'تراکنش بانکی جدید شناسایی شد',
+      body: '${parsed.type} ${formatMoney(parsed.amount)} — برای بررسی ضربه بزنید',
+    );
   }
 }

@@ -110,6 +110,12 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (widget.draft.sender != null && widget.draft.sender!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('فرستنده: ${widget.draft.sender}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  ),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(

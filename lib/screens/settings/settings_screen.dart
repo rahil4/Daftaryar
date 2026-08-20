@@ -5,6 +5,7 @@ import '../../services/backup_service.dart';
 import '../../services/security_service.dart';
 import '../../services/sms_listener_service.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
+import '../sms_drafts/manual_sms_entry_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../accounts/accounts_screen.dart';
@@ -291,6 +292,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: const Text('بررسی، تأیید یا رد پیش‌نویس‌های شناسایی‌شده'),
                       onTap: () => Navigator.push(
                           context, MaterialPageRoute(builder: (_) => const SmsDraftsScreen())),
+                    ),
+                  ),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.edit_note_outlined, color: AppColors.brass),
+                      title: const Text('افزودن دستی پیامک'),
+                      subtitle: const Text('اگر شنود خودکار کار نکرد، متن پیامک را اینجا بچسبانید'),
+                      onTap: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const ManualSmsEntryScreen())),
                     ),
                   ),
                 ],

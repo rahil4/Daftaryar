@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
+import '../../services/notification_service.dart';
 
 /// بررسی یک پیش‌نویس پیامکی: تأیید (با انتخاب حساب/پروژه) یا رد کردن
 class SmsDraftReviewScreen extends StatefulWidget {
@@ -85,6 +86,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
     try {
       await _db.insertJournalEntry(entry);
       await _db.updateSmsDraftStatus(widget.draft.id!, kSmsDraftConfirmed);
+      await _refreshNotificationBadge();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) {
@@ -98,7 +100,13 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
 
   Future<void> _dismiss() async {
     await _db.updateSmsDraftStatus(widget.draft.id!, kSmsDraftDismissed);
+    await _refreshNotificationBadge();
     if (mounted) Navigator.pop(context, true);
+  }
+
+  Future<void> _refreshNotificationBadge() async {
+    final pendingCount = await _db.countPendingSmsDrafts();
+    await NotificationService.updatePendingDraftsNotification(pendingCount);
   }
 
   @override

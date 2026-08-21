@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../services/security_service.dart';
 import '../../services/sms_listener_service.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../home/home_shell.dart';
 import '../lock/lock_screen.dart';
@@ -36,6 +37,8 @@ class _AppRootState extends State<AppRoot> {
     final smsEnabled = await _db.getSetting('sms_reading_enabled');
     if (smsEnabled == '1') {
       SmsListenerService.startListening();
+      final pendingCount = await _db.countPendingSmsDrafts();
+      await NotificationService.updatePendingDraftsNotification(pendingCount);
     }
     setState(() {
       _locked = lockEnabled;

@@ -1,20 +1,41 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-/// نمایش اعلان محلی هنگام شناسایی تراکنش جدید از پیامک بانک
+import '../navigation.dart';
+import '../screens/sms_drafts/sms_drafts_screen.dart';
+import '../utils/formatters.dart';
+
+const _summaryPayload = 'sms_drafts';
+
+/// نمایش اعلان‌های مربوط به پیامک بانکی: یک اعلان لحظه‌ای برای هر تراکنش
+/// تازه شناسایی‌شده، و یک اعلان دائمی و به‌روزشونده که تعداد پیش‌نویس‌های
+/// در انتظار را نشان می‌دهد تا ثبت آن‌ها فراموش نشود.
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _initialized = false;
+  static const int _summaryNotificationId = 9001;
 
   static Future<void> _ensureInit() async {
     if (_initialized) return;
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: androidSettings);
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _onNotificationTap,
+    );
 
     final androidImpl = _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await androidImpl?.requestNotificationsPermission();
     _initialized = true;
+  }
+
+  static void _onNotificationTap(NotificationResponse response) {
+    if (response.payload == _summaryPayload) {
+      rootNavigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (_) => const SmsDraftsScreen()),
+      );
+    }
   }
 
   static Future<void> showTransactionDetected({
@@ -35,6 +56,34 @@ class NotificationService {
       title,
       body,
       details,
+      payload: _summaryPayload,
+    );
+  }
+
+  /// اعلان دائمی و به‌روزشونده تعداد پیش‌نویس‌های در انتظار تأیید؛
+  /// با صفر شدن تعداد، خودش پاک می‌شود.
+  static Future<void> updatePendingDraftsNotification(int count) async {
+    await _ensureInit();
+    if (count <= 0) {
+      await _plugin.cancel(_summaryNotificationId);
+      return;
+    }
+    final androidDetails = AndroidNotificationDetails(
+      'sms_drafts_summary_channel',
+      'یادآوری پیش‌نویس‌های در انتظار',
+      channelDescription: 'یادآوری همیشگی تعداد پیش‌نویس‌های پیامکی تأییدنشده',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+      onlyAlertOnce: true,
+      autoCancel: false,
+    );
+    final details = NotificationDetails(android: androidDetails);
+    await _plugin.show(
+      _summaryNotificationId,
+      'پیش‌نویس پیامکی در انتظار تأیید',
+      '${pn(count)} تراکنش شناسایی‌شده هنوز بررسی نشده — برای مشاهده ضربه بزنید',
+      details,
+      payload: _summaryPayload,
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'theme/app_theme.dart';
 import 'screens/onboarding/app_root.dart';
+import 'navigation.dart';
 
 void main() {
   runApp(const DaftaryarApp());
@@ -16,6 +17,7 @@ class DaftaryarApp extends StatelessWidget {
     return MaterialApp(
       title: 'دفتریار',
       debugShowCheckedModeBanner: false,
+      navigatorKey: rootNavigatorKey,
       theme: AppTheme.theme,
       locale: const Locale('fa', 'IR'),
       supportedLocales: const [Locale('fa', 'IR'), Locale('en', 'US')],

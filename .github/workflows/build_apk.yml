@@ -71,19 +71,19 @@ jobs:
           sed -i '/<manifest /a\    <uses-permission android:name="android.permission.READ_PHONE_STATE" />' android/app/src/main/AndroidManifest.xml
           sed -i '/<manifest /a\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' android/app/src/main/AndroidManifest.xml
           python3 - << 'PYEOF'
-path = "android/app/src/main/AndroidManifest.xml"
-content = open(path).read()
-receiver = '''        <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
-            android:permission="android.permission.BROADCAST_SMS" android:exported="true">
-            <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
-            </intent-filter>
-        </receiver>
-    </application>'''
-content = content.replace('</application>', receiver, 1)
-open(path, "w").write(content)
-print("receiver added")
-PYEOF
+          path = "android/app/src/main/AndroidManifest.xml"
+          content = open(path).read()
+          receiver = '''        <receiver android:name="com.shounakmulay.telephony.sms.IncomingSmsReceiver"
+                      android:permission="android.permission.BROADCAST_SMS" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
+                      </intent-filter>
+                  </receiver>
+              </application>'''
+          content = content.replace('</application>', receiver, 1)
+          open(path, "w").write(content)
+          print("receiver added")
+          PYEOF
           cat "$MAIN_ACTIVITY"
           cat android/app/src/main/AndroidManifest.xml
 

@@ -39,12 +39,15 @@ class SmsListenerService {
     final enabled = await db.getSetting('sms_reading_enabled');
     if (enabled != '1') return;
 
-    // فقط به شماره/فرستنده‌ای که کاربر تعیین کرده حساس باشد (در صورت تنظیم‌شدن)
-    final allowedSender = await db.getSetting('sms_allowed_sender');
-    if (allowedSender != null && allowedSender.trim().isNotEmpty) {
+    // فقط به فرستنده‌هایی که کاربر مجاز کرده حساس باشد (در صورت تنظیم‌شدن حداقل یکی)
+    final allowedSenders = await db.getAllowedSmsSenders();
+    if (allowedSenders.isNotEmpty) {
       final normalizedSender = (sender ?? '').replaceAll(RegExp(r'\s'), '').toLowerCase();
-      final normalizedAllowed = allowedSender.trim().replaceAll(RegExp(r'\s'), '').toLowerCase();
-      if (!normalizedSender.contains(normalizedAllowed)) return;
+      final isAllowed = allowedSenders.any((allowed) {
+        final normalizedAllowed = allowed.replaceAll(RegExp(r'\s'), '').toLowerCase();
+        return normalizedAllowed.isNotEmpty && normalizedSender.contains(normalizedAllowed);
+      });
+      if (!isAllowed) return;
     }
 
     final alreadyExists = await db.smsDraftExists(body);

@@ -576,6 +576,22 @@ class DatabaseHelper {
     };
   }
 
+  // ---------------- فرستنده‌های مجاز پیامک بانکی (چند بانک) ----------------
+  Future<List<String>> getAllowedSmsSenders() async {
+    // سازگاری با نسخه قبلی که فقط یک فرستنده تک ذخیره می‌کرد
+    final legacy = await getSetting('sms_allowed_sender');
+    final value = await getSetting('sms_allowed_senders');
+    if (value == null || value.trim().isEmpty) {
+      if (legacy != null && legacy.trim().isNotEmpty) return [legacy.trim()];
+      return [];
+    }
+    return value.split('|').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  }
+
+  Future<void> setAllowedSmsSenders(List<String> senders) async {
+    await setSetting('sms_allowed_senders', senders.join('|'));
+  }
+
   // ---------------- تحلیل و روند ----------------
 
   /// روند درآمد/هزینه/سود ماه به ماه برای N ماه اخیر (شامل ماه جاری تا امروز)

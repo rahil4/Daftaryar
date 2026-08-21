@@ -30,7 +30,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricEnabled = false;
   bool _biometricAvailable = false;
   bool _smsReadingEnabled = false;
-  final _allowedSenderController = TextEditingController();
+  List<String> _allowedSenders = [];
+  final _newSenderController = TextEditingController();
 
   @override
   void initState() {
@@ -42,17 +43,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSmsSetting() async {
     final value = await DatabaseHelper.instance.getSetting('sms_reading_enabled');
-    final sender = await DatabaseHelper.instance.getSetting('sms_allowed_sender');
+    final senders = await DatabaseHelper.instance.getAllowedSmsSenders();
     if (mounted) {
       setState(() {
         _smsReadingEnabled = value == '1';
-        _allowedSenderController.text = sender ?? '';
+        _allowedSenders = senders;
       });
     }
   }
 
-  Future<void> _saveAllowedSender(String value) async {
-    await DatabaseHelper.instance.setSetting('sms_allowed_sender', value.trim());
+  Future<void> _addSender() async {
+    final value = _newSenderController.text.trim();
+    if (value.isEmpty) return;
+    if (_allowedSenders.any((s) => s.toLowerCase() == value.toLowerCase())) {
+      _newSenderController.clear();
+      return;
+    }
+    final updated = [..._allowedSenders, value];
+    await DatabaseHelper.instance.setAllowedSmsSenders(updated);
+    _newSenderController.clear();
+    _loadSmsSetting();
+  }
+
+  Future<void> _removeSender(String sender) async {
+    final updated = _allowedSenders.where((s) => s != sender).toList();
+    await DatabaseHelper.instance.setAllowedSmsSenders(updated);
+    _loadSmsSetting();
   }
 
   Future<void> _toggleSmsReading(bool value) async {
@@ -274,14 +290,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (_smsReadingEnabled) ...[
                   Card(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                      child: TextFormField(
-                        controller: _allowedSenderController,
-                        decoration: const InputDecoration(
-                          labelText: 'شماره/فرستنده مجاز پیامک بانک',
-                          hintText: 'مثلاً bki.ir یا شماره فرستنده',
-                        ),
-                        onChanged: _saveAllowedSender,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('بانک‌های مجاز (فرستنده‌های پیامک)',
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'برای هر بانک، نام فرستنده پیامک را جدا اضافه کن (مثلاً KESHAVARZI، '
+                            'bki.ir، یا شماره فرستنده). اگر لیست خالی بماند، پیامک از هر '
+                            'فرستنده‌ای بررسی می‌شود.',
+                            style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary, height: 1.6),
+                          ),
+                          if (_allowedSenders.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: _allowedSenders
+                                  .map((s) => Chip(
+                                        label: Text(s),
+                                        onDeleted: () => _removeSender(s),
+                                        deleteIconColor: AppColors.negative,
+                                      ))
+                                  .toList(),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _newSenderController,
+                                  decoration: const InputDecoration(
+                                    labelText: 'افزودن فرستنده جدید',
+                                    hintText: 'مثلاً KESHAVARZI',
+                                    isDense: true,
+                                  ),
+                                  onFieldSubmitted: (_) => _addSender(),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton.filled(
+                                onPressed: _addSender,
+                                icon: const Icon(Icons.add),
+                                style: IconButton.styleFrom(backgroundColor: AppColors.brass),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),

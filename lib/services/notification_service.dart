@@ -23,11 +23,18 @@ class NotificationService {
       settings,
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
+    _initialized = true;
+  }
 
+  /// درخواست مجوز نمایش اعلان — باید فقط از یک صفحه/کانتکست فعال (نه از
+  /// ایزوله پس‌زمینه شنود پیامک) فراخوانی شود، چون نیاز به یک Activity دارد.
+  /// اگر این مجوز زودتر گرفته نشود، تلاش برای گرفتنش از پس‌زمینه می‌تواند
+  /// بی‌صدا شکست بخورد و باعث دیرکرد یا نیامدن اعلان تراکنش تازه شود.
+  static Future<void> requestPermission() async {
+    await _ensureInit();
     final androidImpl = _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await androidImpl?.requestNotificationsPermission();
-    _initialized = true;
   }
 
   static void _onNotificationTap(NotificationResponse response) {

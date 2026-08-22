@@ -4,6 +4,7 @@ import '../../db/database_helper.dart';
 import '../../services/backup_service.dart';
 import '../../services/security_service.dart';
 import '../../services/sms_listener_service.dart';
+import '../../services/notification_service.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import '../sms_drafts/manual_sms_entry_screen.dart';
 import '../../theme/app_theme.dart';
@@ -79,6 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return;
       }
       await DatabaseHelper.instance.setSetting('sms_reading_enabled', '1');
+      await NotificationService.requestPermission();
       SmsListenerService.startListening();
       _snack('خواندن خودکار پیامک بانکی فعال شد.');
     } else {

@@ -36,6 +36,7 @@ class _AppRootState extends State<AppRoot> {
     final fyConfigured = await _db.isFiscalYearConfigured();
     final smsEnabled = await _db.getSetting('sms_reading_enabled');
     if (smsEnabled == '1') {
+      await NotificationService.requestPermission();
       SmsListenerService.startListening();
       final pendingCount = await _db.countPendingSmsDrafts();
       await NotificationService.updatePendingDraftsNotification(pendingCount);

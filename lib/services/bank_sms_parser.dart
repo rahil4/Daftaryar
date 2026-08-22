@@ -74,8 +74,8 @@ BankSmsParseResult? parseBankSms(String rawBody) {
   if (amount <= 0) return null;
 
   final unit = match.group(2);
-  if (unit == 'ریال') {
-    amount = amount / 10; // تبدیل ریال به تومان
+  if (unit != 'تومان') {
+    amount = amount / 10; // بانک‌ها معمولاً مبلغ را به ریال گزارش می‌کنند
   }
 
   final type = isIncome ? 'دریافت' : 'پرداخت';

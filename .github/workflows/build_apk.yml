@@ -37,6 +37,30 @@ jobs:
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
           }
           EOF
+
+      - name: افزودن قوانین ProGuard (رفع کرش flutter_local_notifications با R8)
+        run: |
+          cat > android/app/proguard-rules.pro << 'EOF'
+          -keep class com.dexterous.flutterlocalnotifications.** { *; }
+          -keep class * extends com.google.gson.reflect.TypeToken
+          -keep public class * implements java.lang.reflect.Type
+          -keepattributes Signature
+          -keepattributes *Annotation*
+          -keepattributes EnclosingMethod
+          -keepattributes InnerClasses
+          -dontwarn com.google.gson.**
+          EOF
+          python3 - << 'PYEOF'
+          path = "android/app/build.gradle.kts"
+          content = open(path).read()
+          content = content.replace(
+              "release {",
+              'release {\n            isMinifyEnabled = true\n            isShrinkResources = true\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")',
+              1,
+          )
+          open(path, "w").write(content)
+          print("proguardFiles added")
+          PYEOF
           cat android/app/build.gradle.kts
           cat >> android/build.gradle.kts << 'EOF'
 

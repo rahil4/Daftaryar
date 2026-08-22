@@ -63,8 +63,27 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     final isSystem = widget.existing?.isSystem ?? false;
-    final possibleParents =
-        _allAccounts.where((a) => a.type == _type && a.id != widget.existing?.id).toList();
+
+    // تمام نوادگان حساب فعلی را هم از گزینه‌های والد حذف می‌کنیم؛ در غیر این
+    // صورت می‌شد یک زیرحساب را به‌عنوان والدِ همان حساب انتخاب کرد و یک حلقه
+    // بی‌پایان در سلسله‌مراتب ساخت که هنگام نمایش چارت حساب‌ها کرش می‌کرد.
+    final descendantIds = <int>{};
+    if (widget.existing?.id != null) {
+      void collectDescendants(int parentId) {
+        for (final a in _allAccounts) {
+          if (a.parentId == parentId && a.id != null && descendantIds.add(a.id!)) {
+            collectDescendants(a.id!);
+          }
+        }
+      }
+
+      collectDescendants(widget.existing!.id!);
+    }
+
+    final possibleParents = _allAccounts
+        .where((a) =>
+            a.type == _type && a.id != widget.existing?.id && !descendantIds.contains(a.id))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? 'ویرایش حساب' : 'حساب جدید')),

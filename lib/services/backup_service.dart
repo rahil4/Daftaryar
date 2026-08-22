@@ -19,9 +19,10 @@ class BackupService {
     final projects = await _db.getProjects();
     final accounts = await _db.getAccounts();
     final entries = await _db.getJournalEntries();
+    final settings = await _db.getAllSettings();
 
     final data = {
-      'version': 2,
+      'version': 3,
       'exportedAt': DateTime.now().toIso8601String(),
       'clients': clients.map((e) => e.toMap()).toList(),
       'projects': projects.map((e) => e.toMap()).toList(),
@@ -32,6 +33,7 @@ class BackupService {
                 'lines': e.lines.map((l) => l.toMap()).toList(),
               })
           .toList(),
+      'settings': settings,
     };
 
     final dir = await getTemporaryDirectory();
@@ -125,6 +127,13 @@ class BackupService {
       if (entry.isBalanced) {
         await _db.insertJournalEntry(entry);
       }
+    }
+
+    // تنظیمات برنامه (سال مالی، قفل امنیتی، پیامک بانکی و...)
+    final settingsRaw = data['settings'];
+    if (settingsRaw is Map) {
+      final settings = settingsRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+      await _db.setAllSettings(settings);
     }
   }
 }

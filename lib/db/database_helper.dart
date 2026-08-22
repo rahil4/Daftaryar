@@ -28,6 +28,11 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: _onCreate,
+      onConfigure: (db) async {
+        // بدون این، قیدهای ON DELETE CASCADE / SET NULL در جداول عملاً نادیده گرفته
+        // می‌شدند و حذف کارفرما/پروژه باعث باقی‌ماندن رکوردهای یتیم می‌شد
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
     );
   }
 
@@ -322,8 +327,14 @@ class DatabaseHelper {
     }
     if (projectId != null || accountId != null) {
       String lineWhere = 'entryId = journal_entries.id';
-      if (projectId != null) lineWhere += ' AND projectId = ${projectId}';
-      if (accountId != null) lineWhere += ' AND accountId = ${accountId}';
+      if (projectId != null) {
+        lineWhere += ' AND projectId = ?';
+        args.add(projectId);
+      }
+      if (accountId != null) {
+        lineWhere += ' AND accountId = ?';
+        args.add(accountId);
+      }
       where += ' AND EXISTS (SELECT 1 FROM journal_lines WHERE $lineWhere)';
     }
     final entryMaps = await db.query('journal_entries',
@@ -469,8 +480,10 @@ class DatabaseHelper {
     return accountTypeBreakdown(kAccountExpense, fromDate: fromDate, toDate: toDate);
   }
 
-  /// مانده حساب‌های برگ (بدون زیرحساب) یک نوع خاص در بازه تاریخ اختیاری،
-  /// برای فهرست‌کردن ردیف‌های صورت سود و زیان (درآمدها/هزینه‌ها)
+  /// مانده هر حساب یک نوع خاص در بازه تاریخ اختیاری، برای فهرست‌کردن ردیف‌های
+  /// صورت سود و زیان (درآمدها/هزینه‌ها). توجه: accountBalance فقط سطرهای متصل
+  /// مستقیم به همان حساب را جمع می‌زند، پس شامل کردن حساب‌های والد هم امن است
+  /// و باعث نمی‌شود مبلغی دوبار شمرده شود.
   Future<Map<String, double>> accountTypeBreakdown(
     String type, {
     String? fromDate,
@@ -480,8 +493,6 @@ class DatabaseHelper {
     final typeAccounts = await getAccounts(type: type);
     final Map<String, double> breakdown = {};
     for (final acc in typeAccounts) {
-      final hasChildren = typeAccounts.any((a) => a.parentId == acc.id);
-      if (hasChildren) continue;
       final bal = await accountBalance(acc.id!, fromDate: fromDate, toDate: toDate);
       final balance = bal['balance']!;
       if (balance != 0 || includeZero) breakdown[acc.name] = balance;
@@ -554,6 +565,20 @@ class DatabaseHelper {
     final maps = await db.query('app_settings', where: 'key = ?', whereArgs: [key]);
     if (maps.isEmpty) return null;
     return maps.first['value'] as String?;
+  }
+
+  /// همه تنظیمات کلید-مقدار (سال مالی، قفل امنیتی، پیامک بانکی و...) —
+  /// برای گنجاندن در فایل پشتیبان کامل
+  Future<Map<String, String>> getAllSettings() async {
+    final db = await database;
+    final maps = await db.query('app_settings');
+    return {for (final m in maps) m['key'] as String: m['value'] as String? ?? ''};
+  }
+
+  Future<void> setAllSettings(Map<String, String> settings) async {
+    for (final entry in settings.entries) {
+      await setSetting(entry.key, entry.value);
+    }
   }
 
   // ---------------- سال مالی ----------------

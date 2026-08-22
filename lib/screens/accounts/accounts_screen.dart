@@ -39,11 +39,13 @@ class _AccountsScreenState extends State<AccountsScreen> {
   List<MapEntry<AccountModel, int>> _hierarchicalList(String type) {
     final typeAccounts = _accounts.where((a) => a.type == type).toList();
     final result = <MapEntry<AccountModel, int>>[];
+    final visited = <int>{}; // محافظ در برابر حلقه احتمالی در داده‌ها
 
     void addChildren(int? parentId, int depth) {
       final children = typeAccounts.where((a) => a.parentId == parentId).toList()
         ..sort((a, b) => (a.code ?? '').compareTo(b.code ?? ''));
       for (final child in children) {
+        if (child.id == null || !visited.add(child.id!)) continue;
         result.add(MapEntry(child, depth));
         addChildren(child.id, depth + 1);
       }

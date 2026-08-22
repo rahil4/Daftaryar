@@ -47,9 +47,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
     final asset = await _db.getAccounts(type: kAccountAsset);
     final counterAll = await _db.getAccounts(
         type: _type == 'دریافت' ? kAccountIncome : kAccountExpense);
-    final leafCounter = _type == 'دریافت'
-        ? counterAll
-        : counterAll.where((a) => !counterAll.any((x) => x.parentId == a.id)).toList();
+    final leafCounter = counterAll.where((a) => !counterAll.any((x) => x.parentId == a.id)).toList();
     final projects = await _db.getProjects();
     setState(() {
       _cashAccounts = asset;

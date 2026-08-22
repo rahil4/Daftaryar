@@ -91,7 +91,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('حذف شخص'),
         content: Text(
-            'با حذف «${_client.name}» تمام پروژه‌ها و تراکنش‌های مرتبط با آن نیز حذف خواهد شد. ادامه می‌دهید؟'),
+            'با حذف «${_client.name}» تمام پروژه‌های این شخص هم حذف می‌شود. اسناد حسابداری ثبت‌شده حذف نمی‌شوند، فقط برچسب پروژه از آن‌ها برداشته می‌شود. ادامه می‌دهید؟'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
           TextButton(

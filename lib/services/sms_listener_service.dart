@@ -69,8 +69,5 @@ class SmsListenerService {
       title: 'تراکنش بانکی جدید شناسایی شد',
       body: '${parsed.type} ${formatMoney(parsed.amount)} — برای بررسی ضربه بزنید',
     );
-
-    final pendingCount = await db.countPendingSmsDrafts();
-    await NotificationService.updatePendingDraftsNotification(pendingCount);
   }
 }

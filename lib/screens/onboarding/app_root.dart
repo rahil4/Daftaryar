@@ -38,8 +38,6 @@ class _AppRootState extends State<AppRoot> {
     if (smsEnabled == '1') {
       await NotificationService.requestPermission();
       SmsListenerService.startListening();
-      final pendingCount = await _db.countPendingSmsDrafts();
-      await NotificationService.updatePendingDraftsNotification(pendingCount);
     }
     setState(() {
       _locked = lockEnabled;

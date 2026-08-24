@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/client.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
@@ -12,7 +13,8 @@ import '../../widgets/persian_amount_field.dart';
 /// سند حسابداری دستی با چند سطر بدهکار/بستانکار دلخواه
 class JournalFormScreen extends StatefulWidget {
   final int? presetProjectId;
-  const JournalFormScreen({super.key, this.presetProjectId});
+  final int? presetClientId;
+  const JournalFormScreen({super.key, this.presetProjectId, this.presetClientId});
 
   @override
   State<JournalFormScreen> createState() => _JournalFormScreenState();
@@ -24,6 +26,7 @@ class _JournalLineDraft {
   final amount = TextEditingController();
   final description = TextEditingController();
   int? projectId;
+  int? clientId;
 }
 
 class _JournalFormScreenState extends State<JournalFormScreen> {
@@ -32,6 +35,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
   String _date = todayJalaliString();
   List<AccountModel> _accounts = [];
   List<ProjectModel> _projects = [];
+  List<ClientModel> _clients = [];
   List<_JournalLineDraft> _lines = [];
   bool _loading = true;
   bool _saving = false;
@@ -40,8 +44,12 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
   void initState() {
     super.initState();
     _lines = [
-      _JournalLineDraft()..projectId = widget.presetProjectId,
-      _JournalLineDraft()..projectId = widget.presetProjectId,
+      _JournalLineDraft()
+        ..projectId = widget.presetProjectId
+        ..clientId = widget.presetClientId,
+      _JournalLineDraft()
+        ..projectId = widget.presetProjectId
+        ..clientId = widget.presetClientId,
     ];
     _load();
   }
@@ -49,15 +57,19 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
   Future<void> _load() async {
     final accounts = await _db.getAccounts();
     final projects = await _db.getProjects();
+    final clients = await _db.getClients();
     setState(() {
       _accounts = accounts;
       _projects = projects;
+      _clients = clients;
       _loading = false;
     });
   }
 
   void _addLine() {
-    setState(() => _lines.add(_JournalLineDraft()..projectId = widget.presetProjectId));
+    setState(() => _lines.add(_JournalLineDraft()
+      ..projectId = widget.presetProjectId
+      ..clientId = widget.presetClientId));
   }
 
   void _removeLine(int index) {
@@ -110,6 +122,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
                 credit: l.side == 'credit' ? (parsePersianAmount(l.amount.text) ?? 0) : 0,
                 description: l.description.text.trim().isEmpty ? null : l.description.text.trim(),
                 projectId: l.projectId,
+                clientId: l.clientId,
               ))
           .toList(),
     );
@@ -251,6 +264,18 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
               label: 'مبلغ (تومان)',
               isDense: true,
               onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<int?>(
+              value: line.clientId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'شخص (اختیاری)', isDense: true),
+              items: [
+                const DropdownMenuItem(value: null, child: Text('—')),
+                ..._clients.map((c) => DropdownMenuItem(
+                    value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis))),
+              ],
+              onChanged: (v) => setState(() => line.clientId = v),
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<int?>(

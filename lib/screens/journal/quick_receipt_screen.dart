@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/client.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
 
-/// ثبت سریع دریافت وجه: بدهکار صندوق/بانک، بستانکار حساب درآمد
+/// ثبت سریع دریافت وجه: بدهکار صندوق/بانک، بستانکار حساب درآمد.
+/// شخص و پروژه هر دو مستقل و اختیاری‌اند (مثلاً دریافت از یک شخص بدون پروژه).
 class QuickReceiptScreen extends StatefulWidget {
   final int? presetProjectId;
-  const QuickReceiptScreen({super.key, this.presetProjectId});
+  final int? presetClientId;
+  const QuickReceiptScreen({super.key, this.presetProjectId, this.presetClientId});
 
   @override
   State<QuickReceiptScreen> createState() => _QuickReceiptScreenState();
@@ -28,9 +31,11 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   List<AccountModel> _cashAccounts = [];
   List<AccountModel> _incomeAccounts = [];
   List<ProjectModel> _projects = [];
+  List<ClientModel> _clients = [];
   int? _cashAccountId;
   int? _incomeAccountId;
   int? _projectId;
+  int? _clientId;
   bool _loading = true;
   bool _saving = false;
 
@@ -38,6 +43,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   void initState() {
     super.initState();
     _projectId = widget.presetProjectId;
+    _clientId = widget.presetClientId;
     _load();
   }
 
@@ -47,13 +53,34 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
     // فقط حساب‌های برگ (بدون زیرحساب) برای انتخاب مناسب‌اند، هماهنگ با فرم ثبت هزینه
     final income = incomeAll.where((a) => !incomeAll.any((x) => x.parentId == a.id)).toList();
     final projects = await _db.getProjects();
+    final clients = await _db.getClients();
+
+    // اگر پروژه از قبل انتخاب شده و شخصی هنوز مشخص نشده، کارفرمای همان پروژه را پیشنهاد بده
+    int? initialClientId = _clientId;
+    if (initialClientId == null && _projectId != null) {
+      final matches = projects.where((p) => p.id == _projectId);
+      if (matches.isNotEmpty) initialClientId = matches.first.clientId;
+    }
+
     setState(() {
       _cashAccounts = asset;
       _incomeAccounts = income;
       _projects = projects;
+      _clients = clients;
       _cashAccountId = asset.isNotEmpty ? asset.first.id : null;
       _incomeAccountId = income.isNotEmpty ? income.first.id : null;
+      _clientId = initialClientId;
       _loading = false;
+    });
+  }
+
+  void _onProjectChanged(int? projectId) {
+    setState(() {
+      _projectId = projectId;
+      if (projectId != null) {
+        final matches = _projects.where((p) => p.id == projectId);
+        if (matches.isNotEmpty) _clientId = matches.first.clientId;
+      }
     });
   }
 
@@ -67,8 +94,18 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
       description: _description.text.trim().isEmpty ? 'دریافت وجه' : _description.text.trim(),
       createdAt: todayJalaliString(),
       lines: [
-        JournalLineModel(accountId: _cashAccountId!, debit: amount, projectId: _projectId),
-        JournalLineModel(accountId: _incomeAccountId!, credit: amount, projectId: _projectId),
+        JournalLineModel(
+          accountId: _cashAccountId!,
+          debit: amount,
+          projectId: _projectId,
+          clientId: _clientId,
+        ),
+        JournalLineModel(
+          accountId: _incomeAccountId!,
+          credit: amount,
+          projectId: _projectId,
+          clientId: _clientId,
+        ),
       ],
     );
     try {
@@ -120,13 +157,26 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
+                    value: _clientId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'شخص (اختیاری)'),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('—')),
+                      ..._clients.map((c) => DropdownMenuItem(
+                          value: c.id, child: Text('${c.name} (${c.relationType})'))),
+                    ],
+                    onChanged: (v) => setState(() => _clientId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int?>(
                     value: _projectId,
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
                     items: [
                       const DropdownMenuItem(value: null, child: Text('—')),
                       ..._projects.map((p) => DropdownMenuItem(value: p.id, child: Text(p.title))),
                     ],
-                    onChanged: (v) => setState(() => _projectId = v),
+                    onChanged: _onProjectChanged,
                   ),
                   const SizedBox(height: 12),
                   JalaliDateField(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/client.dart';
 import '../../models/journal_entry.dart';
 import '../../models/project.dart';
 import '../../models/sms_draft.dart';
@@ -30,9 +31,11 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
   List<AccountModel> _cashAccounts = [];
   List<AccountModel> _counterAccounts = []; // درآمد یا هزینه بسته به نوع
   List<ProjectModel> _projects = [];
+  List<ClientModel> _clients = [];
   int? _cashAccountId;
   int? _counterAccountId;
   int? _projectId;
+  int? _clientId;
   bool _loading = true;
   bool _saving = false;
 
@@ -48,10 +51,12 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
         type: _type == 'دریافت' ? kAccountIncome : kAccountExpense);
     final leafCounter = counterAll.where((a) => !counterAll.any((x) => x.parentId == a.id)).toList();
     final projects = await _db.getProjects();
+    final clients = await _db.getClients();
     setState(() {
       _cashAccounts = asset;
       _counterAccounts = leafCounter;
       _projects = projects;
+      _clients = clients;
       _cashAccountId = asset.isNotEmpty ? asset.first.id : null;
       _counterAccountId = leafCounter.isNotEmpty ? leafCounter.first.id : null;
       _loading = false;
@@ -71,12 +76,16 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
       createdAt: todayJalaliString(),
       lines: _type == 'دریافت'
           ? [
-              JournalLineModel(accountId: _cashAccountId!, debit: amount, projectId: _projectId),
-              JournalLineModel(accountId: _counterAccountId!, credit: amount, projectId: _projectId),
+              JournalLineModel(
+                  accountId: _cashAccountId!, debit: amount, projectId: _projectId, clientId: _clientId),
+              JournalLineModel(
+                  accountId: _counterAccountId!, credit: amount, projectId: _projectId, clientId: _clientId),
             ]
           : [
-              JournalLineModel(accountId: _counterAccountId!, debit: amount, projectId: _projectId),
-              JournalLineModel(accountId: _cashAccountId!, credit: amount, projectId: _projectId),
+              JournalLineModel(
+                  accountId: _counterAccountId!, debit: amount, projectId: _projectId, clientId: _clientId),
+              JournalLineModel(
+                  accountId: _cashAccountId!, credit: amount, projectId: _projectId, clientId: _clientId),
             ],
     );
 
@@ -157,6 +166,18 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                       .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
                       .toList(),
                   onChanged: (v) => setState(() => _counterAccountId = v),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int?>(
+                  value: _clientId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'شخص (اختیاری)'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('—')),
+                    ..._clients.map((c) => DropdownMenuItem(
+                        value: c.id, child: Text('${c.name} (${c.relationType})'))),
+                  ],
+                  onChanged: (v) => setState(() => _clientId = v),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(

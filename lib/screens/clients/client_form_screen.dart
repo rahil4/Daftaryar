@@ -21,6 +21,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   late final _nationalId = TextEditingController(text: widget.existing?.nationalId ?? '');
   late final _address = TextEditingController(text: widget.existing?.address ?? '');
   late final _notes = TextEditingController(text: widget.existing?.notes ?? '');
+  late String _relationType = widget.existing?.relationType ?? kRelationEmployer;
 
   bool _saving = false;
 
@@ -34,6 +35,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       nationalId: _nationalId.text.trim().isEmpty ? null : _nationalId.text.trim(),
       address: _address.text.trim().isEmpty ? null : _address.text.trim(),
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+      relationType: _relationType,
       createdAt: widget.existing?.createdAt ?? todayJalaliString(),
     );
     if (widget.existing == null) {
@@ -58,6 +60,15 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
               controller: _name,
               decoration: const InputDecoration(labelText: 'نام و نام خانوادگی *'),
               validator: (v) => (v == null || v.trim().isEmpty) ? 'نام الزامی است' : null,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _relationType,
+              decoration: const InputDecoration(labelText: 'نوع رابطه'),
+              items: kRelationTypes
+                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .toList(),
+              onChanged: (v) => setState(() => _relationType = v!),
             ),
             const SizedBox(height: 12),
             TextFormField(

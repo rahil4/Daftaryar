@@ -109,12 +109,16 @@ class BackupService {
         final originalProjectId = lm['projectId'] as int?;
         final mappedProjectId =
             originalProjectId != null ? (projectIdMap[originalProjectId] ?? originalProjectId) : null;
+        final originalClientId = lm['clientId'] as int?;
+        final mappedClientId =
+            originalClientId != null ? (clientIdMap[originalClientId] ?? originalClientId) : null;
         return JournalLineModel(
           accountId: mappedAccountId,
           debit: (lm['debit'] as num).toDouble(),
           credit: (lm['credit'] as num).toDouble(),
           description: lm['description'] as String?,
           projectId: mappedProjectId,
+          clientId: mappedClientId,
         );
       }).toList();
 

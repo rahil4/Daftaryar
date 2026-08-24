@@ -73,7 +73,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                   child: Icon(Icons.person_outline, color: AppColors.brass),
                                 ),
                                 title: Text(c.name),
-                                subtitle: Text(c.phone ?? 'بدون شماره تماس'),
+                                subtitle: Text(
+                                    '${c.relationType} · ${c.phone ?? 'بدون شماره تماس'}'),
                                 trailing: const Icon(Icons.chevron_left),
                                 onTap: () async {
                                   await Navigator.push(

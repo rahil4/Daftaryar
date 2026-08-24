@@ -1,3 +1,15 @@
+const String kRelationEmployer = 'کارفرما';
+const String kRelationVendor = 'فروشنده / تأمین‌کننده';
+const String kRelationContractor = 'همکار / پیمانکار';
+const String kRelationOther = 'سایر';
+
+const List<String> kRelationTypes = [
+  kRelationEmployer,
+  kRelationVendor,
+  kRelationContractor,
+  kRelationOther,
+];
+
 class ClientModel {
   final int? id;
   final String name;
@@ -5,6 +17,7 @@ class ClientModel {
   final String? nationalId;
   final String? address;
   final String? notes;
+  final String relationType; // نوع رابطه: کارفرما، فروشنده، همکار، سایر
   final String createdAt; // تاریخ شمسی رشته‌ای yyyy/mm/dd
 
   ClientModel({
@@ -14,6 +27,7 @@ class ClientModel {
     this.nationalId,
     this.address,
     this.notes,
+    this.relationType = kRelationEmployer,
     required this.createdAt,
   });
 
@@ -25,6 +39,7 @@ class ClientModel {
       'nationalId': nationalId,
       'address': address,
       'notes': notes,
+      'relationType': relationType,
       'createdAt': createdAt,
     };
   }
@@ -37,6 +52,7 @@ class ClientModel {
       nationalId: map['nationalId'] as String?,
       address: map['address'] as String?,
       notes: map['notes'] as String?,
+      relationType: (map['relationType'] as String?) ?? kRelationEmployer,
       createdAt: map['createdAt'] as String,
     );
   }
@@ -48,6 +64,7 @@ class ClientModel {
     String? nationalId,
     String? address,
     String? notes,
+    String? relationType,
     String? createdAt,
   }) {
     return ClientModel(
@@ -57,6 +74,7 @@ class ClientModel {
       nationalId: nationalId ?? this.nationalId,
       address: address ?? this.address,
       notes: notes ?? this.notes,
+      relationType: relationType ?? this.relationType,
       createdAt: createdAt ?? this.createdAt,
     );
   }

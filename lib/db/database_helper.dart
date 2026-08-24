@@ -23,7 +23,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v4.db');
+    final path = join(dbPath, 'daftaryar_v5.db');
     return openDatabase(
       path,
       version: 1,
@@ -45,6 +45,7 @@ class DatabaseHelper {
         nationalId TEXT,
         address TEXT,
         notes TEXT,
+        relationType TEXT NOT NULL DEFAULT 'کارفرما',
         createdAt TEXT NOT NULL
       )
     ''');
@@ -95,9 +96,11 @@ class DatabaseHelper {
         credit REAL NOT NULL DEFAULT 0,
         description TEXT,
         projectId INTEGER,
+        clientId INTEGER,
         FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE,
         FOREIGN KEY (accountId) REFERENCES accounts (id),
-        FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE SET NULL
+        FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE SET NULL,
+        FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE SET NULL
       )
     ''');
 
@@ -441,6 +444,56 @@ class DatabaseHelper {
       'received': (receivedResult.first['total'] as num).toDouble(),
       'spent': (spentResult.first['total'] as num).toDouble(),
     };
+  }
+
+  /// دریافتی/پرداختی یک شخص — هم از راه پروژه‌های او، هم از سندهایی که
+  /// مستقیم (بدون پروژه) به او برچسب خورده‌اند
+  Future<Map<String, double>> clientFinancials(int clientId) async {
+    final db = await database;
+    final receivedResult = await db.rawQuery('''
+      SELECT COALESCE(SUM(l.credit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE a.type = ? AND (l.clientId = ? OR l.projectId IN (SELECT id FROM projects WHERE clientId = ?))
+    ''', [kAccountIncome, clientId, clientId]);
+    final spentResult = await db.rawQuery('''
+      SELECT COALESCE(SUM(l.debit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE a.type = ? AND (l.clientId = ? OR l.projectId IN (SELECT id FROM projects WHERE clientId = ?))
+    ''', [kAccountExpense, clientId, clientId]);
+    return {
+      'received': (receivedResult.first['total'] as num).toDouble(),
+      'spent': (spentResult.first['total'] as num).toDouble(),
+    };
+  }
+
+  /// اسناد ثبت‌شده مستقیم برای یک شخص (بدون واسطه پروژه)
+  Future<List<JournalEntryModel>> getDirectClientEntries(int clientId) async {
+    final db = await database;
+    final entryMaps = await db.rawQuery('''
+      SELECT DISTINCT e.* FROM journal_entries e
+      JOIN journal_lines l ON l.entryId = e.id
+      WHERE l.clientId = ?
+      ORDER BY e.date DESC, e.id DESC
+    ''', [clientId]);
+    final entries = <JournalEntryModel>[];
+    for (final em in entryMaps) {
+      final lineMaps = await db.query('journal_lines',
+          where: 'entryId = ?', whereArgs: [em['id']], orderBy: 'id ASC');
+      final lines = lineMaps.map((m) => JournalLineModel.fromMap(m)).toList();
+      entries.add(JournalEntryModel.fromMap(em, lines: lines));
+    }
+    return entries;
+  }
+
+  /// خلاصه دریافتی/پرداختی همه اشخاص، برای گزارش «مطالبات و بدهی‌ها»
+  Future<List<Map<String, dynamic>>> allClientsFinancialSummary() async {
+    final clients = await getClients();
+    final result = <Map<String, dynamic>>[];
+    for (final c in clients) {
+      final fin = await clientFinancials(c.id!);
+      result.add({'client': c, 'received': fin['received']!, 'spent': fin['spent']!});
+    }
+    return result;
   }
 
   /// خلاصه داشبورد

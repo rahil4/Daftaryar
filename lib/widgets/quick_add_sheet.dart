@@ -11,6 +11,7 @@ import '../screens/journal/journal_form_screen.dart';
 Future<void> showQuickAddSheet(
   BuildContext context, {
   int? presetProjectId,
+  int? presetClientId,
   VoidCallback? onDone,
 }) {
   return showModalBottomSheet(
@@ -31,7 +32,8 @@ Future<void> showQuickAddSheet(
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => QuickReceiptScreen(presetProjectId: presetProjectId)),
+                    builder: (_) => QuickReceiptScreen(
+                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
               );
               if (result == true) onDone?.call();
             },
@@ -45,7 +47,8 @@ Future<void> showQuickAddSheet(
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => QuickExpenseScreen(presetProjectId: presetProjectId)),
+                    builder: (_) => QuickExpenseScreen(
+                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
               );
               if (result == true) onDone?.call();
             },
@@ -59,7 +62,8 @@ Future<void> showQuickAddSheet(
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => JournalFormScreen(presetProjectId: presetProjectId)),
+                    builder: (_) => JournalFormScreen(
+                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
               );
               if (result == true) onDone?.call();
             },

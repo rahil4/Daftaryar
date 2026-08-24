@@ -6,6 +6,7 @@ class JournalLineModel {
   final double credit;
   final String? description;
   final int? projectId;
+  final int? clientId; // برچسب شخص، مستقل از پروژه (مثلاً برای فروشنده بدون پروژه)
 
   JournalLineModel({
     this.id,
@@ -15,6 +16,7 @@ class JournalLineModel {
     this.credit = 0,
     this.description,
     this.projectId,
+    this.clientId,
   });
 
   Map<String, dynamic> toMap() {
@@ -26,6 +28,7 @@ class JournalLineModel {
       'credit': credit,
       'description': description,
       'projectId': projectId,
+      'clientId': clientId,
     };
   }
 
@@ -38,6 +41,7 @@ class JournalLineModel {
       credit: (map['credit'] as num).toDouble(),
       description: map['description'] as String?,
       projectId: map['projectId'] as int?,
+      clientId: map['clientId'] as int?,
     );
   }
 }

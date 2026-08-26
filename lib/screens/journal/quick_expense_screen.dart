@@ -88,7 +88,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_cashAccountId == null || _expenseAccountId == null) return;
     setState(() => _saving = true);
-    final amount = parsePersianAmount(_amount.text) ?? 0;
+    final amount = (parsePersianAmount(_amount.text) ?? 0).round();
     final entry = JournalEntryModel(
       date: _date,
       description: _description.text.trim().isEmpty ? 'پرداخت هزینه' : _description.text.trim(),

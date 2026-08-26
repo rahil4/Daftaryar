@@ -114,8 +114,8 @@ class BackupService {
             originalClientId != null ? (clientIdMap[originalClientId] ?? originalClientId) : null;
         return JournalLineModel(
           accountId: mappedAccountId,
-          debit: (lm['debit'] as num).toDouble(),
-          credit: (lm['credit'] as num).toDouble(),
+          debit: (lm['debit'] as num).round(),
+          credit: (lm['credit'] as num).round(),
           description: lm['description'] as String?,
           projectId: mappedProjectId,
           clientId: mappedClientId,

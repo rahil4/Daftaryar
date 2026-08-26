@@ -76,17 +76,17 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
     setState(() => _lines.removeAt(index));
   }
 
-  double get _totalDebit => _lines
+  int get _totalDebit => _lines
       .where((l) => l.side == 'debit')
-      .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
+      .fold<int>(0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0).round());
 
-  double get _totalCredit => _lines
+  int get _totalCredit => _lines
       .where((l) => l.side == 'credit')
-      .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
+      .fold<int>(0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0).round());
 
   Future<void> _save() async {
     final validLines = _lines.where((l) {
-      final amount = parsePersianAmount(l.amount.text) ?? 0;
+      final amount = (parsePersianAmount(l.amount.text) ?? 0).round();
       return l.accountId != null && amount > 0;
     }).toList();
 
@@ -98,12 +98,12 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
 
     final totalDebit = validLines
         .where((l) => l.side == 'debit')
-        .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
+        .fold<int>(0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0).round());
     final totalCredit = validLines
         .where((l) => l.side == 'credit')
-        .fold(0.0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0));
+        .fold<int>(0, (s, l) => s + (parsePersianAmount(l.amount.text) ?? 0).round());
 
-    if ((totalDebit - totalCredit).abs() > 0.01) {
+    if (totalDebit != totalCredit) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('سند متوازن نیست؛ جمع بدهکار باید با جمع بستانکار برابر باشد')));
       return;
@@ -118,8 +118,8 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
       lines: validLines
           .map((l) => JournalLineModel(
                 accountId: l.accountId!,
-                debit: l.side == 'debit' ? (parsePersianAmount(l.amount.text) ?? 0) : 0,
-                credit: l.side == 'credit' ? (parsePersianAmount(l.amount.text) ?? 0) : 0,
+                debit: l.side == 'debit' ? (parsePersianAmount(l.amount.text) ?? 0).round() : 0,
+                credit: l.side == 'credit' ? (parsePersianAmount(l.amount.text) ?? 0).round() : 0,
                 description: l.description.text.trim().isEmpty ? null : l.description.text.trim(),
                 projectId: l.projectId,
                 clientId: l.clientId,
@@ -140,7 +140,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final balanced = (_totalDebit - _totalCredit).abs() < 0.01 && _totalDebit > 0;
+    final balanced = _totalDebit == _totalCredit && _totalDebit > 0;
     return Scaffold(
       appBar: AppBar(title: const Text('سند حسابداری جدید')),
       body: _loading

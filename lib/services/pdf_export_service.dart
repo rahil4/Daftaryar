@@ -115,8 +115,8 @@ class PdfExportService {
     required List<Map<String, dynamic>> rows, // {name, type, debit, credit}
   }) async {
     await _loadFonts();
-    final totalDebit = rows.fold<double>(0, (s, r) => s + (r['debit'] as double));
-    final totalCredit = rows.fold<double>(0, (s, r) => s + (r['credit'] as double));
+    final totalDebit = rows.fold<double>(0, (s, r) => s + (r['debit'] as num).toDouble());
+    final totalCredit = rows.fold<double>(0, (s, r) => s + (r['credit'] as num).toDouble());
 
     final doc = pw.Document();
     doc.addPage(
@@ -165,7 +165,7 @@ class PdfExportService {
                         pw.Padding(
                           padding: const pw.EdgeInsets.all(6),
                           child: pw.Text(
-                            (r['debit'] as double) != 0 ? formatMoney(r['debit'] as double, withSuffix: false) : '—',
+                            (r['debit'] as num) != 0 ? formatMoney((r['debit'] as num).toDouble(), withSuffix: false) : '—',
                             style: pw.TextStyle(font: _regularFont, fontSize: 10),
                             textAlign: pw.TextAlign.center,
                           ),
@@ -173,7 +173,7 @@ class PdfExportService {
                         pw.Padding(
                           padding: const pw.EdgeInsets.all(6),
                           child: pw.Text(
-                            (r['credit'] as double) != 0 ? formatMoney(r['credit'] as double, withSuffix: false) : '—',
+                            (r['credit'] as num) != 0 ? formatMoney((r['credit'] as num).toDouble(), withSuffix: false) : '—',
                             style: pw.TextStyle(font: _regularFont, fontSize: 10),
                             textAlign: pw.TextAlign.center,
                           ),
@@ -201,9 +201,9 @@ class PdfExportService {
     required List<Map<String, dynamic>> transactions, // {date, description, type, amount}
   }) async {
     await _loadFonts();
-    final totalAgreed = projectRows.fold<double>(0, (s, r) => s + (r['agreedAmount'] as double));
-    final totalReceived = projectRows.fold<double>(0, (s, r) => s + (r['received'] as double));
-    final totalRemaining = projectRows.fold<double>(0, (s, r) => s + (r['remaining'] as double));
+    final totalAgreed = projectRows.fold<double>(0, (s, r) => s + (r['agreedAmount'] as num).toDouble());
+    final totalReceived = projectRows.fold<double>(0, (s, r) => s + (r['received'] as num).toDouble());
+    final totalRemaining = projectRows.fold<double>(0, (s, r) => s + (r['remaining'] as num).toDouble());
 
     final doc = pw.Document();
     doc.addPage(
@@ -244,9 +244,9 @@ class PdfExportService {
                     for (final r in projectRows)
                       pw.TableRow(children: [
                         _cell(r['title'] as String),
-                        _cell(formatMoney(r['agreedAmount'] as double, withSuffix: false)),
-                        _cell(formatMoney(r['received'] as double, withSuffix: false)),
-                        _cell(formatMoney(r['remaining'] as double, withSuffix: false)),
+                        _cell(formatMoney((r['agreedAmount'] as num).toDouble(), withSuffix: false)),
+                        _cell(formatMoney((r['received'] as num).toDouble(), withSuffix: false)),
+                        _cell(formatMoney((r['remaining'] as num).toDouble(), withSuffix: false)),
                       ]),
                   ],
                 ),
@@ -280,7 +280,7 @@ class PdfExportService {
                           _cell(formatJalaliLong(t['date'] as String)),
                           _cell(t['type'] as String),
                           _cell((t['description'] as String?) ?? '—'),
-                          _cell(formatMoney(t['amount'] as double, withSuffix: false)),
+                          _cell(formatMoney((t['amount'] as num).toDouble(), withSuffix: false)),
                         ]),
                     ],
                   ),

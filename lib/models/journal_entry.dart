@@ -1,9 +1,12 @@
+/// مبالغ به تومان و به‌صورت عدد صحیح ذخیره می‌شوند (نه اعشاری)، چون در این
+/// سیستم واحد پول همیشه تومانِ صحیح است؛ این کار هرگونه خطای محاسباتی
+/// اعشاری (floating point) را در جمع‌بندی سند حسابداری کاملاً حذف می‌کند.
 class JournalLineModel {
   final int? id;
   final int? entryId;
   final int accountId;
-  final double debit;
-  final double credit;
+  final int debit;
+  final int credit;
   final String? description;
   final int? projectId;
   final int? clientId; // برچسب شخص، مستقل از پروژه (مثلاً برای فروشنده بدون پروژه)
@@ -37,8 +40,8 @@ class JournalLineModel {
       id: map['id'] as int?,
       entryId: map['entryId'] as int?,
       accountId: map['accountId'] as int,
-      debit: (map['debit'] as num).toDouble(),
-      credit: (map['credit'] as num).toDouble(),
+      debit: (map['debit'] as num).round(),
+      credit: (map['credit'] as num).round(),
       description: map['description'] as String?,
       projectId: map['projectId'] as int?,
       clientId: map['clientId'] as int?,
@@ -61,9 +64,12 @@ class JournalEntryModel {
     required this.lines,
   });
 
-  double get totalDebit => lines.fold(0, (s, l) => s + l.debit);
-  double get totalCredit => lines.fold(0, (s, l) => s + l.credit);
-  bool get isBalanced => (totalDebit - totalCredit).abs() < 0.01 && totalDebit > 0;
+  int get totalDebit => lines.fold<int>(0, (s, l) => s + l.debit);
+  int get totalCredit => lines.fold<int>(0, (s, l) => s + l.credit);
+
+  /// توازن دقیق و بدون تلورانس اعشاری - چون مقادیر عدد صحیح‌اند، جمع دو طرف
+  /// یا دقیقاً برابرند یا نیستند
+  bool get isBalanced => totalDebit == totalCredit && totalDebit > 0;
 
   Map<String, dynamic> toMap() {
     return {

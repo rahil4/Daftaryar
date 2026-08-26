@@ -66,7 +66,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
   Future<void> _confirm() async {
     if (_cashAccountId == null || _counterAccountId == null) return;
     setState(() => _saving = true);
-    final amount = parsePersianAmount(_amount.text) ?? 0;
+    final amount = (parsePersianAmount(_amount.text) ?? 0).round();
 
     final entry = JournalEntryModel(
       date: _date,

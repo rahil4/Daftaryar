@@ -88,7 +88,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (_cashAccountId == null || _incomeAccountId == null) return;
     setState(() => _saving = true);
-    final amount = parsePersianAmount(_amount.text) ?? 0;
+    final amount = (parsePersianAmount(_amount.text) ?? 0).round();
     final entry = JournalEntryModel(
       date: _date,
       description: _description.text.trim().isEmpty ? 'دریافت وجه' : _description.text.trim(),

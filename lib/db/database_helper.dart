@@ -23,7 +23,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v5.db');
+    final path = join(dbPath, 'daftaryar_v6.db');
     return openDatabase(
       path,
       version: 1,
@@ -92,17 +92,23 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entryId INTEGER NOT NULL,
         accountId INTEGER NOT NULL,
-        debit REAL NOT NULL DEFAULT 0,
-        credit REAL NOT NULL DEFAULT 0,
+        debit INTEGER NOT NULL DEFAULT 0,
+        credit INTEGER NOT NULL DEFAULT 0,
         description TEXT,
         projectId INTEGER,
         clientId INTEGER,
         FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE,
         FOREIGN KEY (accountId) REFERENCES accounts (id),
         FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE SET NULL,
-        FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE SET NULL
+        FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE SET NULL,
+        CHECK (debit >= 0 AND credit >= 0),
+        CHECK (NOT (debit > 0 AND credit > 0)),
+        CHECK (NOT (debit = 0 AND credit = 0))
       )
     ''');
+
+    await db.execute('CREATE INDEX idx_journal_lines_entryId ON journal_lines (entryId)');
+    await db.execute('CREATE INDEX idx_journal_lines_accountId ON journal_lines (accountId)');
 
     await db.execute('''
       CREATE TABLE app_settings (
@@ -286,11 +292,59 @@ class DatabaseHelper {
   }
 
   // ---------------- Journal (اسناد حسابداری) ----------------
+  /// نقطه مرکزی و تنها مسیر مجاز برای ثبت سند حسابداری در کل برنامه.
+  /// تمام قوانین پایه Double-Entry اینجا enforce می‌شوند تا هیچ مسیر دیگری
+  /// (فرم سریع، سند دستی، بازیابی پشتیبان، پیش‌نویس پیامکی) نتواند آن‌ها را
+  /// دور بزند.
   Future<int> insertJournalEntry(JournalEntryModel entry) async {
+    // قانون ۴: حداقل دو سطر
+    if (entry.lines.length < 2) {
+      throw Exception('سند حسابداری باید حداقل دو سطر داشته باشد.');
+    }
+
+    // قانون ۲ و ۳: هر سطر دقیقاً یک طرف داشته باشد و منفی نباشد
+    for (final line in entry.lines) {
+      if (line.debit < 0 || line.credit < 0) {
+        throw Exception('مبلغ بدهکار یا بستانکار نمی‌تواند منفی باشد.');
+      }
+      final hasDebit = line.debit > 0;
+      final hasCredit = line.credit > 0;
+      if (hasDebit && hasCredit) {
+        throw Exception('هر سطر سند باید فقط یک طرف (بدهکار یا بستانکار) داشته باشد، نه هر دو.');
+      }
+      if (!hasDebit && !hasCredit) {
+        throw Exception('هر سطر سند باید مبلغ بدهکار یا بستانکار معتبر (بزرگ‌تر از صفر) داشته باشد.');
+      }
+    }
+
+    // قانون ۱ و ۵: توازن کل سند و رد سند صفر
     if (!entry.isBalanced) {
+      if (entry.totalDebit == 0 && entry.totalCredit == 0) {
+        throw Exception('سند حسابداری نمی‌تواند صفر باشد.');
+      }
       throw Exception('سند حسابداری باید متوازن باشد (جمع بدهکار = جمع بستانکار).');
     }
+
     final db = await database;
+
+    // قانون ۶: هر حساب باید معتبر و «قابل ثبت» باشد (بدون زیرحساب)
+    for (final line in entry.lines) {
+      final accountRows =
+          await db.query('accounts', where: 'id = ?', whereArgs: [line.accountId]);
+      if (accountRows.isEmpty) {
+        throw Exception('حساب انتخاب‌شده معتبر نیست.');
+      }
+      final childRows = await db.query('accounts',
+          where: 'parentId = ?', whereArgs: [line.accountId], limit: 1);
+      if (childRows.isNotEmpty) {
+        throw Exception(
+            'امکان ثبت سند مستقیم روی حساب «${accountRows.first['name']}» وجود ندارد، چون این حساب دارای زیرحساب است. لطفاً یک زیرحساب مشخص را انتخاب کنید.');
+      }
+    }
+
+    // ثبت اتمیک: هدر سند و همه سطرهایش در یک تراکنش دیتابیس - در صورت بروز
+    // هر خطا (مثلاً نقض یکی از CHECK constraint های سطح دیتابیس)، کل عملیات
+    // rollback می‌شود و نه هدر ناقص باقی می‌ماند و نه سطر یتیم.
     return db.transaction((txn) async {
       final entryId = await txn.insert('journal_entries', entry.toMap()..remove('id'));
       for (final line in entry.lines) {

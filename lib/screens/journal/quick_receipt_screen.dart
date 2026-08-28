@@ -48,10 +48,8 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getAccounts(type: kAccountAsset);
-    final incomeAll = await _db.getAccounts(type: kAccountIncome);
-    // فقط حساب‌های برگ (بدون زیرحساب) برای انتخاب مناسب‌اند، هماهنگ با فرم ثبت هزینه
-    final income = incomeAll.where((a) => !incomeAll.any((x) => x.parentId == a.id)).toList();
+    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final income = await _db.getPostableAccounts(type: kAccountIncome);
     final projects = await _db.getProjects();
     final clients = await _db.getClients();
 

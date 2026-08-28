@@ -284,6 +284,15 @@ class DatabaseHelper {
     return maps.map((m) => AccountModel.fromMap(m)).toList();
   }
 
+  /// حساب‌های «قابل ثبت» (بدون زیرحساب) — تنها این‌ها مطابق قانون مرکزی
+  /// insertJournalEntry اجازه استفاده مستقیم در سند حسابداری را دارند.
+  /// همه فرم‌های انتخاب حساب برای ثبت سند باید از همین متد استفاده کنند،
+  /// نه از getAccounts خام، تا حساب‌های والد/گروه هرگز پیشنهاد نشوند.
+  Future<List<AccountModel>> getPostableAccounts({String? type}) async {
+    final all = await getAccounts(type: type);
+    return all.where((a) => !all.any((x) => x.parentId == a.id)).toList();
+  }
+
   Future<AccountModel?> getAccount(int id) async {
     final db = await database;
     final maps = await db.query('accounts', where: 'id = ?', whereArgs: [id]);

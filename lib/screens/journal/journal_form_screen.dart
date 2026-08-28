@@ -55,7 +55,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
   }
 
   Future<void> _load() async {
-    final accounts = await _db.getAccounts();
+    final accounts = await _db.getPostableAccounts();
     final projects = await _db.getProjects();
     final clients = await _db.getClients();
     setState(() {

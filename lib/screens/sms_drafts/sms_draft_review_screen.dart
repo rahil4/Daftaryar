@@ -46,10 +46,9 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getAccounts(type: kAccountAsset);
-    final counterAll = await _db.getAccounts(
+    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final leafCounter = await _db.getPostableAccounts(
         type: _type == 'دریافت' ? kAccountIncome : kAccountExpense);
-    final leafCounter = counterAll.where((a) => !counterAll.any((x) => x.parentId == a.id)).toList();
     final projects = await _db.getProjects();
     final clients = await _db.getClients();
     setState(() {

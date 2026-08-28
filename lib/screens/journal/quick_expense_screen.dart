@@ -48,11 +48,8 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getAccounts(type: kAccountAsset);
-    final expenseAll = await _db.getAccounts(type: kAccountExpense);
-    // فقط حساب‌های برگ (بدون زیرحساب) برای انتخاب مناسب‌اند
-    final leafExpenses =
-        expenseAll.where((a) => !expenseAll.any((x) => x.parentId == a.id)).toList();
+    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final leafExpenses = await _db.getPostableAccounts(type: kAccountExpense);
     final projects = await _db.getProjects();
     final clients = await _db.getClients();
 

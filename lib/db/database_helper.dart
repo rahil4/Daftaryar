@@ -846,6 +846,13 @@ class DatabaseHelper {
         debitNormal: false);
   }
 
+  /// مانده واقعی حساب «درآمد پروژه‌ها» مختص یک پروژه - برای Reconciliation
+  /// (مقایسه با مقدار محاسبه‌شده از finalAmount + FINAL_ADJUSTMENTها)
+  Future<double> projectRevenueLedgerBalance(int projectId) async {
+    return _projectControlAccountBalance(projectId, await getProjectRevenueAccount(),
+        debitNormal: false);
+  }
+
   /// آیا این حساب یا یکی از والدینش (تا هر عمقی) صندوق/بانک است؟ با این
   /// پیمایش، زیرحساب‌های سفارشی بانک (مثل «بانک ملت») هم بدون نیاز به
   /// تگ‌گذاری صریح جداگانه، به‌درستی نقدی/بانکی شناسایی می‌شوند.
@@ -898,6 +905,38 @@ class DatabaseHelper {
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
       FROM journal_lines WHERE accountId = ? AND counterpartyId = ?
     ''', [apAccount.id, counterpartyId]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return c - d;
+  }
+
+  /// مانده پیش‌دریافت یک طرف حساب در کل (نه فقط یک پروژه خاص) - شامل هر
+  /// سطری که مستقیم با این طرف حساب مرتبط باشد، صرف‌نظر از این‌که به پروژه
+  /// خاصی تگ خورده باشد یا نه.
+  Future<double> counterpartyAdvanceBalance(int counterpartyId) async {
+    final account = await getCustomerAdvanceAccount();
+    if (account == null) return 0;
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId = ? AND counterpartyId = ?
+    ''', [account.id, counterpartyId]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return c - d;
+  }
+
+  /// مانده بستانکاری مشتری (مازاد دریافتی) یک طرف حساب در کل - شامل هر
+  /// سطری که مستقیم با این طرف حساب مرتبط باشد، حتی اگر به پروژه خاصی
+  /// تگ نخورده باشد (بر خلاف نسخه سطح-پروژه که فقط projectId فیلتر می‌کند).
+  Future<double> counterpartyCustomerCreditBalance(int counterpartyId) async {
+    final account = await getCustomerCreditAccount();
+    if (account == null) return 0;
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId = ? AND counterpartyId = ?
+    ''', [account.id, counterpartyId]);
     final d = (result.first['d'] as num).toDouble();
     final c = (result.first['c'] as num).toDouble();
     return c - d;
@@ -1634,6 +1673,22 @@ class DatabaseHelper {
 
   /// خلاصه کامل مالی پروژه - همه اعداد مستقیم از Ledger و رویدادهای قیمتی
   /// محاسبه می‌شوند، هیچ‌کدام cache نشده‌اند.
+  /// هزینه مستقیم پروژه: مجموع سطرهای نوع هزینه که به همین پروژه تگ خورده‌اند،
+  /// به‌جز حساب «تخفیف خدمات» که هرچند برای سادگی نوعش هزینه است، مفهوماً
+  /// کاهنده درآمد (Contra-Revenue) است، نه یک هزینه واقعی پروژه. این متد
+  /// عمومی است تا هم projectFinancialSummary و هم FinancialMetricsService از
+  /// همین یک منبع استفاده کنند، نه دو فرمول موازی.
+  Future<double> projectDirectCost(int projectId) async {
+    final db = await database;
+    final discountAccount = await getServiceDiscountAccount();
+    final directCostResult = await db.rawQuery("""
+      SELECT COALESCE(SUM(l.debit),0) - COALESCE(SUM(l.credit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE l.projectId = ? AND a.type = ? AND (a.id != ? OR ? IS NULL)
+    """, [projectId, kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id]);
+    return (directCostResult.first['total'] as num).toDouble();
+  }
+
   Future<Map<String, dynamic>> projectFinancialSummary(int projectId) async {
     final project = await getProject(projectId);
     if (project == null) throw Exception('پروژه یافت نشد.');
@@ -1652,17 +1707,7 @@ class DatabaseHelper {
     final receivableBalance = await projectReceivableBalance(projectId);
     final customerCreditBalance = await projectCustomerCreditBalance(projectId);
 
-    // هزینه مستقیم پروژه: مجموع سطرهای نوع هزینه که به همین پروژه تگ خورده‌اند،
-    // به‌جز حساب «تخفیف خدمات» که هرچند برای سادگی نوعش هزینه است، مفهوماً
-    // کاهنده درآمد (Contra-Revenue) است، نه یک هزینه واقعی پروژه.
-    final db = await database;
-    final discountAccount = await getServiceDiscountAccount();
-    final directCostResult = await db.rawQuery("""
-      SELECT COALESCE(SUM(l.debit),0) - COALESCE(SUM(l.credit),0) as total
-      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE l.projectId = ? AND a.type = ? AND (a.id != ? OR ? IS NULL)
-    """, [projectId, kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id]);
-    final directCost = (directCostResult.first['total'] as num).toDouble();
+    final directCost = await projectDirectCost(projectId);
 
     final contribution = netRevenue != null ? netRevenue - directCost : null;
     final margin = (contribution != null && netRevenue != null && netRevenue > 0)
@@ -1686,6 +1731,203 @@ class DatabaseHelper {
       'projectContribution': contribution,
       'projectMargin': margin,
       'isSettled': settled,
+    };
+  }
+
+  // ---------------- Financial Metrics Layer - توابع کمکی سطح دفتر ----------------
+  // این توابع صرفاً Ledger موجود را با فیلتر بازه تاریخ جمع می‌زنند؛ منطق
+  // موازی یا مانده جدیدی نمی‌سازند - فقط برای مصرف توسط FinancialMetricsService.
+
+  /// درآمد ناخالص دفتر (حساب درآمد پروژه‌ها) در بازه دلخواه
+  Future<double> officeGrossRevenue({String? fromDate, String? toDate}) async {
+    final account = await getProjectRevenueAccount();
+    if (account == null) return 0;
+    final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
+    return bal['balance']!;
+  }
+
+  /// مجموع تخفیف در بازه دلخواه
+  Future<double> officeDiscountTotal({String? fromDate, String? toDate}) async {
+    final account = await getServiceDiscountAccount();
+    if (account == null) return 0;
+    final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
+    return bal['balance']!;
+  }
+
+  /// مجموع سربار عمومی پروژه‌ها در بازه دلخواه
+  Future<double> officeOverheadTotal({String? fromDate, String? toDate}) async {
+    final account = await getProjectOverheadAccount();
+    if (account == null) return 0;
+    final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
+    return bal['balance']!;
+  }
+
+  /// مجموع هزینه مستقیم همه پروژه‌ها (نه یک پروژه خاص) در بازه دلخواه -
+  /// همان قاعده projectDirectCost: نوع هزینه + projectId غیرخالی + بدون تخفیف
+  Future<double> officeDirectCostTotal({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final discountAccount = await getServiceDiscountAccount();
+    String where = 'a.type = ? AND l.projectId IS NOT NULL AND (a.id != ? OR ? IS NULL)';
+    List<Object?> args = [kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id];
+    if (fromDate != null) {
+      where += ' AND l.entryId IN (SELECT id FROM journal_entries WHERE date >= ?)';
+      args.add(fromDate);
+    }
+    if (toDate != null) {
+      where += ' AND l.entryId IN (SELECT id FROM journal_entries WHERE date <= ?)';
+      args.add(toDate);
+    }
+    final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(l.debit),0)-COALESCE(SUM(l.credit),0) as total FROM journal_lines l JOIN accounts a ON a.id=l.accountId WHERE $where',
+        args);
+    return (result.first['total'] as num).toDouble();
+  }
+
+  /// هزینه‌های دفتر: طبق قرارداد صریح این پروژه (چون systemKey اختصاصی
+  /// «office_expense» در معماری فعلی وجود ندارد) — هر سطر نوع «هزینه» که
+  /// projectId ندارد و به حساب سربار پروژه‌ها یا تخفیف هم ثبت نشده باشد.
+  /// یعنی هزینه‌های عمومی دفتر (اجاره، حقوق، آب و برق، اداری) که برخلاف
+  /// Direct Cost به پروژه خاصی وصل نیستند و برخلاف Overhead هم برای
+  /// «پیشبرد پروژه‌ها» به‌طور خاص علامت‌گذاری نشده‌اند.
+  Future<double> officeExpenseTotal({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final overheadAccount = await getProjectOverheadAccount();
+    final discountAccount = await getServiceDiscountAccount();
+    String where =
+        'a.type = ? AND l.projectId IS NULL AND (a.id != ? OR ? IS NULL) AND (a.id != ? OR ? IS NULL)';
+    List<Object?> args = [
+      kAccountExpense,
+      overheadAccount?.id ?? -1,
+      overheadAccount?.id,
+      discountAccount?.id ?? -1,
+      discountAccount?.id,
+    ];
+    if (fromDate != null) {
+      where += ' AND l.entryId IN (SELECT id FROM journal_entries WHERE date >= ?)';
+      args.add(fromDate);
+    }
+    if (toDate != null) {
+      where += ' AND l.entryId IN (SELECT id FROM journal_entries WHERE date <= ?)';
+      args.add(toDate);
+    }
+    final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(l.debit),0)-COALESCE(SUM(l.credit),0) as total FROM journal_lines l JOIN accounts a ON a.id=l.accountId WHERE $where',
+        args);
+    return (result.first['total'] as num).toDouble();
+  }
+
+  /// موجودی نقد/بانک تا پایان یک تاریخ مشخص (شامل همان روز) - برای Closing Cash
+  Future<double> cashBalanceThrough({String? throughDate}) async {
+    final cashAccounts = await getCashAccounts();
+    double total = 0;
+    for (final acc in cashAccounts) {
+      final bal = await accountBalance(acc.id!, toDate: throughDate);
+      total += bal['balance']!;
+    }
+    return total;
+  }
+
+  /// موجودی نقد/بانک دقیقاً پیش از یک تاریخ مشخص (بدون احتساب همان روز) -
+  /// برای Opening Cash یک بازه
+  Future<double> cashBalanceBefore(String date) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return 0;
+    final ids = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId IN ($placeholders)
+        AND entryId IN (SELECT id FROM journal_entries WHERE date < ?)
+    ''', [...ids, date]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return d - c;
+  }
+
+  /// طبقه‌بندی حرکت نقدی یک بازه به ۶ دسته Cash Flow. محدودیت مستند: فقط
+  /// اسناد دقیقاً دوسطری قابل طبقه‌بندی دقیق‌اند (که تمام مسیرهای خودکار
+  /// برنامه چنین‌اند)؛ سندهای دستی چندسطری در «سایر» قرار می‌گیرند.
+  Future<Map<String, double>> classifyCashFlow({String? fromDate, String? toDate}) async {
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) {
+      return {
+        'customerReceipts': 0,
+        'otherCashInflows': 0,
+        'projectPayments': 0,
+        'projectOverheadPayments': 0,
+        'officePayments': 0,
+        'otherCashOutflows': 0,
+      };
+    }
+    final db = await database;
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(cashIds.length, '?').join(',');
+
+    String dateWhere = '';
+    List<Object?> dateArgs = [];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT cl.debit as cashDebit, cl.credit as cashCredit, cl.projectId as projectId,
+             cl.counterpartyId as counterpartyId, otherAcc.type as otherType,
+             otherAcc.systemKey as otherSystemKey
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      JOIN accounts otherAcc ON otherAcc.id = other.accountId
+      WHERE cl.accountId IN ($placeholders)
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $dateWhere
+    ''', [...cashIds, ...dateArgs]);
+
+    double customerReceipts = 0, otherIn = 0, projectPay = 0, overheadPay = 0, officePay = 0, otherOut = 0;
+    for (final row in rows) {
+      final debit = (row['cashDebit'] as num).toDouble();
+      final credit = (row['cashCredit'] as num).toDouble();
+      final projectId = row['projectId'] as int?;
+      final counterpartyId = row['counterpartyId'] as int?;
+      final otherType = row['otherType'] as String?;
+      final otherSystemKey = row['otherSystemKey'] as String?;
+
+      if (debit > 0) {
+        if (counterpartyId != null) {
+          customerReceipts += debit;
+        } else {
+          otherIn += debit;
+        }
+      }
+      if (credit > 0) {
+        if (otherSystemKey == kSystemKeyProjectOverhead) {
+          overheadPay += credit;
+        } else if (projectId != null &&
+            otherType == kAccountExpense &&
+            otherSystemKey != kSystemKeyServiceDiscount) {
+          projectPay += credit;
+        } else if (otherType == kAccountExpense &&
+            projectId == null &&
+            otherSystemKey != kSystemKeyProjectOverhead &&
+            otherSystemKey != kSystemKeyServiceDiscount) {
+          officePay += credit;
+        } else {
+          otherOut += credit;
+        }
+      }
+    }
+    return {
+      'customerReceipts': customerReceipts,
+      'otherCashInflows': otherIn,
+      'projectPayments': projectPay,
+      'projectOverheadPayments': overheadPay,
+      'officePayments': officePay,
+      'otherCashOutflows': otherOut,
     };
   }
 

@@ -1662,13 +1662,17 @@ class DatabaseHelper {
 
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
+  /// طبق تعریف رسمی: Settled فقط یعنی isFinalized + بدون مانده طلب/پیش‌دریافت.
+  /// Customer Credit یک بستانکاری/تعهد مستقل نسبت به مشتری است و در این
+  /// فرمول دخالت نمی‌کند - ممکن است پروژه‌ای Settled باشد ولی هنوز
+  /// Customer Credit باز داشته باشد؛ این دو مفهوم هرگز در یک Boolean ادغام
+  /// نمی‌شوند (وضعیت Credit جداگانه در ProjectFinancialReport گزارش می‌شود).
   Future<bool> isProjectSettled(int projectId) async {
     final project = await getProject(projectId);
     if (project == null || !project.isFinalized) return false;
     final advance = await projectAdvanceBalance(projectId);
     final receivable = await projectReceivableBalance(projectId);
-    final credit = await projectCustomerCreditBalance(projectId);
-    return advance == 0 && receivable == 0 && credit == 0;
+    return advance == 0 && receivable == 0;
   }
 
   /// خلاصه کامل مالی پروژه - همه اعداد مستقیم از Ledger و رویدادهای قیمتی
@@ -1921,6 +1925,33 @@ class DatabaseHelper {
         }
       }
     }
+
+    // سطرهای نقدی متعلق به اسناد غیر-دقیقاً-دوسطری (مثلاً یک سند دستی
+    // چندسطری) با Self-Join بالا قابل طبقه‌بندی دقیق نیستند؛ اما برای
+    // این‌که جمع کل شش سبد همیشه دقیقاً با تغییر موجودی واقعی (Closing-
+    // Opening) یکی باشد - نه کمتر - این سطرها حذف نمی‌شوند، بلکه کامل در
+    // سبد «سایر» قرار می‌گیرند.
+    String otherEntriesDateWhere = '';
+    List<Object?> otherEntriesDateArgs = [];
+    if (fromDate != null) {
+      otherEntriesDateWhere += ' AND je.date >= ?';
+      otherEntriesDateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      otherEntriesDateWhere += ' AND je.date <= ?';
+      otherEntriesDateArgs.add(toDate);
+    }
+    final unclassifiedRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(cl.debit),0) as d, COALESCE(SUM(cl.credit),0) as c
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      WHERE cl.accountId IN ($placeholders)
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) != 2
+        $otherEntriesDateWhere
+    ''', [...cashIds, ...otherEntriesDateArgs]);
+    otherIn += (unclassifiedRows.first['d'] as num).toDouble();
+    otherOut += (unclassifiedRows.first['c'] as num).toDouble();
+
     return {
       'customerReceipts': customerReceipts,
       'otherCashInflows': otherIn,
@@ -1928,6 +1959,262 @@ class DatabaseHelper {
       'projectOverheadPayments': overheadPay,
       'officePayments': officePay,
       'otherCashOutflows': otherOut,
+    };
+  }
+
+  // ---------------- Financial Reporting Layer - Movement & Reconciliation ----------------
+
+  /// مانده یک حساب با فیلترهای دلخواه (پروژه و/یا بازه تاریخ)؛ پایه مشترک
+  /// Movement Reportها - منطق موازی نیست، فقط تعمیم همان الگوی accountBalance.
+  Future<double> _filteredAccountBalance({
+    required int accountId,
+    required bool debitNormal,
+    int? projectId,
+    String? fromDate,
+    String? toDate,
+    bool exclusiveToDate = false,
+  }) async {
+    final db = await database;
+    String where = 'accountId = ?';
+    List<Object?> args = [accountId];
+    if (projectId != null) {
+      where += ' AND projectId = ?';
+      args.add(projectId);
+    }
+    if (fromDate != null) {
+      where += ' AND entryId IN (SELECT id FROM journal_entries WHERE date >= ?)';
+      args.add(fromDate);
+    }
+    if (toDate != null) {
+      where +=
+          ' AND entryId IN (SELECT id FROM journal_entries WHERE date ${exclusiveToDate ? '<' : '<='} ?)';
+      args.add(toDate);
+    }
+    final result = await db.rawQuery(
+        'SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c FROM journal_lines WHERE $where',
+        args);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return debitNormal ? d - c : c - d;
+  }
+
+  /// طبقه‌بندی حرکت یک حساب کنترلی (AR/Advance/CustomerCredit) در یک بازه،
+  /// با پیداکردن حساب طرف‌مقابل هر سطر (Self-Join روی entryId). محدودیت
+  /// مستند: فقط اسناد دقیقاً دوسطری قابل طبقه‌بندی دقیق‌اند (که تمام مسیرهای
+  /// خودکار برنامه چنین‌اند)؛ سطرهای اسناد دستی چندسطری در دسته «سایر»
+  /// قرار می‌گیرند، نه این‌که حدس زده شوند.
+  Future<Map<String, double>> _classifyControlAccountMovement({
+    required int accountId,
+    required bool debitNormal,
+    int? projectId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final db = await database;
+    String dateWhere = '';
+    List<Object?> dateArgs = [];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+    String projectWhere = '';
+    List<Object?> projectArgs = [];
+    if (projectId != null) {
+      projectWhere = ' AND cl.projectId = ?';
+      projectArgs.add(projectId);
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT cl.debit as d, cl.credit as c, otherAcc.systemKey as otherSystemKey
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      JOIN accounts otherAcc ON otherAcc.id = other.accountId
+      WHERE cl.accountId = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $projectWhere $dateWhere
+    ''', [accountId, ...projectArgs, ...dateArgs]);
+
+    // برای AR: افزایش (بدهکار) طرف‌مقابل Revenue => رکورد جدید طلب.
+    // کاهش (بستانکار) طرف‌مقابل Cash/Bank => وصولی واقعی.
+    // کاهش طرف‌مقابل Discount یا Revenue (اصلاح منفی) => اصلاحیه.
+    // بقیه (مثلاً انتقال پیش‌دریافت) => «سایر» تا حدس زده نشود.
+    double increase = 0, decreaseByCash = 0, decreaseByAdjustment = 0, other = 0;
+    for (final row in rows) {
+      final d = (row['d'] as num).toDouble();
+      final c = (row['c'] as num).toDouble();
+      final otherKey = row['otherSystemKey'] as String?;
+      final amount = debitNormal ? d : c; // مقداری که این حساب را افزایش می‌دهد
+      final reduceAmount = debitNormal ? c : d; // مقداری که این حساب را کاهش می‌دهد
+
+      if (amount > 0) {
+        if (otherKey == kSystemKeyProjectRevenue || otherKey == kSystemKeyCustomerAdvance) {
+          increase += amount;
+        } else {
+          other += amount;
+        }
+      }
+      if (reduceAmount > 0) {
+        if (otherKey == kSystemKeyCash || otherKey == kSystemKeyBank) {
+          decreaseByCash += reduceAmount;
+        } else if (otherKey == kSystemKeyServiceDiscount || otherKey == kSystemKeyProjectRevenue) {
+          decreaseByAdjustment += reduceAmount;
+        } else {
+          other += reduceAmount;
+        }
+      }
+    }
+    return {
+      'increase': increase,
+      'decreaseByCash': decreaseByCash,
+      'decreaseByAdjustment': decreaseByAdjustment,
+      'other': other,
+    };
+  }
+
+  /// حرکت مانده حساب دریافتنی (AR) در یک بازه - Opening/Closing مستقیماً از
+  /// Ledger؛ تفکیک increase/collections/adjustments با محدودیت مستندشده بالا.
+  Future<Map<String, double>> arMovement({String? fromDate, String? toDate, int? projectId}) async {
+    final account = await getReceivableAccount();
+    if (account == null) {
+      return {
+        'opening': 0,
+        'newReceivables': 0,
+        'collections': 0,
+        'adjustments': 0,
+        'other': 0,
+        'closing': 0
+      };
+    }
+    final opening = fromDate != null
+        ? await _filteredAccountBalance(
+            accountId: account.id!,
+            debitNormal: true,
+            projectId: projectId,
+            toDate: fromDate,
+            exclusiveToDate: true)
+        : 0.0;
+    final closing = await _filteredAccountBalance(
+        accountId: account.id!, debitNormal: true, projectId: projectId, toDate: toDate);
+    final movement = await _classifyControlAccountMovement(
+        accountId: account.id!,
+        debitNormal: true,
+        projectId: projectId,
+        fromDate: fromDate,
+        toDate: toDate);
+    return {
+      'opening': opening,
+      'newReceivables': movement['increase']!,
+      'collections': movement['decreaseByCash']!,
+      'adjustments': movement['decreaseByAdjustment']!,
+      'other': movement['other']!,
+      'closing': closing,
+    };
+  }
+
+  /// حرکت مانده پیش‌دریافت (Customer Advance) در یک بازه
+  Future<Map<String, double>> advanceMovement({String? fromDate, String? toDate, int? projectId}) async {
+    final account = await getCustomerAdvanceAccount();
+    if (account == null) {
+      return {'opening': 0, 'newAdvances': 0, 'advanceApplied': 0, 'other': 0, 'closing': 0};
+    }
+    final opening = fromDate != null
+        ? await _filteredAccountBalance(
+            accountId: account.id!,
+            debitNormal: false,
+            projectId: projectId,
+            toDate: fromDate,
+            exclusiveToDate: true)
+        : 0.0;
+    final closing = await _filteredAccountBalance(
+        accountId: account.id!, debitNormal: false, projectId: projectId, toDate: toDate);
+    // برای Advance: افزایش (بستانکار) با طرف‌مقابل Cash => پیش‌دریافت جدید.
+    // کاهش (بدهکار) با طرف‌مقابل AR => اعمال‌شده در تسویه (انتقال به AR در Finalization).
+    final db = await database;
+    String dateWhere = '';
+    List<Object?> dateArgs = [];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+    String projectWhere = '';
+    List<Object?> projectArgs = [];
+    if (projectId != null) {
+      projectWhere = ' AND cl.projectId = ?';
+      projectArgs.add(projectId);
+    }
+    final rows = await db.rawQuery('''
+      SELECT cl.debit as d, cl.credit as c, otherAcc.systemKey as otherSystemKey
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      JOIN accounts otherAcc ON otherAcc.id = other.accountId
+      WHERE cl.accountId = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $projectWhere $dateWhere
+    ''', [account.id, ...projectArgs, ...dateArgs]);
+    double newAdvances = 0, applied = 0, other = 0;
+    for (final row in rows) {
+      final d = (row['d'] as num).toDouble();
+      final c = (row['c'] as num).toDouble();
+      final otherKey = row['otherSystemKey'] as String?;
+      if (c > 0) {
+        if (otherKey == kSystemKeyCash || otherKey == kSystemKeyBank) {
+          newAdvances += c;
+        } else {
+          other += c;
+        }
+      }
+      if (d > 0) {
+        if (otherKey == kSystemKeyReceivable) {
+          applied += d;
+        } else {
+          other += d;
+        }
+      }
+    }
+    return {
+      'opening': opening,
+      'newAdvances': newAdvances,
+      'advanceApplied': applied,
+      'other': other,
+      'closing': closing,
+    };
+  }
+
+  /// حرکت مانده بستانکاری مشتری (Customer Credit) در یک بازه. محدودیت
+  /// مستند: در معماری فعلی هیچ مسیری برای «مصرف» این بستانکاری (usedCredit)
+  /// وجود ندارد (طبق طراحی عمدی این پروژه، ماهیت مازاد باید توسط کاربر و
+  /// از طریق سند دستی مشخص شود)؛ پس usedCredit را حدس نمی‌زنیم و فقط
+  /// Opening/Closing/newCredit را با اطمینان گزارش می‌کنیم.
+  Future<Map<String, double>> customerCreditMovement(
+      {String? fromDate, String? toDate, int? projectId}) async {
+    final account = await getCustomerCreditAccount();
+    if (account == null) {
+      return {'opening': 0, 'newCredit': 0, 'closing': 0};
+    }
+    final opening = fromDate != null
+        ? await _filteredAccountBalance(
+            accountId: account.id!,
+            debitNormal: false,
+            projectId: projectId,
+            toDate: fromDate,
+            exclusiveToDate: true)
+        : 0.0;
+    final closing = await _filteredAccountBalance(
+        accountId: account.id!, debitNormal: false, projectId: projectId, toDate: toDate);
+    return {
+      'opening': opening,
+      'newCredit': closing - opening, // چون usedCredit قابل تشخیص نیست، فقط خالص تغییر گزارش می‌شود
+      'closing': closing,
     };
   }
 

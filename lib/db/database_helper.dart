@@ -645,6 +645,54 @@ class DatabaseHelper {
     };
   }
 
+  // ---------------- Accounts Receivable / Accounts Payable (مرحله ۳) ----------------
+
+  /// حساب کنترلی «حساب‌های دریافتنی» را می‌یابد (از حساب‌های پیش‌فرض seed‌شده
+  /// استفاده می‌شود؛ حساب جدید ساخته نمی‌شود مگر واقعاً وجود نداشته باشد)
+  Future<AccountModel?> getReceivableAccount() async {
+    final assets = await getAccounts(type: kAccountAsset);
+    final matches = assets.where((a) => a.name.contains('دریافتنی'));
+    return matches.isNotEmpty ? matches.first : null;
+  }
+
+  /// حساب کنترلی «حساب‌های پرداختنی»
+  Future<AccountModel?> getPayableAccount() async {
+    final liabilities = await getAccounts(type: kAccountLiability);
+    final matches = liabilities.where((a) => a.name.contains('پرداختنی'));
+    return matches.isNotEmpty ? matches.first : null;
+  }
+
+  /// مانده مطالبات (AR) یک طرف حساب خاص - همیشه مستقیم از Ledger محاسبه
+  /// می‌شود (بدون هیچ مقدار ذخیره‌شده جداگانه)؛ طبق ماهیت بدهکار حساب دارایی:
+  /// جمع بدهکارها منهای جمع بستانکارهای همان حساب برای همان طرف حساب.
+  Future<double> receivableBalance(int counterpartyId) async {
+    final arAccount = await getReceivableAccount();
+    if (arAccount == null) return 0;
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId = ? AND counterpartyId = ?
+    ''', [arAccount.id, counterpartyId]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return d - c;
+  }
+
+  /// مانده بدهی (AP) یک طرف حساب خاص - طبق ماهیت بستانکار حساب بدهی:
+  /// جمع بستانکارها منهای جمع بدهکارهای همان حساب برای همان طرف حساب.
+  Future<double> payableBalance(int counterpartyId) async {
+    final apAccount = await getPayableAccount();
+    if (apAccount == null) return 0;
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId = ? AND counterpartyId = ?
+    ''', [apAccount.id, counterpartyId]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return c - d;
+  }
+
   /// دریافتی/پرداختی یک طرف حساب — هم از راه پروژه‌های او، هم از سندهایی که
   /// مستقیم (بدون پروژه) به او برچسب خورده‌اند
   Future<Map<String, double>> counterpartyFinancials(int counterpartyId) async {

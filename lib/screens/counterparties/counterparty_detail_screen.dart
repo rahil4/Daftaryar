@@ -29,6 +29,8 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
   List<JournalEntryModel> _directEntries = [];
   double _received = 0;
   double _spent = 0;
+  double _receivable = 0; // مانده مطالبات (AR) - همیشه از Ledger محاسبه می‌شود
+  double _payable = 0; // مانده بدهی (AP) - همیشه از Ledger محاسبه می‌شود
   late CounterpartyModel _counterparty;
   bool _loading = true;
   bool _exporting = false;
@@ -45,11 +47,15 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
     final projects = await _db.getProjects(counterpartyId: _counterparty.id);
     final directEntries = await _db.getDirectCounterpartyEntries(_counterparty.id!);
     final fin = await _db.counterpartyFinancials(_counterparty.id!);
+    final receivable = await _db.receivableBalance(_counterparty.id!);
+    final payable = await _db.payableBalance(_counterparty.id!);
     setState(() {
       _projects = projects;
       _directEntries = directEntries;
       _received = fin['received']!;
       _spent = fin['spent']!;
+      _receivable = receivable;
+      _payable = payable;
       _loading = false;
     });
   }
@@ -270,6 +276,20 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
                           icon: Icons.account_balance_wallet_outlined,
                           color: net >= 0 ? AppColors.positive : AppColors.negative,
                         ),
+                        if (_receivable != 0)
+                          StatCard(
+                            title: 'مانده مطالبات (طلب از او)',
+                            value: formatMoney(_receivable),
+                            icon: Icons.request_quote_outlined,
+                            color: AppColors.positive,
+                          ),
+                        if (_payable != 0)
+                          StatCard(
+                            title: 'مانده بدهی (بدهکاری به او)',
+                            value: formatMoney(_payable),
+                            icon: Icons.payments_outlined,
+                            color: AppColors.negative,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 12),

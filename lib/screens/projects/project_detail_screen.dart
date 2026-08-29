@@ -10,6 +10,7 @@ import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import 'project_form_screen.dart';
+import 'project_finance_screen.dart';
 
 class ProjectDetailScreen extends StatefulWidget {
   final ProjectModel project;
@@ -54,7 +55,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('حذف پروژه'),
-        content: const Text('این پروژه حذف خواهد شد (اسناد حسابداری مرتبط حذف نمی‌شوند). ادامه می‌دهید؟'),
+        content: const Text(
+            'اگر این پروژه سند مالی یا تاریخچه تغییر مبلغ ثبت‌شده داشته باشد، برای حفظ سوابق قابل حذف نخواهد بود. ادامه می‌دهید؟'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
           TextButton(
@@ -64,8 +66,15 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
       ),
     );
     if (confirm == true) {
-      await _db.deleteProject(_project.id!);
-      if (mounted) Navigator.pop(context, true);
+      try {
+        await _db.deleteProject(_project.id!);
+        if (mounted) Navigator.pop(context, true);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        }
+      }
     }
   }
 
@@ -177,6 +186,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                           valueColor: remaining > 0 ? AppColors.brass : AppColors.positive,
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    Center(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => ProjectFinanceScreen(project: _project)));
+                          _load();
+                        },
+                        icon: const Icon(Icons.account_balance_outlined, size: 18),
+                        label: const Text('وضعیت مالی کامل پروژه (Finalization/تخفیف/طلب)'),
+                      ),
                     ),
                     const SizedBox(height: 20),
                     Row(

@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../db/database_helper.dart';
 import '../models/counterparty.dart';
 import '../models/project.dart';
+import '../models/project_price_event.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
 
@@ -20,13 +21,19 @@ class BackupService {
     final accounts = await _db.getAccounts();
     final entries = await _db.getJournalEntries();
     final settings = await _db.getAllSettings();
+    final priceEvents = <Map<String, dynamic>>[];
+    for (final p in projects) {
+      final events = await _db.getProjectPriceEvents(p.id!);
+      priceEvents.addAll(events.map((e) => e.toMap()));
+    }
 
     final data = {
-      'version': 4,
+      'version': 5,
       'exportedAt': DateTime.now().toIso8601String(),
       'counterparties':
           counterparties.map((e) => {...e.toMap(), 'roles': e.roles}).toList(),
       'projects': projects.map((e) => e.toMap()).toList(),
+      'projectPriceEvents': priceEvents,
       'accounts': accounts.map((e) => e.toMap()).toList(),
       'journalEntries': entries
           .map((e) => {
@@ -80,6 +87,19 @@ class BackupService {
       final newId =
           await _db.insertProject(project.copyWith(counterpartyId: mappedCounterpartyId));
       projectIdMap[project.id ?? -1] = newId;
+    }
+
+    for (final pe in (data['projectPriceEvents'] as List? ?? [])) {
+      final event = ProjectPriceEventModel.fromMap(Map<String, dynamic>.from(pe));
+      final mappedProjectId = projectIdMap[event.projectId] ?? event.projectId;
+      await _db.insertProjectPriceEventRaw(ProjectPriceEventModel(
+        projectId: mappedProjectId,
+        type: event.type,
+        amount: event.amount,
+        reason: event.reason,
+        date: event.date,
+        createdAt: event.createdAt,
+      ));
     }
 
     // حساب‌ها: فقط حساب‌های غیرسیستمی اضافه می‌شوند (حساب‌های پیش‌فرض از قبل موجودند)

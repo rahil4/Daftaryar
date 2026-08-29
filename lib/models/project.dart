@@ -15,6 +15,10 @@ const List<String> kProjectStatuses = [
   'در انتظار مدارک',
 ];
 
+// وضعیت‌های مالی مستقل از وضعیت عملیاتی بالا - طبق مدل جریان مالی پروژه
+const String kProjectStatusFinalized = 'نهایی‌شده';
+const String kProjectStatusCancelled = 'لغوشده';
+
 class ProjectModel {
   final int? id;
   final String title;
@@ -22,9 +26,16 @@ class ProjectModel {
   final String projectType;
   final String status;
   final String startDate; // شمسی yyyy/mm/dd
-  final double agreedAmount;
+  final double agreedAmount; // برآورد اولیه (Initial Estimate) - فقط در ایجاد پروژه ثبت می‌شود
   final String? description;
   final String createdAt;
+
+  // فیلدهای Finalization - فقط یک‌بار در زمان نهایی‌سازی ست می‌شوند و پس از
+  // آن دیگر overwrite نمی‌شوند؛ اصلاحات بعدی از طریق ProjectPriceEvent
+  // (نوع FINAL_ADJUSTMENT) ثبت می‌شوند، نه با تغییر مستقیم این مقدار.
+  final double? finalAmount;
+  final String? finalizedDate;
+  final String? finalizedNote;
 
   ProjectModel({
     this.id,
@@ -36,7 +47,12 @@ class ProjectModel {
     required this.agreedAmount,
     this.description,
     required this.createdAt,
+    this.finalAmount,
+    this.finalizedDate,
+    this.finalizedNote,
   });
+
+  bool get isFinalized => finalAmount != null;
 
   Map<String, dynamic> toMap() {
     return {
@@ -49,6 +65,9 @@ class ProjectModel {
       'agreedAmount': agreedAmount,
       'description': description,
       'createdAt': createdAt,
+      'finalAmount': finalAmount,
+      'finalizedDate': finalizedDate,
+      'finalizedNote': finalizedNote,
     };
   }
 
@@ -63,6 +82,9 @@ class ProjectModel {
       agreedAmount: (map['agreedAmount'] as num).toDouble(),
       description: map['description'] as String?,
       createdAt: map['createdAt'] as String,
+      finalAmount: (map['finalAmount'] as num?)?.toDouble(),
+      finalizedDate: map['finalizedDate'] as String?,
+      finalizedNote: map['finalizedNote'] as String?,
     );
   }
 
@@ -76,6 +98,9 @@ class ProjectModel {
     double? agreedAmount,
     String? description,
     String? createdAt,
+    double? finalAmount,
+    String? finalizedDate,
+    String? finalizedNote,
   }) {
     return ProjectModel(
       id: id ?? this.id,
@@ -87,6 +112,9 @@ class ProjectModel {
       agreedAmount: agreedAmount ?? this.agreedAmount,
       description: description ?? this.description,
       createdAt: createdAt ?? this.createdAt,
+      finalAmount: finalAmount ?? this.finalAmount,
+      finalizedDate: finalizedDate ?? this.finalizedDate,
+      finalizedNote: finalizedNote ?? this.finalizedNote,
     );
   }
 }

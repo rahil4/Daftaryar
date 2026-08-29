@@ -4,6 +4,7 @@ import 'package:shamsi_date/shamsi_date.dart';
 
 import '../models/counterparty.dart';
 import '../models/project.dart';
+import '../models/project_price_event.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
 import '../models/sms_draft.dart';
@@ -23,7 +24,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v8.db');
+    final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
       version: 1,
@@ -82,9 +83,29 @@ class DatabaseHelper {
         agreedAmount REAL NOT NULL DEFAULT 0,
         description TEXT,
         createdAt TEXT NOT NULL,
+        finalAmount REAL,
+        finalizedDate TEXT,
+        finalizedNote TEXT,
         FOREIGN KEY (counterpartyId) REFERENCES counterparties (id) ON DELETE CASCADE
       )
     ''');
+
+    // تاریخچه تغییرات مبلغ پروژه - رکورد اصلی هرگز overwrite نمی‌شود؛ هر
+    // تغییر (پیش یا پس از Finalization) یک ردیف مستقل و همیشگی است.
+    await db.execute('''
+      CREATE TABLE project_price_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        projectId INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        reason TEXT,
+        date TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX idx_price_events_projectId ON project_price_events (projectId)');
 
     await db.execute('''
       CREATE TABLE accounts (
@@ -183,6 +204,9 @@ class DatabaseHelper {
 
     // بدهی
     await add('2000', 'حساب‌های پرداختنی', kAccountLiability, systemKey: kSystemKeyPayable);
+    await add('2010', 'پیش‌دریافت مشتری', kAccountLiability, systemKey: kSystemKeyCustomerAdvance);
+    await add('2020', 'بستانکاری مشتری (مازاد دریافتی)', kAccountLiability,
+        systemKey: kSystemKeyCustomerCredit);
 
     // حقوق صاحبان سرمایه
     await add('3000', 'سرمایه', kAccountEquity);
@@ -190,6 +214,7 @@ class DatabaseHelper {
     // درآمد
     await add('4000', 'درآمد نقشه‌برداری', kAccountIncome);
     await add('4010', 'درآمد پیگیری ثبتی', kAccountIncome);
+    await add('4020', 'درآمد پروژه‌ها', kAccountIncome, systemKey: kSystemKeyProjectRevenue);
     await add('4090', 'سایر درآمدها', kAccountIncome);
 
     // هزینه
@@ -198,6 +223,9 @@ class DatabaseHelper {
     await add('5020', 'حقوق و دستمزد', kAccountExpense);
     await add('5030', 'هزینه‌های نقشه‌برداری', kAccountExpense);
     await add('5040', 'حمل و نقل', kAccountExpense);
+    await add('5050', 'هزینه مستقیم پروژه', kAccountExpense, systemKey: kSystemKeyDirectProjectCost);
+    await add('5060', 'سربار عمومی پروژه‌ها', kAccountExpense, systemKey: kSystemKeyProjectOverhead);
+    await add('5070', 'تخفیف خدمات', kAccountExpense, systemKey: kSystemKeyServiceDiscount);
     await add('5090', 'سایر هزینه‌های عمومی', kAccountExpense);
   }
 
@@ -354,8 +382,23 @@ class DatabaseHelper {
     return db.update('projects', p.toMap(), where: 'id = ?', whereArgs: [p.id]);
   }
 
+  /// حذف فیزیکی پروژه فقط وقتی مجاز است که هیچ سند مالی یا رویداد تغییر
+  /// قیمتی نداشته باشد؛ چون Price Event و اسناد مالی هرگز نباید Hard Delete
+  /// شوند (طبق اصل حفظ تاریخچه مالی).
   Future<int> deleteProject(int id) async {
     final db = await database;
+    final lineRows =
+        await db.query('journal_lines', where: 'projectId = ?', whereArgs: [id], limit: 1);
+    if (lineRows.isNotEmpty) {
+      throw Exception(
+          'این پروژه اسناد حسابداری ثبت‌شده دارد و برای حفظ سوابق مالی، قابل حذف فیزیکی نیست.');
+    }
+    final eventRows =
+        await db.query('project_price_events', where: 'projectId = ?', whereArgs: [id], limit: 1);
+    if (eventRows.isNotEmpty) {
+      throw Exception(
+          'این پروژه تاریخچه تغییر مبلغ دارد و برای حفظ سوابق مالی، قابل حذف فیزیکی نیست.');
+    }
     return db.delete('projects', where: 'id = ?', whereArgs: [id]);
   }
 
@@ -716,6 +759,91 @@ class DatabaseHelper {
     final maps = await db.query('accounts', where: 'systemKey = ?', whereArgs: [kSystemKeyPayable]);
     if (maps.isEmpty) return null;
     return AccountModel.fromMap(maps.first);
+  }
+
+  Future<AccountModel?> _accountBySystemKey(String key) async {
+    final db = await database;
+    final maps = await db.query('accounts', where: 'systemKey = ?', whereArgs: [key]);
+    if (maps.isEmpty) return null;
+    return AccountModel.fromMap(maps.first);
+  }
+
+  Future<AccountModel?> getCustomerAdvanceAccount() => _accountBySystemKey(kSystemKeyCustomerAdvance);
+  Future<AccountModel?> getCustomerCreditAccount() => _accountBySystemKey(kSystemKeyCustomerCredit);
+  Future<AccountModel?> getProjectRevenueAccount() => _accountBySystemKey(kSystemKeyProjectRevenue);
+  Future<AccountModel?> getProjectOverheadAccount() => _accountBySystemKey(kSystemKeyProjectOverhead);
+  Future<AccountModel?> getDirectProjectCostAccount() =>
+      _accountBySystemKey(kSystemKeyDirectProjectCost);
+  Future<AccountModel?> getServiceDiscountAccount() => _accountBySystemKey(kSystemKeyServiceDiscount);
+
+  /// ساخت سطرهای بستانکار برای اعمال مبلغی به AR یک پروژه مشخص، با محافظت
+  /// در برابر Overpayment: اگر مبلغ از مانده فعلی AR همان پروژه بیشتر باشد
+  /// (مثلاً چون پیش‌دریافت یا دریافت مستقیم بیشتر از طلب واقعی بوده)، فقط
+  /// به‌اندازه مانده به AR اعمال می‌شود و مازاد به‌جای منفی‌کردن AR، به حساب
+  /// «بستانکاری مشتری (مازاد دریافتی)» می‌رود - ماهیت این مازاد را کاربر
+  /// بعداً به‌صورت صریح مشخص می‌کند، سیستم آن را حدس نمی‌زند.
+  Future<List<JournalLineModel>> _creditArWithOverflowGuard({
+    required int projectId,
+    required int counterpartyId,
+    required int arAccountId,
+    required double amount,
+  }) async {
+    final currentAr = await projectReceivableBalance(projectId);
+    final toAr = amount <= currentAr ? amount : currentAr;
+    final excess = amount - toAr;
+    final lines = <JournalLineModel>[];
+    if (toAr > 0) {
+      lines.add(JournalLineModel(
+          accountId: arAccountId,
+          credit: toAr.round(),
+          projectId: projectId,
+          counterpartyId: counterpartyId));
+    }
+    if (excess > 0) {
+      final creditAccount = await getCustomerCreditAccount();
+      if (creditAccount == null) {
+        throw Exception('حساب «بستانکاری مشتری» برای ثبت مازاد دریافتی یافت نشد.');
+      }
+      lines.add(JournalLineModel(
+          accountId: creditAccount.id!,
+          credit: excess.round(),
+          projectId: projectId,
+          counterpartyId: counterpartyId));
+    }
+    return lines;
+  }
+
+  /// مانده یک حساب کنترلی (AR/Advance/...) برای یک پروژه مشخص - مستقیم از
+  /// Ledger، با فیلتر projectId (نه counterpartyId) چون هدف مانده مختص همین
+  /// پروژه است، نه کل طرف حساب.
+  Future<double> _projectControlAccountBalance(int projectId, AccountModel? account,
+      {required bool debitNormal}) async {
+    if (account == null) return 0;
+    final db = await database;
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines WHERE accountId = ? AND projectId = ?
+    ''', [account.id, projectId]);
+    final d = (result.first['d'] as num).toDouble();
+    final c = (result.first['c'] as num).toDouble();
+    return debitNormal ? d - c : c - d;
+  }
+
+  /// مانده مطالبات (AR) مختص یک پروژه خاص (نه کل طرف حساب)
+  Future<double> projectReceivableBalance(int projectId) async {
+    return _projectControlAccountBalance(projectId, await getReceivableAccount(), debitNormal: true);
+  }
+
+  /// مانده پیش‌دریافت (Customer Advance) مختص یک پروژه خاص
+  Future<double> projectAdvanceBalance(int projectId) async {
+    return _projectControlAccountBalance(projectId, await getCustomerAdvanceAccount(),
+        debitNormal: false);
+  }
+
+  /// مانده بستانکاری مشتری (مازاد دریافتی ناشی از Overpayment) مختص یک پروژه
+  Future<double> projectCustomerCreditBalance(int projectId) async {
+    return _projectControlAccountBalance(projectId, await getCustomerCreditAccount(),
+        debitNormal: false);
   }
 
   /// آیا این حساب یا یکی از والدینش (تا هر عمقی) صندوق/بانک است؟ با این
@@ -1161,6 +1289,404 @@ class DatabaseHelper {
     final maps =
         await db.query('sms_drafts', where: 'rawBody = ?', whereArgs: [rawBody], limit: 1);
     return maps.isNotEmpty;
+  }
+
+  // ---------------- جریان مالی پروژه (Price Events / Finalization / Discount) ----------------
+
+  /// ثبت رویداد تغییر مبلغ برآوردی پروژه (پیش از Finalization). این رویداد
+  /// فقط تاریخچه است و Journal تولید نمی‌کند - مبلغ پروژه هنوز قطعی نیست.
+  Future<int> addProjectPriceEvent({
+    required int projectId,
+    required String type,
+    required double amount,
+    String? reason,
+    required String date,
+  }) async {
+    final project = await getProject(projectId);
+    if (project != null && project.isFinalized && type != kPriceEventFinalAdjustment && type != kPriceEventDiscount) {
+      throw Exception('این پروژه نهایی شده؛ تغییر مبلغ برآوردی دیگر امکان‌پذیر نیست.');
+    }
+    final db = await database;
+    return db.insert('project_price_events', {
+      'projectId': projectId,
+      'type': type,
+      'amount': amount,
+      'reason': reason,
+      'date': date,
+      'createdAt': todayJalaliString(),
+    });
+  }
+
+  /// درج خام رویداد قیمت بدون اعتبارسنجی/Journal اضافه - فقط برای بازیابی
+  /// پشتیبان که خودِ اسناد حسابداری متناظر را جداگانه وارد می‌کند
+  Future<int> insertProjectPriceEventRaw(ProjectPriceEventModel e) async {
+    final db = await database;
+    return db.insert('project_price_events', e.toMap()..remove('id'));
+  }
+
+  Future<List<ProjectPriceEventModel>> getProjectPriceEvents(int projectId) async {
+    final db = await database;
+    final maps = await db.query('project_price_events',
+        where: 'projectId = ?', whereArgs: [projectId], orderBy: 'id ASC');
+    return maps.map((m) => ProjectPriceEventModel.fromMap(m)).toList();
+  }
+
+  /// مبلغ مورد انتظار فعلی پروژه = برآورد اولیه + مجموع رویدادهای پیش از
+  /// Finalization (ADDITION/REDUCTION/ADJUSTMENT). بعد از Finalization دیگر
+  /// معنا ندارد؛ در آن حالت finalAmount + FINAL_ADJUSTMENTها ملاک است.
+  Future<double> currentExpectedAmount(int projectId) async {
+    final project = await getProject(projectId);
+    if (project == null) return 0;
+    final events = await getProjectPriceEvents(projectId);
+    final preFinalSum = events
+        .where((e) => e.type == kPriceEventAddition ||
+            e.type == kPriceEventReduction ||
+            e.type == kPriceEventAdjustment)
+        .fold<double>(0, (s, e) => s + e.amount);
+    return project.agreedAmount + preFinalSum;
+  }
+
+  /// مجموع اصلاحات پس از Finalization (FINAL_ADJUSTMENT) - علامت‌دار
+  Future<double> _finalAdjustmentsTotal(int projectId) async {
+    final events = await getProjectPriceEvents(projectId);
+    return events
+        .where((e) => e.type == kPriceEventFinalAdjustment)
+        .fold<double>(0, (s, e) => s + e.amount);
+  }
+
+  /// مجموع تخفیف‌های ثبت‌شده (همیشه به‌صورت مقدار مثبت گزارش می‌شود)
+  Future<double> _totalDiscount(int projectId) async {
+    final events = await getProjectPriceEvents(projectId);
+    final sum = events.where((e) => e.type == kPriceEventDiscount).fold<double>(0, (s, e) => s + e.amount);
+    return sum.abs();
+  }
+
+  /// نهایی‌سازی پروژه (Finalization): مبلغ نهایی ثبت می‌شود (هرگز overwrite
+  /// نمی‌شود)، درآمد پروژه شناسایی می‌شود، و مانده پیش‌دریافت موجود این پروژه
+  /// به‌طور خودکار به حساب دریافتنی منتقل می‌شود.
+  Future<void> finalizeProject({
+    required int projectId,
+    required double finalAmount,
+    required String date,
+    String? note,
+  }) async {
+    final project = await getProject(projectId);
+    if (project == null) throw Exception('پروژه یافت نشد.');
+    if (project.isFinalized) {
+      // Idempotency: نهایی‌سازی تکراری هرگز نباید سند دوم بسازد
+      throw Exception('این پروژه قبلاً نهایی شده است.');
+    }
+    final arAccount = await getReceivableAccount();
+    final revenueAccount = await getProjectRevenueAccount();
+    final advanceAccount = await getCustomerAdvanceAccount();
+    if (arAccount == null || revenueAccount == null || advanceAccount == null) {
+      throw Exception('حساب‌های کنترلی موردنیاز (دریافتنی/درآمد پروژه/پیش‌دریافت) یافت نشدند.');
+    }
+
+    // این عملیات ممکن است دو سند مستقل بسازد (شناسایی درآمد + انتقال
+    // پیش‌دریافت). چون insertJournalEntry خودش هر بار در تراکنش جداگانه
+    // اجرا می‌شود، برای تضمین All-or-Nothing واقعی، در صورت شکست هر مرحله
+    // (مثلاً بروزرسانی نهایی پروژه)، سندهای قبلاً موفق این عملیات با یک
+    // اقدام جبرانی (Compensating Action) حذف می‌شوند تا هیچ حالت نصفه در
+    // دیتابیس باقی نماند.
+    int? revenueEntryId;
+    int? advanceEntryId;
+    try {
+      revenueEntryId = await insertJournalEntry(JournalEntryModel(
+        date: date,
+        description: 'نهایی‌سازی پروژه «${project.title}» - شناسایی درآمد',
+        createdAt: todayJalaliString(),
+        lines: [
+          JournalLineModel(
+              accountId: arAccount.id!,
+              debit: finalAmount.round(),
+              projectId: projectId,
+              counterpartyId: project.counterpartyId),
+          JournalLineModel(
+              accountId: revenueAccount.id!,
+              credit: finalAmount.round(),
+              projectId: projectId,
+              counterpartyId: project.counterpartyId),
+        ],
+      ));
+
+      // انتقال مانده پیش‌دریافت موجود همین پروژه به حساب دریافتنی - با
+      // محافظت Overpayment: اگر پیش‌دریافت از مبلغ نهایی بیشتر باشد، مازاد
+      // به AR منفی تبدیل نمی‌شود، بلکه به «بستانکاری مشتری» می‌رود.
+      final advanceBalance = await projectAdvanceBalance(projectId);
+      if (advanceBalance > 0) {
+        final creditLines = await _creditArWithOverflowGuard(
+          projectId: projectId,
+          counterpartyId: project.counterpartyId,
+          arAccountId: arAccount.id!,
+          amount: advanceBalance,
+        );
+        advanceEntryId = await insertJournalEntry(JournalEntryModel(
+          date: date,
+          description: 'انتقال پیش‌دریافت به حساب دریافتنی - پروژه «${project.title}»',
+          createdAt: todayJalaliString(),
+          lines: [
+            JournalLineModel(
+                accountId: advanceAccount.id!,
+                debit: advanceBalance.round(),
+                projectId: projectId,
+                counterpartyId: project.counterpartyId),
+            ...creditLines,
+          ],
+        ));
+      }
+
+      await updateProject(project.copyWith(
+        finalAmount: finalAmount,
+        finalizedDate: date,
+        finalizedNote: note,
+        status: kProjectStatusFinalized,
+      ));
+    } catch (e) {
+      if (advanceEntryId != null) await deleteJournalEntry(advanceEntryId);
+      if (revenueEntryId != null) await deleteJournalEntry(revenueEntryId);
+      rethrow;
+    }
+  }
+
+  /// ثبت تخفیف نهایی - فقط پس از Finalization مجاز است. تخفیف مبلغ نهایی
+  /// اصلی را overwrite نمی‌کند؛ به‌صورت رویداد مستقل ذخیره و Journal می‌شود.
+  Future<void> recordProjectDiscount({
+    required int projectId,
+    required double amount,
+    String? reason,
+    required String date,
+  }) async {
+    final project = await getProject(projectId);
+    if (project == null || !project.isFinalized) {
+      throw Exception('تخفیف فقط پس از نهایی‌سازی پروژه قابل ثبت است.');
+    }
+    final arAccount = await getReceivableAccount();
+    final discountAccount = await getServiceDiscountAccount();
+    if (arAccount == null || discountAccount == null) {
+      throw Exception('حساب‌های کنترلی موردنیاز یافت نشدند.');
+    }
+    // تخفیف یک تصمیم عمدی کاربر است (نه دریافت پول از بیرون که باید جایی
+    // پارک شود)؛ پس اگر از مانده طلب بیشتر باشد، به‌جای مسیر دادن به یک
+    // حساب دیگر، به‌صراحت رد می‌شود تا کاربر عدد را اصلاح کند.
+    final currentAr = await projectReceivableBalance(projectId);
+    if (amount > currentAr) {
+      throw Exception(
+          'مبلغ تخفیف (${formatMoney(amount)}) از مانده طلب فعلی این پروژه (${formatMoney(currentAr)}) بیشتر است.');
+    }
+    await insertJournalEntry(JournalEntryModel(
+      date: date,
+      description: reason?.isNotEmpty == true ? 'تخفیف: $reason' : 'تخفیف نهایی پروژه',
+      createdAt: todayJalaliString(),
+      lines: [
+        JournalLineModel(
+            accountId: discountAccount.id!,
+            debit: amount.round(),
+            projectId: projectId,
+            counterpartyId: project.counterpartyId),
+        JournalLineModel(
+            accountId: arAccount.id!,
+            credit: amount.round(),
+            projectId: projectId,
+            counterpartyId: project.counterpartyId),
+      ],
+    ));
+    await addProjectPriceEvent(
+      projectId: projectId,
+      type: kPriceEventDiscount,
+      amount: -amount,
+      reason: reason,
+      date: date,
+    );
+  }
+
+  /// اصلاح مبلغ نهایی پس از Finalization (مثبت یا منفی) - Finalization قبلی
+  /// را overwrite نمی‌کند، یک رویداد و یک سند اصلاحی مستقل ایجاد می‌کند.
+  Future<void> recordFinalAdjustment({
+    required int projectId,
+    required double amount, // علامت‌دار: مثبت=افزایش درآمد، منفی=کاهش
+    String? reason,
+    required String date,
+  }) async {
+    final project = await getProject(projectId);
+    if (project == null || !project.isFinalized) {
+      throw Exception('اصلاح مبلغ نهایی فقط پس از نهایی‌سازی پروژه ممکن است.');
+    }
+    if (amount == 0) return;
+    final arAccount = await getReceivableAccount();
+    final revenueAccount = await getProjectRevenueAccount();
+    if (arAccount == null || revenueAccount == null) {
+      throw Exception('حساب‌های کنترلی موردنیاز یافت نشدند.');
+    }
+    final magnitude = amount.abs().round();
+    // اصلاح کاهشی، AR را بستانکار (کاهش) می‌دهد؛ اگر از مانده فعلی بیشتر
+    // باشد، به‌جای منفی‌کردن AR، به‌صراحت رد می‌شود.
+    if (amount < 0) {
+      final currentAr = await projectReceivableBalance(projectId);
+      if (magnitude > currentAr) {
+        throw Exception(
+            'مقدار کاهش (${formatMoney(magnitude)}) از مانده طلب فعلی این پروژه (${formatMoney(currentAr)}) بیشتر است.');
+      }
+    }
+    await insertJournalEntry(JournalEntryModel(
+      date: date,
+      description: reason?.isNotEmpty == true ? 'اصلاح مبلغ نهایی: $reason' : 'اصلاح مبلغ نهایی پروژه',
+      createdAt: todayJalaliString(),
+      lines: amount > 0
+          ? [
+              JournalLineModel(
+                  accountId: arAccount.id!,
+                  debit: magnitude,
+                  projectId: projectId,
+                  counterpartyId: project.counterpartyId),
+              JournalLineModel(
+                  accountId: revenueAccount.id!,
+                  credit: magnitude,
+                  projectId: projectId,
+                  counterpartyId: project.counterpartyId),
+            ]
+          : [
+              JournalLineModel(
+                  accountId: revenueAccount.id!,
+                  debit: magnitude,
+                  projectId: projectId,
+                  counterpartyId: project.counterpartyId),
+              JournalLineModel(
+                  accountId: arAccount.id!,
+                  credit: magnitude,
+                  projectId: projectId,
+                  counterpartyId: project.counterpartyId),
+            ],
+    ));
+    await addProjectPriceEvent(
+      projectId: projectId,
+      type: kPriceEventFinalAdjustment,
+      amount: amount,
+      reason: reason,
+      date: date,
+    );
+  }
+
+  /// دریافت وجه برای یک پروژه مشخص - مقصد بستانکار به‌صورت هوشمند تعیین
+  /// می‌شود: پیش از Finalization همیشه «پیش‌دریافت مشتری» (هرگز درآمد)،
+  /// پس از آن «حساب‌های دریافتنی» (تسویه طلب، نه درآمد جدید).
+  Future<void> receiveProjectPayment({
+    required int projectId,
+    required int cashAccountId,
+    required double amount,
+    required String date,
+    String? description,
+  }) async {
+    final project = await getProject(projectId);
+    if (project == null) throw Exception('پروژه یافت نشد.');
+    final targetAccount = project.isFinalized
+        ? await getReceivableAccount()
+        : await getCustomerAdvanceAccount();
+    if (targetAccount == null) {
+      throw Exception('حساب کنترلی موردنیاز یافت نشد.');
+    }
+
+    // پیش از Finalization، پیش‌دریافت باز و بدون سقف است (چون برآورد قطعی
+    // نیست)؛ پس از Finalization، دریافت مازاد بر مانده طلب باید به‌جای
+    // منفی‌کردن AR، به «بستانکاری مشتری» برود.
+    final creditLines = project.isFinalized
+        ? await _creditArWithOverflowGuard(
+            projectId: projectId,
+            counterpartyId: project.counterpartyId,
+            arAccountId: targetAccount.id!,
+            amount: amount,
+          )
+        : [
+            JournalLineModel(
+                accountId: targetAccount.id!,
+                credit: amount.round(),
+                projectId: projectId,
+                counterpartyId: project.counterpartyId),
+          ];
+
+    await insertJournalEntry(JournalEntryModel(
+      date: date,
+      description: description?.isNotEmpty == true
+          ? description!
+          : (project.isFinalized ? 'دریافت طلب پروژه' : 'پیش‌دریافت پروژه'),
+      createdAt: todayJalaliString(),
+      lines: [
+        JournalLineModel(
+            accountId: cashAccountId,
+            debit: amount.round(),
+            projectId: projectId,
+            counterpartyId: project.counterpartyId),
+        ...creditLines,
+      ],
+    ));
+  }
+
+  /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
+  /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
+  Future<bool> isProjectSettled(int projectId) async {
+    final project = await getProject(projectId);
+    if (project == null || !project.isFinalized) return false;
+    final advance = await projectAdvanceBalance(projectId);
+    final receivable = await projectReceivableBalance(projectId);
+    final credit = await projectCustomerCreditBalance(projectId);
+    return advance == 0 && receivable == 0 && credit == 0;
+  }
+
+  /// خلاصه کامل مالی پروژه - همه اعداد مستقیم از Ledger و رویدادهای قیمتی
+  /// محاسبه می‌شوند، هیچ‌کدام cache نشده‌اند.
+  Future<Map<String, dynamic>> projectFinancialSummary(int projectId) async {
+    final project = await getProject(projectId);
+    if (project == null) throw Exception('پروژه یافت نشد.');
+
+    final initialEstimate = project.agreedAmount;
+    final currentExpected = await currentExpectedAmount(projectId);
+    final discount = await _totalDiscount(projectId);
+    final finalAdjustments = await _finalAdjustmentsTotal(projectId);
+    final grossFinalAmount =
+        project.isFinalized ? (project.finalAmount! + finalAdjustments) : null;
+    final netRevenue = grossFinalAmount != null ? grossFinalAmount - discount : null;
+
+    final cashFlow = await projectFinancials(projectId); // received/spent واقعی نقدی
+    final totalReceived = cashFlow['received']!;
+    final advanceBalance = await projectAdvanceBalance(projectId);
+    final receivableBalance = await projectReceivableBalance(projectId);
+    final customerCreditBalance = await projectCustomerCreditBalance(projectId);
+
+    // هزینه مستقیم پروژه: مجموع سطرهای نوع هزینه که به همین پروژه تگ خورده‌اند،
+    // به‌جز حساب «تخفیف خدمات» که هرچند برای سادگی نوعش هزینه است، مفهوماً
+    // کاهنده درآمد (Contra-Revenue) است، نه یک هزینه واقعی پروژه.
+    final db = await database;
+    final discountAccount = await getServiceDiscountAccount();
+    final directCostResult = await db.rawQuery("""
+      SELECT COALESCE(SUM(l.debit),0) - COALESCE(SUM(l.credit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE l.projectId = ? AND a.type = ? AND (a.id != ? OR ? IS NULL)
+    """, [projectId, kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id]);
+    final directCost = (directCostResult.first['total'] as num).toDouble();
+
+    final contribution = netRevenue != null ? netRevenue - directCost : null;
+    final margin = (contribution != null && netRevenue != null && netRevenue > 0)
+        ? (contribution / netRevenue) * 100
+        : null;
+
+    final settled = await isProjectSettled(projectId);
+
+    return {
+      'initialEstimate': initialEstimate,
+      'currentExpectedAmount': currentExpected,
+      'isFinalized': project.isFinalized,
+      'grossFinalAmount': grossFinalAmount,
+      'discount': discount,
+      'netRevenue': netRevenue,
+      'totalReceived': totalReceived,
+      'customerAdvance': advanceBalance,
+      'receivable': receivableBalance,
+      'customerCredit': customerCreditBalance,
+      'directProjectCost': directCost,
+      'projectContribution': contribution,
+      'projectMargin': margin,
+      'isSettled': settled,
+    };
   }
 
   Future<void> wipeAll() async {

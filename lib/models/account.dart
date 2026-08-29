@@ -21,6 +21,12 @@ const String kSystemKeyReceivable = 'accounts_receivable';
 const String kSystemKeyPayable = 'accounts_payable';
 const String kSystemKeyCash = 'cash';
 const String kSystemKeyBank = 'bank';
+const String kSystemKeyCustomerAdvance = 'customer_advance';
+const String kSystemKeyCustomerCredit = 'customer_credit';
+const String kSystemKeyProjectRevenue = 'project_revenue';
+const String kSystemKeyProjectOverhead = 'project_overhead';
+const String kSystemKeyDirectProjectCost = 'direct_project_cost';
+const String kSystemKeyServiceDiscount = 'service_discount';
 
 class AccountModel {
   final int? id;

@@ -146,7 +146,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                   DropdownButtonFormField<String>(
                     value: _status,
                     decoration: const InputDecoration(labelText: 'وضعیت'),
-                    items: kProjectStatuses
+                    items: [...kProjectStatuses, kProjectStatusFinalized, kProjectStatusCancelled]
                         .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                         .toList(),
                     onChanged: (v) => setState(() => _status = v!),

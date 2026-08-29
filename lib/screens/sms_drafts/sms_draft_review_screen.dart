@@ -51,7 +51,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final asset = await _db.getCashAccounts();
     final leafCounter = await _db.getPostableAccounts(
         type: _type == 'دریافت' ? kAccountIncome : kAccountExpense);
     final projects = await _db.getProjects();
@@ -255,11 +255,14 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                     style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   if (overLimit)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        '⚠️ این مبلغ از مانده فعلی بیشتر است؛ پس از ثبت، مانده معکوس خواهد شد.',
-                        style: TextStyle(fontSize: 12, color: AppColors.negative),
+                        _type == 'دریافت'
+                            ? 'مبلغ دریافت بیشتر از مانده طلب است و امکان ثبت این عملیات وجود ندارد.'
+                            : 'مبلغ پرداخت بیشتر از مانده بدهی است و امکان ثبت این عملیات وجود ندارد.',
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.negative, fontWeight: FontWeight.w700),
                       ),
                     ),
                 ],
@@ -296,7 +299,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: _saving ? null : _confirm,
+                        onPressed: (_saving || overLimit) ? null : _confirm,
                         child: _saving
                             ? const SizedBox(
                                 height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))

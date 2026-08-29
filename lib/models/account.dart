@@ -15,6 +15,13 @@ const List<String> kAccountTypes = [
 /// آیا مانده طبیعی این نوع حساب بدهکار است؟ (دارایی و هزینه بدهکار، بقیه بستانکار)
 bool isDebitNormal(String type) => type == kAccountAsset || type == kAccountExpense;
 
+/// کلیدهای پایدار برای شناسایی حساب‌های کنترلی سیستم - جایگزین جستجوی
+/// شکننده بر اساس نام (مرحله ۳.۱، اصلاح ۶)
+const String kSystemKeyReceivable = 'accounts_receivable';
+const String kSystemKeyPayable = 'accounts_payable';
+const String kSystemKeyCash = 'cash';
+const String kSystemKeyBank = 'bank';
+
 class AccountModel {
   final int? id;
   final String? code;
@@ -22,6 +29,7 @@ class AccountModel {
   final String type;
   final int? parentId;
   final bool isSystem;
+  final String? systemKey; // شناسه پایدار برای حساب‌های کنترلی خاص (AR/AP و...)
   final String createdAt;
 
   AccountModel({
@@ -31,6 +39,7 @@ class AccountModel {
     required this.type,
     this.parentId,
     this.isSystem = false,
+    this.systemKey,
     required this.createdAt,
   });
 
@@ -42,6 +51,7 @@ class AccountModel {
       'type': type,
       'parentId': parentId,
       'isSystem': isSystem ? 1 : 0,
+      'systemKey': systemKey,
       'createdAt': createdAt,
     };
   }
@@ -54,6 +64,7 @@ class AccountModel {
       type: map['type'] as String,
       parentId: map['parentId'] as int?,
       isSystem: (map['isSystem'] as int) == 1,
+      systemKey: map['systemKey'] as String?,
       createdAt: map['createdAt'] as String,
     );
   }
@@ -66,6 +77,7 @@ class AccountModel {
     int? parentId,
     bool clearParent = false,
     bool? isSystem,
+    String? systemKey,
     String? createdAt,
   }) {
     return AccountModel(
@@ -75,6 +87,7 @@ class AccountModel {
       type: type ?? this.type,
       parentId: clearParent ? null : (parentId ?? this.parentId),
       isSystem: isSystem ?? this.isSystem,
+      systemKey: systemKey ?? this.systemKey,
       createdAt: createdAt ?? this.createdAt,
     );
   }

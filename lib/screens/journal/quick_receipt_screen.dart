@@ -55,7 +55,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final asset = await _db.getCashAccounts();
     final incomeAll = await _db.getPostableAccounts(type: kAccountIncome);
     // حساب «حساب‌های دریافتنی» نباید در لیست «بابت درآمد» انتخاب شود
     final arAccount = await _db.getReceivableAccount();
@@ -266,8 +266,8 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                       const Padding(
                         padding: EdgeInsets.only(top: 4),
                         child: Text(
-                          '⚠️ این مبلغ از مانده طلب فعلی بیشتر است؛ پس از ثبت، مانده این طرف حساب بستانکار (منفی) خواهد شد.',
-                          style: TextStyle(fontSize: 12, color: AppColors.negative),
+                          'مبلغ دریافت بیشتر از مانده طلب است و امکان ثبت این عملیات وجود ندارد.',
+                          style: TextStyle(fontSize: 12, color: AppColors.negative, fontWeight: FontWeight.w700),
                         ),
                       ),
                   ],
@@ -295,7 +295,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
-                    onPressed: _saving ? null : _save,
+                    onPressed: (_saving || overLimit) ? null : _save,
                     child: _saving
                         ? const SizedBox(
                             height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))

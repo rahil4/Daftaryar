@@ -55,7 +55,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
   }
 
   Future<void> _load() async {
-    final asset = await _db.getPostableAccounts(type: kAccountAsset);
+    final asset = await _db.getCashAccounts();
     final leafExpenses = await _db.getPostableAccounts(type: kAccountExpense);
     final projects = await _db.getProjects();
     final counterparties = await _db.getCounterparties();
@@ -264,8 +264,8 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                       const Padding(
                         padding: EdgeInsets.only(top: 4),
                         child: Text(
-                          '⚠️ این مبلغ از مانده بدهی فعلی بیشتر است؛ پس از ثبت، مانده این طرف حساب بدهکار (منفی) خواهد شد.',
-                          style: TextStyle(fontSize: 12, color: AppColors.negative),
+                          'مبلغ پرداخت بیشتر از مانده بدهی است و امکان ثبت این عملیات وجود ندارد.',
+                          style: TextStyle(fontSize: 12, color: AppColors.negative, fontWeight: FontWeight.w700),
                         ),
                       ),
                   ],
@@ -293,7 +293,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
-                    onPressed: _saving ? null : _save,
+                    onPressed: (_saving || overLimit) ? null : _save,
                     child: _saving
                         ? const SizedBox(
                             height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))

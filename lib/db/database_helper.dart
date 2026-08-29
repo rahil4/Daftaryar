@@ -23,7 +23,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v7.db');
+    final path = join(dbPath, 'daftaryar_v8.db');
     return openDatabase(
       path,
       version: 1,
@@ -94,6 +94,7 @@ class DatabaseHelper {
         type TEXT NOT NULL,
         parentId INTEGER,
         isSystem INTEGER NOT NULL DEFAULT 0,
+        systemKey TEXT,
         createdAt TEXT NOT NULL,
         FOREIGN KEY (parentId) REFERENCES accounts (id) ON DELETE SET NULL
       )
@@ -163,24 +164,25 @@ class DatabaseHelper {
 
   Future<void> _seedDefaultAccounts(Database db) async {
     final now = DateTime.now().toIso8601String();
-    Future<int> add(String code, String name, String type, {int? parentId}) {
+    Future<int> add(String code, String name, String type, {int? parentId, String? systemKey}) {
       return db.insert('accounts', {
         'code': code,
         'name': name,
         'type': type,
         'parentId': parentId,
         'isSystem': 1,
+        'systemKey': systemKey,
         'createdAt': now,
       });
     }
 
     // دارایی
-    await add('1000', 'صندوق', kAccountAsset);
-    await add('1010', 'بانک', kAccountAsset);
-    await add('1100', 'حساب‌های دریافتنی', kAccountAsset);
+    await add('1000', 'صندوق', kAccountAsset, systemKey: kSystemKeyCash);
+    await add('1010', 'بانک', kAccountAsset, systemKey: kSystemKeyBank);
+    await add('1100', 'حساب‌های دریافتنی', kAccountAsset, systemKey: kSystemKeyReceivable);
 
     // بدهی
-    await add('2000', 'حساب‌های پرداختنی', kAccountLiability);
+    await add('2000', 'حساب‌های پرداختنی', kAccountLiability, systemKey: kSystemKeyPayable);
 
     // حقوق صاحبان سرمایه
     await add('3000', 'سرمایه', kAccountEquity);
@@ -487,6 +489,46 @@ class DatabaseHelper {
       }
     }
 
+    // مرحله ۳.۲ - جلوگیری تجمیعی (نه تک‌سطری) از Overpayment در تسویه AR/AP:
+    // چون یک سند می‌تواند چند سطر برای همان طرف حساب روی همان حساب AR/AP
+    // داشته باشد، باید مجموع کاهش AR/AP همان سند برای هر طرف حساب با مانده
+    // فعلی‌اش مقایسه شود؛ نه هر سطر به‌تنهایی (وگرنه دو سطر ۳۰ و ۴۰ که هرکدام
+    // به‌تنهایی مجازند ولی مجموعشان ۷۰ از مانده ۵۰ عبور می‌کند، اشتباهاً قبول
+    // می‌شدند). بررسی پیش از هرگونه نوشتن در دیتابیس انجام می‌شود.
+    final arAccount = await getReceivableAccount();
+    final apAccount = await getPayableAccount();
+
+    final Map<int, int> arReductionByCounterparty = {};
+    final Map<int, int> apReductionByCounterparty = {};
+    for (final line in entry.lines) {
+      if (line.counterpartyId == null) continue;
+      if (arAccount != null && line.accountId == arAccount.id && line.credit > 0) {
+        arReductionByCounterparty[line.counterpartyId!] =
+            (arReductionByCounterparty[line.counterpartyId!] ?? 0) + line.credit;
+      }
+      if (apAccount != null && line.accountId == apAccount.id && line.debit > 0) {
+        apReductionByCounterparty[line.counterpartyId!] =
+            (apReductionByCounterparty[line.counterpartyId!] ?? 0) + line.debit;
+      }
+    }
+
+    for (final counterpartyId in arReductionByCounterparty.keys) {
+      final totalReduction = arReductionByCounterparty[counterpartyId]!;
+      final currentBalance = await receivableBalance(counterpartyId);
+      if (totalReduction > currentBalance) {
+        throw Exception(
+            'مجموع مبلغ دریافت (${formatMoney(totalReduction)}) از مانده طلب فعلی این طرف حساب (${formatMoney(currentBalance)}) بیشتر است؛ عملیات ثبت نشد.');
+      }
+    }
+    for (final counterpartyId in apReductionByCounterparty.keys) {
+      final totalReduction = apReductionByCounterparty[counterpartyId]!;
+      final currentBalance = await payableBalance(counterpartyId);
+      if (totalReduction > currentBalance) {
+        throw Exception(
+            'مجموع مبلغ پرداخت (${formatMoney(totalReduction)}) از مانده بدهی فعلی این طرف حساب (${formatMoney(currentBalance)}) بیشتر است؛ عملیات ثبت نشد.');
+      }
+    }
+
     // ثبت اتمیک: هدر سند و همه سطرهایش در یک تراکنش دیتابیس - در صورت بروز
     // هر خطا (مثلاً نقض یکی از CHECK constraint های سطح دیتابیس)، کل عملیات
     // rollback می‌شود و نه هدر ناقص باقی می‌ماند و نه سطر یتیم.
@@ -627,18 +669,28 @@ class DatabaseHelper {
   }
 
   /// دریافتی/هزینه یک پروژه بر اساس سطرهای برچسب‌خورده به آن
+  /// دریافتی/پرداختی واقعی یک پروژه — بر اساس حرکت واقعی وجه نقد تگ‌خورده با
+  /// همان پروژه، نه شناسایی درآمد/هزینه. مرحله ۳.۱ (اصلاح ۴): مثلاً «ایجاد
+  /// طلب ۱۰۰ میلیونی» برای پروژه باعث می‌شود received=۰ بماند تا زمانی که
+  /// واقعاً دریافتی ثبت شود؛ فیلتر بر اساس projectId مستقل از Counterparty
+  /// باقی می‌ماند - تراکنشی که فقط به طرف حساب برچسب خورده و پروژه ندارد،
+  /// به هیچ پروژه‌ای نسبت داده نمی‌شود.
   Future<Map<String, double>> projectFinancials(int projectId) async {
     final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return {'received': 0, 'spent': 0};
+
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+
     final receivedResult = await db.rawQuery('''
-      SELECT COALESCE(SUM(l.credit),0) as total
-      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE l.projectId = ? AND a.type = ?
-    ''', [projectId, kAccountIncome]);
+      SELECT COALESCE(SUM(debit),0) as total
+      FROM journal_lines WHERE projectId = ? AND accountId IN ($placeholders)
+    ''', [projectId, ...cashIds]);
     final spentResult = await db.rawQuery('''
-      SELECT COALESCE(SUM(l.debit),0) as total
-      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE l.projectId = ? AND a.type = ?
-    ''', [projectId, kAccountExpense]);
+      SELECT COALESCE(SUM(credit),0) as total
+      FROM journal_lines WHERE projectId = ? AND accountId IN ($placeholders)
+    ''', [projectId, ...cashIds]);
     return {
       'received': (receivedResult.first['total'] as num).toDouble(),
       'spent': (spentResult.first['total'] as num).toDouble(),
@@ -647,19 +699,49 @@ class DatabaseHelper {
 
   // ---------------- Accounts Receivable / Accounts Payable (مرحله ۳) ----------------
 
-  /// حساب کنترلی «حساب‌های دریافتنی» را می‌یابد (از حساب‌های پیش‌فرض seed‌شده
-  /// استفاده می‌شود؛ حساب جدید ساخته نمی‌شود مگر واقعاً وجود نداشته باشد)
+  /// حساب کنترلی «حساب‌های دریافتنی» را از روی شناسه پایدار systemKey می‌یابد
+  /// (نه جستجوی نام که شکننده است) - از حساب‌های پیش‌فرض seed‌شده استفاده
+  /// می‌شود؛ حساب جدید ساخته نمی‌شود.
   Future<AccountModel?> getReceivableAccount() async {
-    final assets = await getAccounts(type: kAccountAsset);
-    final matches = assets.where((a) => a.name.contains('دریافتنی'));
-    return matches.isNotEmpty ? matches.first : null;
+    final db = await database;
+    final maps =
+        await db.query('accounts', where: 'systemKey = ?', whereArgs: [kSystemKeyReceivable]);
+    if (maps.isEmpty) return null;
+    return AccountModel.fromMap(maps.first);
   }
 
-  /// حساب کنترلی «حساب‌های پرداختنی»
+  /// حساب کنترلی «حساب‌های پرداختنی» از روی شناسه پایدار systemKey
   Future<AccountModel?> getPayableAccount() async {
-    final liabilities = await getAccounts(type: kAccountLiability);
-    final matches = liabilities.where((a) => a.name.contains('پرداختنی'));
-    return matches.isNotEmpty ? matches.first : null;
+    final db = await database;
+    final maps = await db.query('accounts', where: 'systemKey = ?', whereArgs: [kSystemKeyPayable]);
+    if (maps.isEmpty) return null;
+    return AccountModel.fromMap(maps.first);
+  }
+
+  /// آیا این حساب یا یکی از والدینش (تا هر عمقی) صندوق/بانک است؟ با این
+  /// پیمایش، زیرحساب‌های سفارشی بانک (مثل «بانک ملت») هم بدون نیاز به
+  /// تگ‌گذاری صریح جداگانه، به‌درستی نقدی/بانکی شناسایی می‌شوند.
+  bool _isCashOrBankAccount(AccountModel account, List<AccountModel> allInType) {
+    AccountModel? current = account;
+    while (current != null) {
+      if (current.systemKey == kSystemKeyCash || current.systemKey == kSystemKeyBank) return true;
+      if (current.parentId == null) return false;
+      final parentId = current.parentId;
+      final matches = allInType.where((a) => a.id == parentId);
+      current = matches.isNotEmpty ? matches.first : null;
+    }
+    return false;
+  }
+
+  /// حساب‌های واقعاً نقد/بانکی برای انتخاب‌گر دریافت/پرداخت وجه - نه هر
+  /// حساب دارایی. بر پایه شناسه پایدار systemKey (cash/bank) به‌همراه پیمایش
+  /// زنجیره والدین است، نه فهرست سیاه یک حساب خاص؛ این‌طوری دارایی‌های
+  /// دیگری که بعداً اضافه شوند (سرقفلی، تجهیزات، سپرده، پیش‌پرداخت و...)
+  /// به‌طور پیش‌فرض نقدی/بانکی محسوب نمی‌شوند مگر واقعاً زیرمجموعه صندوق/بانک باشند.
+  Future<List<AccountModel>> getCashAccounts() async {
+    final allAssets = await getAccounts(type: kAccountAsset); // برای پیمایش زنجیره والد لازم است
+    final postable = allAssets.where((a) => !allAssets.any((x) => x.parentId == a.id)).toList();
+    return postable.where((a) => _isCashOrBankAccount(a, allAssets)).toList();
   }
 
   /// مانده مطالبات (AR) یک طرف حساب خاص - همیشه مستقیم از Ledger محاسبه
@@ -695,18 +777,29 @@ class DatabaseHelper {
 
   /// دریافتی/پرداختی یک طرف حساب — هم از راه پروژه‌های او، هم از سندهایی که
   /// مستقیم (بدون پروژه) به او برچسب خورده‌اند
+  /// دریافتی/پرداختی واقعی یک طرف حساب — بر اساس حرکت واقعی وجه نقد (بدهکار/
+  /// بستانکار شدن حساب‌های نقد/بانکی)، نه شناسایی درآمد/هزینه. مرحله ۳.۱
+  /// (اصلاح ۳): Revenue ≠ Received و Expense ≠ Paid. برای مثال «ایجاد طلب»
+  /// اصلاً به این حساب‌ها دست نمی‌زند (Received=0)، فقط «دریافت طلب» یا
+  /// «فروش نقدی» که واقعاً پول به صندوق/بانک می‌آورند در Received می‌آیند.
   Future<Map<String, double>> counterpartyFinancials(int counterpartyId) async {
     final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return {'received': 0, 'spent': 0};
+
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+
     final receivedResult = await db.rawQuery('''
-      SELECT COALESCE(SUM(l.credit),0) as total
-      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE a.type = ? AND (l.counterpartyId = ? OR l.projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
-    ''', [kAccountIncome, counterpartyId, counterpartyId]);
+      SELECT COALESCE(SUM(debit),0) as total
+      FROM journal_lines
+      WHERE accountId IN ($placeholders) AND (counterpartyId = ? OR projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
+    ''', [...cashIds, counterpartyId, counterpartyId]);
     final spentResult = await db.rawQuery('''
-      SELECT COALESCE(SUM(l.debit),0) as total
-      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE a.type = ? AND (l.counterpartyId = ? OR l.projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
-    ''', [kAccountExpense, counterpartyId, counterpartyId]);
+      SELECT COALESCE(SUM(credit),0) as total
+      FROM journal_lines
+      WHERE accountId IN ($placeholders) AND (counterpartyId = ? OR projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
+    ''', [...cashIds, counterpartyId, counterpartyId]);
     return {
       'received': (receivedResult.first['total'] as num).toDouble(),
       'spent': (spentResult.first['total'] as num).toDouble(),

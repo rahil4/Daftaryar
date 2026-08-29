@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
-import '../../models/client.dart';
+import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../utils/formatters.dart';
@@ -13,8 +13,8 @@ import '../../widgets/persian_amount_field.dart';
 /// شخص و پروژه هر دو مستقل و اختیاری‌اند (مثلاً پرداخت به یک فروشنده بدون پروژه).
 class QuickExpenseScreen extends StatefulWidget {
   final int? presetProjectId;
-  final int? presetClientId;
-  const QuickExpenseScreen({super.key, this.presetProjectId, this.presetClientId});
+  final int? presetCounterpartyId;
+  const QuickExpenseScreen({super.key, this.presetProjectId, this.presetCounterpartyId});
 
   @override
   State<QuickExpenseScreen> createState() => _QuickExpenseScreenState();
@@ -31,11 +31,11 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
   List<AccountModel> _cashAccounts = [];
   List<AccountModel> _expenseAccounts = [];
   List<ProjectModel> _projects = [];
-  List<ClientModel> _clients = [];
+  List<CounterpartyModel> _counterparties = [];
   int? _cashAccountId;
   int? _expenseAccountId;
   int? _projectId;
-  int? _clientId;
+  int? _counterpartyId;
   bool _loading = true;
   bool _saving = false;
 
@@ -43,7 +43,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
   void initState() {
     super.initState();
     _projectId = widget.presetProjectId;
-    _clientId = widget.presetClientId;
+    _counterpartyId = widget.presetCounterpartyId;
     _load();
   }
 
@@ -51,22 +51,22 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
     final asset = await _db.getPostableAccounts(type: kAccountAsset);
     final leafExpenses = await _db.getPostableAccounts(type: kAccountExpense);
     final projects = await _db.getProjects();
-    final clients = await _db.getClients();
+    final clients = await _db.getCounterparties();
 
-    int? initialClientId = _clientId;
-    if (initialClientId == null && _projectId != null) {
+    int? initialCounterpartyId = _counterpartyId;
+    if (initialCounterpartyId == null && _projectId != null) {
       final matches = projects.where((p) => p.id == _projectId);
-      if (matches.isNotEmpty) initialClientId = matches.first.clientId;
+      if (matches.isNotEmpty) initialCounterpartyId = matches.first.counterpartyId;
     }
 
     setState(() {
       _cashAccounts = asset;
       _expenseAccounts = leafExpenses;
       _projects = projects;
-      _clients = clients;
+      _counterparties = clients;
       _cashAccountId = asset.isNotEmpty ? asset.first.id : null;
       _expenseAccountId = leafExpenses.isNotEmpty ? leafExpenses.first.id : null;
-      _clientId = initialClientId;
+      _counterpartyId = initialCounterpartyId;
       _loading = false;
     });
   }
@@ -76,7 +76,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
       _projectId = projectId;
       if (projectId != null) {
         final matches = _projects.where((p) => p.id == projectId);
-        if (matches.isNotEmpty) _clientId = matches.first.clientId;
+        if (matches.isNotEmpty) _counterpartyId = matches.first.counterpartyId;
       }
     });
   }
@@ -95,13 +95,13 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
           accountId: _expenseAccountId!,
           debit: amount,
           projectId: _projectId,
-          clientId: _clientId,
+          counterpartyId: _counterpartyId,
         ),
         JournalLineModel(
           accountId: _cashAccountId!,
           credit: amount,
           projectId: _projectId,
-          clientId: _clientId,
+          counterpartyId: _counterpartyId,
         ),
       ],
     );
@@ -155,15 +155,15 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _clientId,
+                    value: _counterpartyId,
                     isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'شخص (اختیاری)'),
+                    decoration: const InputDecoration(labelText: 'طرف حساب (اختیاری)'),
                     items: [
                       const DropdownMenuItem(value: null, child: Text('—')),
-                      ..._clients.map((c) => DropdownMenuItem(
-                          value: c.id, child: Text('${c.name} (${c.relationType})'))),
+                      ..._counterparties.map((c) => DropdownMenuItem(
+                          value: c.id, child: Text('${c.name} (${c.roles.join('، ')})'))),
                     ],
-                    onChanged: (v) => setState(() => _clientId = v),
+                    onChanged: (v) => setState(() => _counterpartyId = v),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(

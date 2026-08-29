@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
-import '../../models/client.dart';
+import '../../models/counterparty.dart';
 import '../../models/journal_entry.dart';
 import '../../models/project.dart';
 import '../../models/sms_draft.dart';
@@ -31,11 +31,11 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
   List<AccountModel> _cashAccounts = [];
   List<AccountModel> _counterAccounts = []; // درآمد یا هزینه بسته به نوع
   List<ProjectModel> _projects = [];
-  List<ClientModel> _clients = [];
+  List<CounterpartyModel> _counterparties = [];
   int? _cashAccountId;
   int? _counterAccountId;
   int? _projectId;
-  int? _clientId;
+  int? _counterpartyId;
   bool _loading = true;
   bool _saving = false;
 
@@ -50,12 +50,12 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
     final leafCounter = await _db.getPostableAccounts(
         type: _type == 'دریافت' ? kAccountIncome : kAccountExpense);
     final projects = await _db.getProjects();
-    final clients = await _db.getClients();
+    final clients = await _db.getCounterparties();
     setState(() {
       _cashAccounts = asset;
       _counterAccounts = leafCounter;
       _projects = projects;
-      _clients = clients;
+      _counterparties = clients;
       _cashAccountId = asset.isNotEmpty ? asset.first.id : null;
       _counterAccountId = leafCounter.isNotEmpty ? leafCounter.first.id : null;
       _loading = false;
@@ -76,15 +76,15 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
       lines: _type == 'دریافت'
           ? [
               JournalLineModel(
-                  accountId: _cashAccountId!, debit: amount, projectId: _projectId, clientId: _clientId),
+                  accountId: _cashAccountId!, debit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
               JournalLineModel(
-                  accountId: _counterAccountId!, credit: amount, projectId: _projectId, clientId: _clientId),
+                  accountId: _counterAccountId!, credit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
             ]
           : [
               JournalLineModel(
-                  accountId: _counterAccountId!, debit: amount, projectId: _projectId, clientId: _clientId),
+                  accountId: _counterAccountId!, debit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
               JournalLineModel(
-                  accountId: _cashAccountId!, credit: amount, projectId: _projectId, clientId: _clientId),
+                  accountId: _cashAccountId!, credit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
             ],
     );
 
@@ -168,15 +168,15 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(
-                  value: _clientId,
+                  value: _counterpartyId,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'شخص (اختیاری)'),
+                  decoration: const InputDecoration(labelText: 'طرف حساب (اختیاری)'),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('—')),
-                    ..._clients.map((c) => DropdownMenuItem(
-                        value: c.id, child: Text('${c.name} (${c.relationType})'))),
+                    ..._counterparties.map((c) => DropdownMenuItem(
+                        value: c.id, child: Text('${c.name} (${c.roles.join('، ')})'))),
                   ],
-                  onChanged: (v) => setState(() => _clientId = v),
+                  onChanged: (v) => setState(() => _counterpartyId = v),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(

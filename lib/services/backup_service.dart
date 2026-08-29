@@ -6,7 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../db/database_helper.dart';
-import '../models/client.dart';
+import '../models/counterparty.dart';
 import '../models/project.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
@@ -15,16 +15,17 @@ class BackupService {
   final _db = DatabaseHelper.instance;
 
   Future<String> exportToFile() async {
-    final clients = await _db.getClients();
+    final counterparties = await _db.getCounterparties(includeInactive: true);
     final projects = await _db.getProjects();
     final accounts = await _db.getAccounts();
     final entries = await _db.getJournalEntries();
     final settings = await _db.getAllSettings();
 
     final data = {
-      'version': 3,
+      'version': 4,
       'exportedAt': DateTime.now().toIso8601String(),
-      'clients': clients.map((e) => e.toMap()).toList(),
+      'counterparties':
+          counterparties.map((e) => {...e.toMap(), 'roles': e.roles}).toList(),
       'projects': projects.map((e) => e.toMap()).toList(),
       'accounts': accounts.map((e) => e.toMap()).toList(),
       'journalEntries': entries
@@ -61,18 +62,23 @@ class BackupService {
       await _db.wipeAll();
     }
 
-    final Map<int, int> clientIdMap = {};
-    for (final c in (data['clients'] as List? ?? [])) {
-      final client = ClientModel.fromMap(Map<String, dynamic>.from(c));
-      final newId = await _db.insertClient(client);
-      clientIdMap[client.id ?? -1] = newId;
+    final Map<int, int> counterpartyIdMap = {};
+    for (final c in (data['counterparties'] as List? ?? [])) {
+      final map = Map<String, dynamic>.from(c);
+      final rolesRaw = map['roles'] as List? ?? [];
+      final roles = rolesRaw.map((r) => r.toString()).toList();
+      final counterparty = CounterpartyModel.fromMap(map, roles: roles);
+      final newId = await _db.insertCounterparty(counterparty);
+      counterpartyIdMap[counterparty.id ?? -1] = newId;
     }
 
     final Map<int, int> projectIdMap = {};
     for (final p in (data['projects'] as List? ?? [])) {
       final project = ProjectModel.fromMap(Map<String, dynamic>.from(p));
-      final mappedClientId = clientIdMap[project.clientId] ?? project.clientId;
-      final newId = await _db.insertProject(project.copyWith(clientId: mappedClientId));
+      final mappedCounterpartyId =
+          counterpartyIdMap[project.counterpartyId] ?? project.counterpartyId;
+      final newId =
+          await _db.insertProject(project.copyWith(counterpartyId: mappedCounterpartyId));
       projectIdMap[project.id ?? -1] = newId;
     }
 
@@ -109,16 +115,17 @@ class BackupService {
         final originalProjectId = lm['projectId'] as int?;
         final mappedProjectId =
             originalProjectId != null ? (projectIdMap[originalProjectId] ?? originalProjectId) : null;
-        final originalClientId = lm['clientId'] as int?;
-        final mappedClientId =
-            originalClientId != null ? (clientIdMap[originalClientId] ?? originalClientId) : null;
+        final originalCounterpartyId = lm['counterpartyId'] as int?;
+        final mappedCounterpartyId = originalCounterpartyId != null
+            ? (counterpartyIdMap[originalCounterpartyId] ?? originalCounterpartyId)
+            : null;
         return JournalLineModel(
           accountId: mappedAccountId,
           debit: (lm['debit'] as num).round(),
           credit: (lm['credit'] as num).round(),
           description: lm['description'] as String?,
           projectId: mappedProjectId,
-          clientId: mappedClientId,
+          counterpartyId: mappedCounterpartyId,
         );
       }).toList();
 

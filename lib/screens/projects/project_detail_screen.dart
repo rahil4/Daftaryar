@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
-import '../../models/client.dart';
+import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
@@ -22,7 +22,7 @@ class ProjectDetailScreen extends StatefulWidget {
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
   final _db = DatabaseHelper.instance;
   late ProjectModel _project;
-  ClientModel? _client;
+  CounterpartyModel? _counterparty;
   List<JournalEntryModel> _entries = [];
   double _received = 0;
   double _spent = 0;
@@ -37,11 +37,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final client = await _db.getClient(_project.clientId);
+    final client = await _db.getCounterparty(_project.counterpartyId);
     final entries = await _db.getJournalEntries(projectId: _project.id);
     final financials = await _db.projectFinancials(_project.id!);
     setState(() {
-      _client = client;
+      _counterparty = client;
       _entries = entries;
       _received = financials['received']!;
       _spent = financials['spent']!;
@@ -114,7 +114,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
                                 const Icon(Icons.person_outline,
                                     size: 16, color: AppColors.textSecondary),
                                 const SizedBox(width: 6),
-                                Text(_client?.name ?? '—'),
+                                Text(_counterparty?.name ?? '—'),
                               ],
                             ),
                             const SizedBox(height: 6),

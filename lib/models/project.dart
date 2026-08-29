@@ -18,7 +18,7 @@ const List<String> kProjectStatuses = [
 class ProjectModel {
   final int? id;
   final String title;
-  final int clientId;
+  final int counterpartyId;
   final String projectType;
   final String status;
   final String startDate; // شمسی yyyy/mm/dd
@@ -29,7 +29,7 @@ class ProjectModel {
   ProjectModel({
     this.id,
     required this.title,
-    required this.clientId,
+    required this.counterpartyId,
     required this.projectType,
     required this.status,
     required this.startDate,
@@ -42,7 +42,7 @@ class ProjectModel {
     return {
       'id': id,
       'title': title,
-      'clientId': clientId,
+      'counterpartyId': counterpartyId,
       'projectType': projectType,
       'status': status,
       'startDate': startDate,
@@ -56,7 +56,7 @@ class ProjectModel {
     return ProjectModel(
       id: map['id'] as int?,
       title: map['title'] as String,
-      clientId: map['clientId'] as int,
+      counterpartyId: map['counterpartyId'] as int,
       projectType: map['projectType'] as String,
       status: map['status'] as String,
       startDate: map['startDate'] as String,
@@ -69,7 +69,7 @@ class ProjectModel {
   ProjectModel copyWith({
     int? id,
     String? title,
-    int? clientId,
+    int? counterpartyId,
     String? projectType,
     String? status,
     String? startDate,
@@ -80,7 +80,7 @@ class ProjectModel {
     return ProjectModel(
       id: id ?? this.id,
       title: title ?? this.title,
-      clientId: clientId ?? this.clientId,
+      counterpartyId: counterpartyId ?? this.counterpartyId,
       projectType: projectType ?? this.projectType,
       status: status ?? this.status,
       startDate: startDate ?? this.startDate,

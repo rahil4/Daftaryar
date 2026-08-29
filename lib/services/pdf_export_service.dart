@@ -194,9 +194,9 @@ class PdfExportService {
     await Printing.sharePdf(bytes: await doc.save(), filename: 'تراز_آزمایشی.pdf');
   }
 
-  Future<void> exportClientStatement({
-    required String clientName,
-    String? clientPhone,
+  Future<void> exportCounterpartyStatement({
+    required String counterpartyName,
+    String? counterpartyPhone,
     required List<Map<String, dynamic>> projectRows, // {title, agreedAmount, received, spent, remaining}
     required List<Map<String, dynamic>> transactions, // {date, description, type, amount}
   }) async {
@@ -217,7 +217,7 @@ class PdfExportService {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.stretch,
               children: [
-                _header('صورتحساب $clientName', clientPhone != null ? 'شماره تماس: $clientPhone' : ''),
+                _header('صورتحساب $counterpartyName', counterpartyPhone != null ? 'شماره تماس: $counterpartyPhone' : ''),
                 pw.Text('تاریخ صدور: ${formatJalaliLong(todayJalaliString())}',
                     style: pw.TextStyle(font: _regularFont, fontSize: 9, color: PdfColors.grey600)),
                 pw.SizedBox(height: 14),
@@ -292,7 +292,7 @@ class PdfExportService {
       ),
     );
 
-    await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$clientName.pdf');
+    await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$counterpartyName.pdf');
   }
 
   pw.Widget _cell(String text, {bool bold = false}) {

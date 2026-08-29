@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/project.dart';
-import '../../models/client.dart';
 import '../../theme/app_theme.dart';
 import 'project_form_screen.dart';
 import 'project_detail_screen.dart';
-import '../clients/clients_screen.dart';
+import '../counterparties/counterparties_screen.dart';
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({super.key});
@@ -18,7 +17,7 @@ class ProjectsScreen extends StatefulWidget {
 class _ProjectsScreenState extends State<ProjectsScreen> {
   final _db = DatabaseHelper.instance;
   List<ProjectModel> _projects = [];
-  Map<int, String> _clientNames = {};
+  Map<int, String> _counterpartyNames = {};
   bool _loading = true;
   String _query = '';
   String? _statusFilter;
@@ -32,13 +31,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final projects = await _db.getProjects(query: _query);
-    final clients = await _db.getClients();
-    final names = {for (final c in clients) c.id!: c.name};
+    final counterparties = await _db.getCounterparties(includeInactive: true);
+    final names = {for (final c in counterparties) c.id!: c.name};
     setState(() {
       _projects = _statusFilter == null
           ? projects
           : projects.where((p) => p.status == _statusFilter).toList();
-      _clientNames = names;
+      _counterpartyNames = names;
       _loading = false;
     });
   }
@@ -54,7 +53,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             tooltip: 'اشخاص',
             onPressed: () async {
               await Navigator.push(
-                  context, MaterialPageRoute(builder: (_) => const ClientsScreen()));
+                  context, MaterialPageRoute(builder: (_) => const CounterpartiesScreen()));
               _load();
             },
           ),
@@ -125,7 +124,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                 leading: const Icon(Icons.work_outline, color: AppColors.brass),
                                 title: Text(p.title),
                                 subtitle: Text(
-                                    '${_clientNames[p.clientId] ?? '—'} · ${p.projectType}'),
+                                    '${_counterpartyNames[p.counterpartyId] ?? '—'} · ${p.projectType}'),
                                 trailing: _StatusBadge(status: p.status),
                                 onTap: () async {
                                   await Navigator.push(context,

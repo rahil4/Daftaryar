@@ -10,7 +10,7 @@ import '../sms_drafts/manual_sms_entry_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../accounts/accounts_screen.dart';
-import '../clients/clients_screen.dart';
+import '../counterparties/counterparties_screen.dart';
 import '../onboarding/fiscal_year_setup_screen.dart';
 import '../lock/pin_setup_screen.dart';
 
@@ -230,10 +230,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.people_alt_outlined, color: AppColors.brass),
-                    title: const Text('اشخاص'),
-                    subtitle: const Text('مدیریت لیست اشخاص'),
+                    title: const Text('طرف‌های حساب'),
+                    subtitle: const Text('مدیریت طرف‌های حساب و نقش‌های آن‌ها'),
                     onTap: () => Navigator.push(
-                        context, MaterialPageRoute(builder: (_) => const ClientsScreen())),
+                        context, MaterialPageRoute(builder: (_) => const CounterpartiesScreen())),
                   ),
                 ),
                 const SizedBox(height: 12),

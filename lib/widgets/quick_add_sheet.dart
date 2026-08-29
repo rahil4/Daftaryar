@@ -11,7 +11,7 @@ import '../screens/journal/journal_form_screen.dart';
 Future<void> showQuickAddSheet(
   BuildContext context, {
   int? presetProjectId,
-  int? presetClientId,
+  int? presetCounterpartyId,
   VoidCallback? onDone,
 }) {
   return showModalBottomSheet(
@@ -26,14 +26,14 @@ Future<void> showQuickAddSheet(
           ListTile(
             leading: const Icon(Icons.south_west_rounded, color: AppColors.positive),
             title: const Text('ثبت دریافت وجه'),
-            subtitle: const Text('دریافت از شخص یا سایر منابع'),
+            subtitle: const Text('دریافت از طرف حساب یا سایر منابع'),
             onTap: () async {
               Navigator.pop(ctx);
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
                     builder: (_) => QuickReceiptScreen(
-                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
+                        presetProjectId: presetProjectId, presetCounterpartyId: presetCounterpartyId)),
               );
               if (result == true) onDone?.call();
             },
@@ -48,7 +48,7 @@ Future<void> showQuickAddSheet(
                 context,
                 MaterialPageRoute(
                     builder: (_) => QuickExpenseScreen(
-                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
+                        presetProjectId: presetProjectId, presetCounterpartyId: presetCounterpartyId)),
               );
               if (result == true) onDone?.call();
             },
@@ -63,7 +63,7 @@ Future<void> showQuickAddSheet(
                 context,
                 MaterialPageRoute(
                     builder: (_) => JournalFormScreen(
-                        presetProjectId: presetProjectId, presetClientId: presetClientId)),
+                        presetProjectId: presetProjectId, presetCounterpartyId: presetCounterpartyId)),
               );
               if (result == true) onDone?.call();
             },

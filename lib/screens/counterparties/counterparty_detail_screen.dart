@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
-import '../../models/client.dart';
+import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../theme/app_theme.dart';
@@ -9,42 +9,42 @@ import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
 import '../../services/pdf_export_service.dart';
-import 'client_form_screen.dart';
+import 'counterparty_form_screen.dart';
 import '../projects/project_detail_screen.dart';
 import '../projects/project_form_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
 
-class ClientDetailScreen extends StatefulWidget {
-  final ClientModel client;
-  const ClientDetailScreen({super.key, required this.client});
+class CounterpartyDetailScreen extends StatefulWidget {
+  final CounterpartyModel counterparty;
+  const CounterpartyDetailScreen({super.key, required this.counterparty});
 
   @override
-  State<ClientDetailScreen> createState() => _ClientDetailScreenState();
+  State<CounterpartyDetailScreen> createState() => _CounterpartyDetailScreenState();
 }
 
-class _ClientDetailScreenState extends State<ClientDetailScreen> {
+class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
   final _db = DatabaseHelper.instance;
   final _pdf = PdfExportService();
   List<ProjectModel> _projects = [];
   List<JournalEntryModel> _directEntries = [];
   double _received = 0;
   double _spent = 0;
-  late ClientModel _client;
+  late CounterpartyModel _counterparty;
   bool _loading = true;
   bool _exporting = false;
 
   @override
   void initState() {
     super.initState();
-    _client = widget.client;
+    _counterparty = widget.counterparty;
     _load();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final projects = await _db.getProjects(clientId: _client.id);
-    final directEntries = await _db.getDirectClientEntries(_client.id!);
-    final fin = await _db.clientFinancials(_client.id!);
+    final projects = await _db.getProjects(counterpartyId: _counterparty.id);
+    final directEntries = await _db.getDirectCounterpartyEntries(_counterparty.id!);
+    final fin = await _db.counterpartyFinancials(_counterparty.id!);
     setState(() {
       _projects = projects;
       _directEntries = directEntries;
@@ -55,7 +55,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
   }
 
   void _showAddOptions() {
-    showQuickAddSheet(context, presetClientId: _client.id, onDone: _load);
+    showQuickAddSheet(context, presetCounterpartyId: _counterparty.id, onDone: _load);
   }
 
   Future<void> _exportStatement() async {
@@ -92,7 +92,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
       // تراکنش‌های مستقیم (بدون پروژه) هم به صورتحساب اضافه می‌شوند
       for (final e in _directEntries) {
         for (final l in e.lines) {
-          if (l.clientId != _client.id) continue;
+          if (l.counterpartyId != _counterparty.id) continue;
           if (l.debit == 0 && l.credit == 0) continue;
           transactions.add({
             'date': e.date,
@@ -105,9 +105,9 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
 
       transactions.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
-      await _pdf.exportClientStatement(
-        clientName: _client.name,
-        clientPhone: _client.phone,
+      await _pdf.exportCounterpartyStatement(
+        counterpartyName: _counterparty.name,
+        counterpartyPhone: _counterparty.phone,
         projectRows: projectRows,
         transactions: transactions,
       );
@@ -116,13 +116,38 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     }
   }
 
-  Future<void> _deleteClient() async {
+  Future<void> _toggleActive() async {
+    await _db.setCounterpartyActive(_counterparty.id!, !_counterparty.isActive);
+    final updated = await _db.getCounterparty(_counterparty.id!);
+    if (updated != null && mounted) setState(() => _counterparty = updated);
+  }
+
+  Future<void> _deleteCounterparty() async {
+    final hasHistory = _projects.isNotEmpty || _directEntries.isNotEmpty;
+    if (hasHistory) {
+      final goDeactivate = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('حذف ممکن نیست'),
+          content: const Text(
+              'این طرف حساب پروژه یا سند مالی ثبت‌شده دارد و برای حفظ سوابق حسابداری، قابل حذف فیزیکی نیست. به‌جای آن می‌توانید غیرفعالش کنید.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('بستن')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('غیرفعال کردن')),
+          ],
+        ),
+      );
+      if (goDeactivate == true) await _toggleActive();
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف شخص'),
-        content: Text(
-            'با حذف «${_client.name}» تمام پروژه‌های این شخص هم حذف می‌شود. اسناد حسابداری ثبت‌شده حذف نمی‌شوند، فقط برچسب شخص/پروژه از آن‌ها برداشته می‌شود. ادامه می‌دهید؟'),
+        title: const Text('حذف طرف حساب'),
+        content: Text('«${_counterparty.name}» برای همیشه حذف می‌شود. ادامه می‌دهید؟'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
           TextButton(
@@ -131,9 +156,16 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
         ],
       ),
     );
-    if (confirm == true && _client.id != null) {
-      await _db.deleteClient(_client.id!);
-      if (mounted) Navigator.pop(context);
+    if (confirm == true) {
+      try {
+        await _db.deleteCounterparty(_counterparty.id!);
+        if (mounted) Navigator.pop(context);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        }
+      }
     }
   }
 
@@ -142,20 +174,27 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     final net = _received - _spent;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_client.name),
+        title: Text(_counterparty.name),
         actions: [
+          IconButton(
+            icon: Icon(_counterparty.isActive
+                ? Icons.toggle_on_outlined
+                : Icons.toggle_off_outlined),
+            tooltip: _counterparty.isActive ? 'غیرفعال کردن' : 'فعال کردن',
+            onPressed: _toggleActive,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             onPressed: () async {
               final result = await Navigator.push(context,
-                  MaterialPageRoute(builder: (_) => ClientFormScreen(existing: _client)));
+                  MaterialPageRoute(builder: (_) => CounterpartyFormScreen(existing: _counterparty)));
               if (result == true) {
-                final updated = await _db.getClient(_client.id!);
-                if (updated != null) setState(() => _client = updated);
+                final updated = await _db.getCounterparty(_counterparty.id!);
+                if (updated != null) setState(() => _counterparty = updated);
               }
             },
           ),
-          IconButton(icon: const Icon(Icons.delete_outline), onPressed: _deleteClient),
+          IconButton(icon: const Icon(Icons.delete_outline), onPressed: _deleteCounterparty),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -174,21 +213,32 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                 child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (!_counterparty.isActive)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppColors.textSecondary.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text('این طرف حساب غیرفعال است',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                      ),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _infoRow(Icons.badge_outlined, _client.relationType),
-                            if (_client.phone != null)
-                              _infoRow(Icons.phone_outlined, _client.phone!),
-                            if (_client.nationalId != null)
-                              _infoRow(Icons.perm_identity_outlined, _client.nationalId!),
-                            if (_client.address != null)
-                              _infoRow(Icons.location_on_outlined, _client.address!),
-                            if (_client.notes != null)
-                              _infoRow(Icons.notes_outlined, _client.notes!),
+                            _infoRow(Icons.badge_outlined, _counterparty.roles.join('، ')),
+                            if (_counterparty.phone != null)
+                              _infoRow(Icons.phone_outlined, _counterparty.phone!),
+                            if (_counterparty.nationalId != null)
+                              _infoRow(Icons.perm_identity_outlined, _counterparty.nationalId!),
+                            if (_counterparty.address != null)
+                              _infoRow(Icons.location_on_outlined, _counterparty.address!),
+                            if (_counterparty.notes != null)
+                              _infoRow(Icons.notes_outlined, _counterparty.notes!),
                           ],
                         ),
                       ),
@@ -215,7 +265,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                           color: AppColors.negative,
                         ),
                         StatCard(
-                          title: net >= 0 ? 'مانده به نفع شخص' : 'مانده بدهکار شخص',
+                          title: net >= 0 ? 'مانده به نفع طرف حساب' : 'مانده بدهکار طرف حساب',
                           value: formatMoney(net.abs()),
                           icon: Icons.account_balance_wallet_outlined,
                           color: net >= 0 ? AppColors.positive : AppColors.negative,
@@ -227,7 +277,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                       child: TextButton.icon(
                         onPressed: _showAddOptions,
                         icon: const Icon(Icons.add, size: 18),
-                        label: const Text('ثبت دریافت/پرداخت برای این شخص'),
+                        label: const Text('ثبت دریافت/پرداخت برای این طرف حساب'),
                       ),
                     ),
 
@@ -235,14 +285,14 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('پروژه‌های این شخص (${pn(_projects.length)})',
+                        Text('پروژه‌های این طرف حساب (${pn(_projects.length)})',
                             style: Theme.of(context).textTheme.titleMedium),
                         TextButton.icon(
                           onPressed: () async {
                             final result = await Navigator.push(
                               context,
                               MaterialPageRoute(
-                                  builder: (_) => ProjectFormScreen(presetClient: _client)),
+                                  builder: (_) => ProjectFormScreen(presetCounterparty: _counterparty)),
                             );
                             if (result == true) _load();
                           },
@@ -254,7 +304,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                     if (_projects.isEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 4, bottom: 8),
-                        child: Text('پروژه‌ای برای این شخص ثبت نشده',
+                        child: Text('پروژه‌ای برای این طرف حساب ثبت نشده',
                             style: TextStyle(color: AppColors.textSecondary)),
                       )
                     else
@@ -278,7 +328,7 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
                     if (_directEntries.isEmpty)
                       const Padding(
                         padding: EdgeInsets.only(top: 4),
-                        child: Text('تراکنش مستقیمی برای این شخص ثبت نشده',
+                        child: Text('تراکنش مستقیمی برای این طرف حساب ثبت نشده',
                             style: TextStyle(color: AppColors.textSecondary)),
                       )
                     else

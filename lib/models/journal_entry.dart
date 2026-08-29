@@ -9,7 +9,7 @@ class JournalLineModel {
   final int credit;
   final String? description;
   final int? projectId;
-  final int? clientId; // برچسب شخص، مستقل از پروژه (مثلاً برای فروشنده بدون پروژه)
+  final int? counterpartyId; // برچسب طرف حساب، مستقل از پروژه (مثلاً برای پیمانکار بدون پروژه)
 
   JournalLineModel({
     this.id,
@@ -19,7 +19,7 @@ class JournalLineModel {
     this.credit = 0,
     this.description,
     this.projectId,
-    this.clientId,
+    this.counterpartyId,
   });
 
   Map<String, dynamic> toMap() {
@@ -31,7 +31,7 @@ class JournalLineModel {
       'credit': credit,
       'description': description,
       'projectId': projectId,
-      'clientId': clientId,
+      'counterpartyId': counterpartyId,
     };
   }
 
@@ -44,7 +44,7 @@ class JournalLineModel {
       credit: (map['credit'] as num).round(),
       description: map['description'] as String?,
       projectId: map['projectId'] as int?,
-      clientId: map['clientId'] as int?,
+      counterpartyId: map['counterpartyId'] as int?,
     );
   }
 }

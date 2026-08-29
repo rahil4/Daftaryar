@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
-import '../../models/client.dart';
+import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
-import '../clients/client_form_screen.dart';
+import '../counterparties/counterparty_form_screen.dart';
 
 class ProjectFormScreen extends StatefulWidget {
   final ProjectModel? existing;
-  final ClientModel? presetClient;
-  const ProjectFormScreen({super.key, this.existing, this.presetClient});
+  final CounterpartyModel? presetCounterparty;
+  const ProjectFormScreen({super.key, this.existing, this.presetCounterparty});
 
   @override
   State<ProjectFormScreen> createState() => _ProjectFormScreenState();
@@ -33,8 +33,8 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   String _projectType = kProjectTypes.first;
   String _status = kProjectStatuses.first;
 
-  List<ClientModel> _clients = [];
-  int? _selectedClientId;
+  List<CounterpartyModel> _counterparties = [];
+  int? _selectedCounterpartyId;
   bool _loading = true;
   bool _saving = false;
 
@@ -44,32 +44,32 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     _startDate = widget.existing?.startDate ?? todayJalaliString();
     _projectType = widget.existing?.projectType ?? kProjectTypes.first;
     _status = widget.existing?.status ?? kProjectStatuses.first;
-    _selectedClientId = widget.existing?.clientId ?? widget.presetClient?.id;
-    _loadClients();
+    _selectedCounterpartyId = widget.existing?.counterpartyId ?? widget.presetCounterparty?.id;
+    _loadCounterparties();
   }
 
-  Future<void> _loadClients() async {
-    final list = await _db.getClients();
+  Future<void> _loadCounterparties() async {
+    final list = await _db.getCounterparties();
     setState(() {
-      _clients = list;
+      _counterparties = list;
       _loading = false;
     });
   }
 
-  Future<void> _addNewClientInline() async {
+  Future<void> _addNewCounterpartyInline() async {
     final result = await Navigator.push(
-        context, MaterialPageRoute(builder: (_) => const ClientFormScreen()));
+        context, MaterialPageRoute(builder: (_) => const CounterpartyFormScreen()));
     if (result == true) {
-      await _loadClients();
-      if (_clients.isNotEmpty) {
-        setState(() => _selectedClientId = _clients.first.id);
+      await _loadCounterparties();
+      if (_counterparties.isNotEmpty) {
+        setState(() => _selectedCounterpartyId = _counterparties.first.id);
       }
     }
   }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedClientId == null) {
+    if (_selectedCounterpartyId == null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('لطفاً کارفرما را انتخاب کنید')));
       return;
@@ -78,7 +78,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final model = ProjectModel(
       id: widget.existing?.id,
       title: _title.text.trim(),
-      clientId: _selectedClientId!,
+      counterpartyId: _selectedCounterpartyId!,
       projectType: _projectType,
       status: _status,
       startDate: _startDate,
@@ -117,17 +117,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<int>(
-                          value: _selectedClientId,
+                          value: _selectedCounterpartyId,
                           decoration: const InputDecoration(labelText: 'کارفرما *'),
-                          items: _clients
+                          items: _counterparties
                               .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name)))
                               .toList(),
-                          onChanged: (v) => setState(() => _selectedClientId = v),
+                          onChanged: (v) => setState(() => _selectedCounterpartyId = v),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton.filled(
-                        onPressed: _addNewClientInline,
+                        onPressed: _addNewCounterpartyInline,
                         icon: const Icon(Icons.person_add_alt_1_outlined),
                         style: IconButton.styleFrom(backgroundColor: AppColors.surfaceAlt),
                       ),

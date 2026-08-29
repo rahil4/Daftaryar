@@ -2,7 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
-import '../models/client.dart';
+import '../models/counterparty.dart';
 import '../models/project.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
@@ -23,7 +23,7 @@ class DatabaseHelper {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'daftaryar_v6.db');
+    final path = join(dbPath, 'daftaryar_v7.db');
     return openDatabase(
       path,
       version: 1,
@@ -38,15 +38,36 @@ class DatabaseHelper {
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
-      CREATE TABLE clients (
+      CREATE TABLE counterparties (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         phone TEXT,
-        nationalId TEXT,
         address TEXT,
+        nationalId TEXT,
         notes TEXT,
-        relationType TEXT NOT NULL DEFAULT 'کارفرما',
-        createdAt TEXT NOT NULL
+        isActive INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      )
+    ''');
+
+    // نقش‌ها به‌صورت جدول مستقل (نه فیلد ثابت روی خودِ طرف حساب) تا افزودن
+    // نقش جدید در آینده نیازی به تغییر ساختار اصلی نداشته باشد.
+    await db.execute('''
+      CREATE TABLE counterparty_roles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE counterparty_role_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        counterpartyId INTEGER NOT NULL,
+        roleId INTEGER NOT NULL,
+        FOREIGN KEY (counterpartyId) REFERENCES counterparties (id) ON DELETE CASCADE,
+        FOREIGN KEY (roleId) REFERENCES counterparty_roles (id) ON DELETE CASCADE,
+        UNIQUE (counterpartyId, roleId)
       )
     ''');
 
@@ -54,14 +75,14 @@ class DatabaseHelper {
       CREATE TABLE projects (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
-        clientId INTEGER NOT NULL,
+        counterpartyId INTEGER NOT NULL,
         projectType TEXT NOT NULL,
         status TEXT NOT NULL,
         startDate TEXT NOT NULL,
         agreedAmount REAL NOT NULL DEFAULT 0,
         description TEXT,
         createdAt TEXT NOT NULL,
-        FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE CASCADE
+        FOREIGN KEY (counterpartyId) REFERENCES counterparties (id) ON DELETE CASCADE
       )
     ''');
 
@@ -96,11 +117,11 @@ class DatabaseHelper {
         credit INTEGER NOT NULL DEFAULT 0,
         description TEXT,
         projectId INTEGER,
-        clientId INTEGER,
+        counterpartyId INTEGER,
         FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE,
         FOREIGN KEY (accountId) REFERENCES accounts (id),
         FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE SET NULL,
-        FOREIGN KEY (clientId) REFERENCES clients (id) ON DELETE SET NULL,
+        FOREIGN KEY (counterpartyId) REFERENCES counterparties (id) ON DELETE SET NULL,
         CHECK (debit >= 0 AND credit >= 0),
         CHECK (NOT (debit > 0 AND credit > 0)),
         CHECK (NOT (debit = 0 AND credit = 0))
@@ -109,6 +130,13 @@ class DatabaseHelper {
 
     await db.execute('CREATE INDEX idx_journal_lines_entryId ON journal_lines (entryId)');
     await db.execute('CREATE INDEX idx_journal_lines_accountId ON journal_lines (accountId)');
+    await db.execute('CREATE INDEX idx_projects_counterpartyId ON projects (counterpartyId)');
+    await db.execute(
+        'CREATE INDEX idx_role_assignments_counterpartyId ON counterparty_role_assignments (counterpartyId)');
+
+    for (final roleName in kDefaultCounterpartyRoles) {
+      await db.insert('counterparty_roles', {'name': roleName});
+    }
 
     await db.execute('''
       CREATE TABLE app_settings (
@@ -171,38 +199,146 @@ class DatabaseHelper {
     await add('5090', 'سایر هزینه‌های عمومی', kAccountExpense);
   }
 
-  // ---------------- Clients ----------------
-  Future<int> insertClient(ClientModel c) async {
+  // ---------------- Counterparties (طرف حساب) ----------------
+
+  Future<int> insertCounterparty(CounterpartyModel c) async {
     final db = await database;
-    return db.insert('clients', c.toMap()..remove('id'));
+    final id = await db.insert(
+        'counterparties',
+        c.toMap()
+          ..remove('id')
+          ..remove('roles'));
+    if (c.roles.isNotEmpty) {
+      await setCounterpartyRoles(id, c.roles);
+    }
+    return id;
   }
 
-  Future<int> updateClient(ClientModel c) async {
+  Future<int> updateCounterparty(CounterpartyModel c) async {
     final db = await database;
-    return db.update('clients', c.toMap(), where: 'id = ?', whereArgs: [c.id]);
+    final result = await db.update(
+        'counterparties',
+        c.toMap()
+          ..remove('roles'),
+        where: 'id = ?', whereArgs: [c.id]);
+    await setCounterpartyRoles(c.id!, c.roles);
+    return result;
   }
 
-  Future<int> deleteClient(int id) async {
+  /// حذف فیزیکی فقط وقتی مجاز است که هیچ پروژه یا سند مالی به این طرف حساب
+  /// اشاره نکرده باشد؛ در غیر این صورت خطا می‌دهد و باید غیرفعال شود.
+  Future<void> deleteCounterparty(int id) async {
     final db = await database;
-    return db.delete('clients', where: 'id = ?', whereArgs: [id]);
+    final projectRows =
+        await db.query('projects', where: 'counterpartyId = ?', whereArgs: [id], limit: 1);
+    if (projectRows.isNotEmpty) {
+      throw Exception('این طرف حساب پروژه ثبت‌شده دارد و قابل حذف فیزیکی نیست؛ آن را غیرفعال کنید.');
+    }
+    final lineRows = await db.query('journal_lines',
+        where: 'counterpartyId = ?', whereArgs: [id], limit: 1);
+    if (lineRows.isNotEmpty) {
+      throw Exception('این طرف حساب در اسناد حسابداری استفاده شده و قابل حذف فیزیکی نیست؛ آن را غیرفعال کنید.');
+    }
+    await db.delete('counterparty_role_assignments', where: 'counterpartyId = ?', whereArgs: [id]);
+    await db.delete('counterparties', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<ClientModel>> getClients({String? query}) async {
+  Future<void> setCounterpartyActive(int id, bool isActive) async {
     final db = await database;
-    final maps = query == null || query.isEmpty
-        ? await db.query('clients', orderBy: 'name ASC')
-        : await db.query('clients',
-            where: 'name LIKE ? OR phone LIKE ?',
-            whereArgs: ['%$query%', '%$query%'],
-            orderBy: 'name ASC');
-    return maps.map((m) => ClientModel.fromMap(m)).toList();
+    await db.update('counterparties', {'isActive': isActive ? 1 : 0, 'updatedAt': todayJalaliString()},
+        where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<ClientModel?> getClient(int id) async {
+  Future<List<String>> _rolesForCounterparty(Database db, int counterpartyId) async {
+    final rows = await db.rawQuery('''
+      SELECT r.name as name FROM counterparty_roles r
+      JOIN counterparty_role_assignments a ON a.roleId = r.id
+      WHERE a.counterpartyId = ?
+      ORDER BY r.name ASC
+    ''', [counterpartyId]);
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
+  /// مجموعه نقش‌های یک طرف حساب را با مجموعه داده‌شده جایگزین می‌کند (نه اضافه)
+  Future<void> setCounterpartyRoles(int counterpartyId, List<String> roleNames) async {
     final db = await database;
-    final maps = await db.query('clients', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('counterparty_role_assignments',
+          where: 'counterpartyId = ?', whereArgs: [counterpartyId]);
+      for (final roleName in roleNames) {
+        var roleRows =
+            await txn.query('counterparty_roles', where: 'name = ?', whereArgs: [roleName]);
+        int roleId;
+        if (roleRows.isEmpty) {
+          roleId = await txn.insert('counterparty_roles', {'name': roleName});
+        } else {
+          roleId = roleRows.first['id'] as int;
+        }
+        await txn.insert('counterparty_role_assignments',
+            {'counterpartyId': counterpartyId, 'roleId': roleId});
+      }
+    });
+  }
+
+  Future<List<CounterpartyRoleModel>> getAllRoles() async {
+    final db = await database;
+    final maps = await db.query('counterparty_roles', orderBy: 'name ASC');
+    return maps.map((m) => CounterpartyRoleModel.fromMap(m)).toList();
+  }
+
+  /// طرف‌های حساب؛ پیش‌فرض فقط فعال‌ها (برای انتخاب‌گرهای UI)، مگر این‌که
+  /// includeInactive=true باشد (برای لیست کامل مدیریتی یا نمایش رکورد قدیمی)
+  Future<List<CounterpartyModel>> getCounterparties({
+    String? query,
+    bool includeInactive = false,
+  }) async {
+    final db = await database;
+    String? where = includeInactive ? null : 'isActive = 1';
+    List<Object?> args = [];
+    if (query != null && query.isNotEmpty) {
+      final searchClause = '(name LIKE ? OR phone LIKE ?)';
+      where = where == null ? searchClause : '$where AND $searchClause';
+      args = ['%$query%', '%$query%'];
+    }
+    final maps = await db.query('counterparties',
+        where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'name ASC');
+    final result = <CounterpartyModel>[];
+    for (final m in maps) {
+      final roles = await _rolesForCounterparty(db, m['id'] as int);
+      result.add(CounterpartyModel.fromMap(m, roles: roles));
+    }
+    return result;
+  }
+
+  Future<CounterpartyModel?> getCounterparty(int id) async {
+    final db = await database;
+    final maps = await db.query('counterparties', where: 'id = ?', whereArgs: [id]);
     if (maps.isEmpty) return null;
-    return ClientModel.fromMap(maps.first);
+    final roles = await _rolesForCounterparty(db, id);
+    return CounterpartyModel.fromMap(maps.first, roles: roles);
+  }
+
+  /// بررسی نرم و غیرمسدودکننده تکراری بودن - بر اساس تطابق کد ملی (در صورت
+  /// وجود) یا تطابق دقیق نام؛ فقط برای هشدار به کاربر، نه رد خودکار
+  Future<CounterpartyModel?> findPossibleDuplicateCounterparty({
+    required String name,
+    String? nationalId,
+    int? excludeId,
+  }) async {
+    final db = await database;
+    if (nationalId != null && nationalId.trim().isNotEmpty) {
+      final where = excludeId != null ? 'nationalId = ? AND id != ?' : 'nationalId = ?';
+      final args = excludeId != null ? [nationalId.trim(), excludeId] : [nationalId.trim()];
+      final rows = await db.query('counterparties', where: where, whereArgs: args);
+      if (rows.isNotEmpty) return CounterpartyModel.fromMap(rows.first);
+    }
+    final nameWhere = excludeId != null ? 'LOWER(name) = ? AND id != ?' : 'LOWER(name) = ?';
+    final nameArgs = excludeId != null
+        ? [name.trim().toLowerCase(), excludeId]
+        : [name.trim().toLowerCase()];
+    final rows = await db.query('counterparties', where: nameWhere, whereArgs: nameArgs);
+    if (rows.isNotEmpty) return CounterpartyModel.fromMap(rows.first);
+    return null;
   }
 
   // ---------------- Projects ----------------
@@ -221,13 +357,13 @@ class DatabaseHelper {
     return db.delete('projects', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<ProjectModel>> getProjects({int? clientId, String? query}) async {
+  Future<List<ProjectModel>> getProjects({int? counterpartyId, String? query}) async {
     final db = await database;
     String? where;
     List<Object?> args = [];
-    if (clientId != null) {
-      where = 'clientId = ?';
-      args.add(clientId);
+    if (counterpartyId != null) {
+      where = 'counterpartyId = ?';
+      args.add(counterpartyId);
     }
     if (query != null && query.isNotEmpty) {
       where = where == null ? 'title LIKE ?' : '$where AND title LIKE ?';
@@ -509,35 +645,35 @@ class DatabaseHelper {
     };
   }
 
-  /// دریافتی/پرداختی یک شخص — هم از راه پروژه‌های او، هم از سندهایی که
+  /// دریافتی/پرداختی یک طرف حساب — هم از راه پروژه‌های او، هم از سندهایی که
   /// مستقیم (بدون پروژه) به او برچسب خورده‌اند
-  Future<Map<String, double>> clientFinancials(int clientId) async {
+  Future<Map<String, double>> counterpartyFinancials(int counterpartyId) async {
     final db = await database;
     final receivedResult = await db.rawQuery('''
       SELECT COALESCE(SUM(l.credit),0) as total
       FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE a.type = ? AND (l.clientId = ? OR l.projectId IN (SELECT id FROM projects WHERE clientId = ?))
-    ''', [kAccountIncome, clientId, clientId]);
+      WHERE a.type = ? AND (l.counterpartyId = ? OR l.projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
+    ''', [kAccountIncome, counterpartyId, counterpartyId]);
     final spentResult = await db.rawQuery('''
       SELECT COALESCE(SUM(l.debit),0) as total
       FROM journal_lines l JOIN accounts a ON a.id = l.accountId
-      WHERE a.type = ? AND (l.clientId = ? OR l.projectId IN (SELECT id FROM projects WHERE clientId = ?))
-    ''', [kAccountExpense, clientId, clientId]);
+      WHERE a.type = ? AND (l.counterpartyId = ? OR l.projectId IN (SELECT id FROM projects WHERE counterpartyId = ?))
+    ''', [kAccountExpense, counterpartyId, counterpartyId]);
     return {
       'received': (receivedResult.first['total'] as num).toDouble(),
       'spent': (spentResult.first['total'] as num).toDouble(),
     };
   }
 
-  /// اسناد ثبت‌شده مستقیم برای یک شخص (بدون واسطه پروژه)
-  Future<List<JournalEntryModel>> getDirectClientEntries(int clientId) async {
+  /// اسناد ثبت‌شده مستقیم برای یک طرف حساب (بدون واسطه پروژه)
+  Future<List<JournalEntryModel>> getDirectCounterpartyEntries(int counterpartyId) async {
     final db = await database;
     final entryMaps = await db.rawQuery('''
       SELECT DISTINCT e.* FROM journal_entries e
       JOIN journal_lines l ON l.entryId = e.id
-      WHERE l.clientId = ?
+      WHERE l.counterpartyId = ?
       ORDER BY e.date DESC, e.id DESC
-    ''', [clientId]);
+    ''', [counterpartyId]);
     final entries = <JournalEntryModel>[];
     for (final em in entryMaps) {
       final lineMaps = await db.query('journal_lines',
@@ -548,13 +684,13 @@ class DatabaseHelper {
     return entries;
   }
 
-  /// خلاصه دریافتی/پرداختی همه اشخاص، برای گزارش «مطالبات و بدهی‌ها»
-  Future<List<Map<String, dynamic>>> allClientsFinancialSummary() async {
-    final clients = await getClients();
+  /// خلاصه دریافتی/پرداختی همه طرف‌های حساب، برای گزارش «مطالبات و بدهی‌ها»
+  Future<List<Map<String, dynamic>>> allCounterpartiesFinancialSummary() async {
+    final counterparties = await getCounterparties(includeInactive: true);
     final result = <Map<String, dynamic>>[];
-    for (final c in clients) {
-      final fin = await clientFinancials(c.id!);
-      result.add({'client': c, 'received': fin['received']!, 'spent': fin['spent']!});
+    for (final c in counterparties) {
+      final fin = await counterpartyFinancials(c.id!);
+      result.add({'counterparty': c, 'received': fin['received']!, 'spent': fin['spent']!});
     }
     return result;
   }
@@ -891,7 +1027,8 @@ class DatabaseHelper {
     await db.delete('journal_lines');
     await db.delete('journal_entries');
     await db.delete('projects');
-    await db.delete('clients');
+    await db.delete('counterparty_role_assignments');
+    await db.delete('counterparties');
     await db.delete('accounts');
     await db.delete('sms_drafts');
     await _seedDefaultAccounts(db);

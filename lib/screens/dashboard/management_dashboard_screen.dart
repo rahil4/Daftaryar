@@ -7,6 +7,7 @@ import '../../utils/dashboard_period.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/trend_chart_widget.dart';
+import '../operational/operational_performance_screen.dart';
 
 /// صفحه اصلی داشبورد مدیریتی. این صفحه فقط مصرف‌کننده ManagementDashboardService
 /// است و هیچ محاسبه مالی مستقلی انجام نمی‌دهد.
@@ -52,7 +53,19 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('داشبورد مدیریتی')),
+      appBar: AppBar(
+        title: const Text('داشبورد مدیریتی'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.query_stats_outlined),
+            tooltip: 'عملکرد عملیاتی',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const OperationalPerformanceScreen()),
+            ),
+          ),
+        ],
+      ),
       body: BlueprintGridBackground(
         child: RefreshIndicator(
           onRefresh: _load,

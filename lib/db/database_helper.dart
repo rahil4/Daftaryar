@@ -1370,6 +1370,28 @@ class DatabaseHelper {
     return maps.map((m) => ProjectPriceEventModel.fromMap(m)).toList();
   }
 
+  /// رویدادهای تغییر قیمت همه پروژه‌ها در یک بازه تاریخ - تنها READ API
+  /// جدید لایه تحلیل عملکرد عملیاتی؛ چون API موجود (getProjectPriceEvents)
+  /// فقط سطح یک پروژه است و هیچ مسیر سراسری با فیلتر بازه برای تحلیل دوره‌ای
+  /// قیمت/تخفیف در کل دفتر وجود نداشت. فیلتر بر مبنای ProjectPriceEvent.date
+  /// است (طبق قاعده رسمی این نوع Metric)، نه تاریخ ایجاد یا Finalize پروژه.
+  Future<List<ProjectPriceEventModel>> getAllPriceEventsInRange({String? fromDate, String? toDate}) async {
+    final db = await database;
+    String? where;
+    List<Object?> args = [];
+    if (fromDate != null) {
+      where = 'date >= ?';
+      args.add(fromDate);
+    }
+    if (toDate != null) {
+      where = where == null ? 'date <= ?' : '$where AND date <= ?';
+      args.add(toDate);
+    }
+    final maps = await db.query('project_price_events',
+        where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'date ASC');
+    return maps.map((m) => ProjectPriceEventModel.fromMap(m)).toList();
+  }
+
   /// مبلغ مورد انتظار فعلی پروژه = برآورد اولیه + مجموع رویدادهای پیش از
   /// Finalization (ADDITION/REDUCTION/ADJUSTMENT). بعد از Finalization دیگر
   /// معنا ندارد؛ در آن حالت finalAmount + FINAL_ADJUSTMENTها ملاک است.

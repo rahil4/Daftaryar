@@ -10,6 +10,7 @@ import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
 import '../../widgets/stat_card.dart';
 import 'project_metrics_debug_screen.dart';
+import 'project_economics_screen.dart';
 
 /// مدیریت کامل جریان مالی پروژه: تاریخچه تغییر مبلغ، نهایی‌سازی، دریافت وجه
 /// (پیش‌دریافت پیش از Finalization / تسویه طلب پس از آن)، تخفیف نهایی، و
@@ -106,6 +107,15 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
       appBar: AppBar(
         title: const Text('وضعیت مالی پروژه'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.insights_outlined),
+            tooltip: 'تحلیل اقتصادی پروژه',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => ProjectEconomicsScreen(projectId: _project.id!)),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.analytics_outlined),
             tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',

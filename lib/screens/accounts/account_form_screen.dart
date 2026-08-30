@@ -49,6 +49,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
       type: _type,
       parentId: _parentId,
       isSystem: widget.existing?.isSystem ?? false,
+      systemKey: widget.existing?.systemKey,
       createdAt: widget.existing?.createdAt ?? todayJalaliString(),
     );
     if (widget.existing == null) {
@@ -82,7 +83,10 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
 
     final possibleParents = _allAccounts
         .where((a) =>
-            a.type == _type && a.id != widget.existing?.id && !descendantIds.contains(a.id))
+            a.type == _type &&
+            a.id != widget.existing?.id &&
+            !descendantIds.contains(a.id) &&
+            !a.isSystem)
         .toList();
 
     return Scaffold(
@@ -133,7 +137,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
                       ...possibleParents
                           .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name))),
                     ],
-                    onChanged: (v) => setState(() => _parentId = v),
+                    onChanged: isSystem ? null : (v) => setState(() => _parentId = v),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(

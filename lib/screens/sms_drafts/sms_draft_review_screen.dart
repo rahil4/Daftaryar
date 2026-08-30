@@ -129,7 +129,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
     );
 
     try {
-      await _db.insertJournalEntry(entry);
+      await _db.createManualJournal(entry);
       await _db.updateSmsDraftStatus(widget.draft.id!, kSmsDraftConfirmed);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

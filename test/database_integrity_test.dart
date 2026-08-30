@@ -1,0 +1,497 @@
+// تست‌های یکپارچگی دیتابیس (Financial Data Integrity Hardening). این‌ها به
+// sqflite_common_ffi نیاز دارند (بدون دستگاه/شبیه‌ساز واقعی اجرا می‌شوند)؛
+// در محیط توسعه فعلی (بدون نصب Flutter SDK) اجرا نشده‌اند - رجوع کنید به
+// گزارش نهایی، بخش «Do Not Claim Success Without Evidence».
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'package:daftaryar/db/database_helper.dart';
+import 'package:daftaryar/models/account.dart';
+import 'package:daftaryar/models/counterparty.dart';
+import 'package:daftaryar/models/journal_entry.dart';
+import 'package:daftaryar/models/project.dart';
+
+void main() {
+  final db = DatabaseHelper.instance;
+
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
+
+  setUp(() async {
+    // هر تست از یک وضعیت کاملاً تمیز شروع می‌شود تا تست‌ها به‌هم وابسته نباشند
+    await db.wipeAll();
+  });
+
+  Future<int> createCounterparty(String name) async {
+    final now = '1404/01/01';
+    return db.insertCounterparty(CounterpartyModel(
+      name: name,
+      createdAt: now,
+      updatedAt: now,
+      roles: const ['مشتری'],
+    ));
+  }
+
+  Future<int> createProject(int counterpartyId, {double agreedAmount = 80000000}) async {
+    return db.insertProject(ProjectModel(
+      title: 'پروژه تست',
+      counterpartyId: counterpartyId,
+      projectType: kProjectTypes.first,
+      status: kProjectStatuses.first,
+      startDate: '1404/01/01',
+      agreedAmount: agreedAmount,
+      createdAt: '1404/01/01',
+    ));
+  }
+
+  group('مورد ۵ — Atomic بودن Finalization', () {
+    test('سناریوی موفق: پروژه Finalize و Journal/PriceEvent صحیح ایجاد می‌شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+
+      await db.finalizeProject(projectId: projectId, finalAmount: 120000000, date: '1404/02/01');
+
+      final project = await db.getProject(projectId);
+      expect(project!.isFinalized, true);
+      expect(project.finalAmount, 120000000);
+
+      final revenueBalance = await db.projectRevenueLedgerBalance(projectId);
+      expect(revenueBalance, 120000000, reason: 'درآمد باید در Ledger شناسایی شده باشد');
+    });
+
+    test('Idempotency: نهایی‌سازی تکراری رد می‌شود و سند دوم نمی‌سازد', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 100000000, date: '1404/02/01');
+
+      expect(
+        () => db.finalizeProject(projectId: projectId, finalAmount: 999, date: '1404/02/02'),
+        throwsA(isA<Exception>()),
+      );
+
+      final revenueBalance = await db.projectRevenueLedgerBalance(projectId);
+      expect(revenueBalance, 100000000, reason: 'تلاش دوم نباید مبلغ درآمد را تغییر دهد');
+    });
+  });
+
+  group('مورد ۸ — کنترل Overpayment در سطح Project', () {
+    test('دریافت روی پروژه‌ای که خودش مانده طلب ندارد رد می‌شود، حتی اگر طرف'
+        ' حساب در پروژه دیگری مانده مثبت داشته باشد', () async {
+      final cpId = await createCounterparty('مشتری مشترک');
+      final projectA = await createProject(cpId);
+      final projectB = await createProject(cpId);
+
+      // پروژه A نهایی می‌شود و طلب ۱۰۰ میلیونی ایجاد می‌کند
+      await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: '1404/02/01');
+      final counterpartyArBefore = await db.receivableBalance(cpId);
+      expect(counterpartyArBefore, 100000000);
+
+      final cashAccount = (await db.getCashAccounts()).first;
+
+      // تلاش برای دریافت ۵۰ میلیون روی پروژه B (که خودش هیچ طلبی ندارد)
+      // کنترل قدیمی (فقط سطح طرف‌حساب) این را اشتباهاً قبول می‌کرد چون
+      // ۵۰ ≤ ۱۰۰ (مانده کل طرف‌حساب)؛ کنترل جدید سطح پروژه باید رد کند.
+      expect(
+        () => db.receiveProjectPayment(
+          projectId: projectB,
+          cashAccountId: cashAccount.id!,
+          amount: 50000000,
+          date: '1404/02/05',
+        ),
+        throwsA(isA<Exception>()),
+        reason: 'پروژه B هیچ مانده طلبی ندارد؛ این دریافت باید رد شود',
+      );
+
+      final projectBAr = await db.projectReceivableBalance(projectB);
+      expect(projectBAr, 0, reason: 'مانده پروژه B نباید منفی شده باشد');
+    });
+  });
+
+  group('مورد ۴ — محافظت حذف سند System-generated', () {
+    test('سند حاصل از Finalization قابل حذف نیست', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 100000000, date: '1404/02/01');
+
+      final entries = await db.getJournalEntries(projectId: projectId);
+      expect(entries, isNotEmpty);
+      final systemEntry = entries.first;
+      expect(systemEntry.isSystemGenerated, true);
+
+      expect(
+        () => db.deleteJournalEntry(systemEntry.id!),
+        throwsA(isA<Exception>()),
+      );
+
+      final stillExists = await db.getJournalEntry(systemEntry.id!);
+      expect(stillExists, isNotNull, reason: 'سند سیستمی باید بدون تغییر باقی مانده باشد');
+    });
+
+    test('سند دستی صریح (source=manual) همچنان قابل حذف است', () async {
+      // تغییر نسبت به مرحله قبل: دیگر صرفاً «بدون source» به معنی قابل‌حذف
+      // نیست؛ باید صراحتاً از createManualJournal (یا source=manual) استفاده
+      // شود - دقیقاً همان چیزی که این تست بررسی می‌کند.
+      final cpId = await createCounterparty('محمد');
+      final accounts = await db.getPostableAccounts();
+      final cash = (await db.getCashAccounts()).first;
+      final income = accounts.firstWhere((a) => a.type == kAccountIncome);
+
+      final entryId = await db.createManualJournal(JournalEntryModel(
+        date: '1404/01/01',
+        createdAt: '1404/01/01',
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 1000000, counterpartyId: cpId),
+          JournalLineModel(accountId: income.id!, credit: 1000000, counterpartyId: cpId),
+        ],
+      ));
+
+      await db.deleteJournalEntry(entryId);
+      final afterDelete = await db.getJournalEntry(entryId);
+      expect(afterDelete, isNull, reason: 'سند دستی صریح باید با موفقیت حذف شود');
+    });
+
+    test('مورد ۵ — سند با source نامشخص (NULL/Legacy) محافظت‌شده است، نه قابل‌حذف', () async {
+      final cpId = await createCounterparty('محمد');
+      final accounts = await db.getPostableAccounts();
+      final cash = (await db.getCashAccounts()).first;
+      final income = accounts.firstWhere((a) => a.type == kAccountIncome);
+
+      // شبیه‌سازی یک سند «قدیمی» که از مسیر insertJournalEntry خام (بدون
+      // source) وارد شده - مثلاً باقی‌مانده از پیش از افزودن این مکانیزم.
+      final entryId = await db.insertJournalEntry(JournalEntryModel(
+        date: '1404/01/01',
+        createdAt: '1404/01/01',
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 500000, counterpartyId: cpId),
+          JournalLineModel(accountId: income.id!, credit: 500000, counterpartyId: cpId),
+        ],
+      ));
+
+      expect(
+        () => db.deleteJournalEntry(entryId),
+        throwsA(isA<Exception>()),
+        reason: 'سند با source نامشخص نباید حدس زده شود که دستی بوده؛ باید محافظت شود',
+      );
+    });
+  });
+
+  group('مورد ۳ — محافظت System Account', () {
+    test('ویرایش نام حساب سیستمی، systemKey را حفظ می‌کند', () async {
+      final arAccount = await db.getReceivableAccount();
+      expect(arAccount, isNotNull);
+
+      await db.updateAccount(arAccount!.copyWith(name: 'نام جدید حساب دریافتنی'));
+
+      final afterEdit = await db.getReceivableAccount();
+      expect(afterEdit, isNotNull, reason: 'حساب باید همچنان از طریق systemKey پیدا شود');
+      expect(afterEdit!.name, 'نام جدید حساب دریافتنی');
+      expect(afterEdit.systemKey, kSystemKeyReceivable);
+    });
+
+    test('حتی تلاش صریح برای حذف systemKey یک حساب سیستمی نادیده گرفته می‌شود', () async {
+      final arAccount = await db.getReceivableAccount();
+      // شبیه‌سازی یک فراخوانی اشتباه که سعی می‌کند systemKey را null کند
+      await db.updateAccount(AccountModel(
+        id: arAccount!.id,
+        name: arAccount.name,
+        type: arAccount.type,
+        isSystem: false, // تلاش برای تبدیل به غیرسیستمی
+        systemKey: null, // تلاش برای حذف systemKey
+        createdAt: arAccount.createdAt,
+      ));
+
+      final afterAttempt = await db.getReceivableAccount();
+      expect(afterAttempt, isNotNull,
+          reason: 'لایه دیتابیس باید systemKey/isSystem را مستقل از ورودی محافظت کند');
+      expect(afterAttempt!.systemKey, kSystemKeyReceivable);
+      expect(afterAttempt.isSystem, true);
+    });
+
+    test('حذف فیزیکی حساب سیستمی رد می‌شود', () async {
+      final arAccount = await db.getReceivableAccount();
+      expect(
+        () => db.deleteAccount(arAccount!.id!),
+        throwsA(isA<Exception>()),
+      );
+    });
+  });
+
+  group('مورد ۱۰ — Quick Receipt پروژه‌محور', () {
+    test('دریافت روی پروژه Finalize‌نشده به Advance می‌رود، نه Revenue', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      final cashAccount = (await db.getCashAccounts()).first;
+
+      await db.receiveProjectPayment(
+        projectId: projectId,
+        cashAccountId: cashAccount.id!,
+        amount: 20000000,
+        date: '1404/01/10',
+      );
+
+      final advanceBalance = await db.projectAdvanceBalance(projectId);
+      final revenueBalance = await db.projectRevenueLedgerBalance(projectId);
+      expect(advanceBalance, 20000000, reason: 'مبلغ باید به پیش‌دریافت برود');
+      expect(revenueBalance, 0, reason: 'هیچ درآمدی نباید شناسایی شده باشد');
+    });
+
+    test('دریافت روی پروژه Finalize‌شده به تسویه AR می‌رود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 100000000, date: '1404/02/01');
+      final cashAccount = (await db.getCashAccounts()).first;
+
+      await db.receiveProjectPayment(
+        projectId: projectId,
+        cashAccountId: cashAccount.id!,
+        amount: 40000000,
+        date: '1404/02/05',
+      );
+
+      final arBalance = await db.projectReceivableBalance(projectId);
+      expect(arBalance, 60000000, reason: 'مانده طلب باید کاهش یابد، نه این‌که درآمد دوباره ثبت شود');
+    });
+  });
+
+  group('مرحله ۱.۱ — مورد ۱: محافظت کامل‌تر System Account', () {
+    test('تلاش برای تغییر type یک حساب سیستمی نادیده گرفته می‌شود', () async {
+      final arAccount = await db.getReceivableAccount();
+      await db.updateAccount(AccountModel(
+        id: arAccount!.id,
+        name: arAccount.name,
+        type: kAccountExpense, // تلاش برای تبدیل دارایی به هزینه
+        isSystem: arAccount.isSystem,
+        systemKey: arAccount.systemKey,
+        createdAt: arAccount.createdAt,
+      ));
+      final after = await db.getReceivableAccount();
+      expect(after!.type, kAccountAsset, reason: 'نوع حساب سیستمی نباید تغییر کند');
+    });
+
+    test('تلاش برای دادن والد به یک حساب سیستمی نادیده گرفته می‌شود', () async {
+      final arAccount = await db.getReceivableAccount();
+      final someOtherAsset = (await db.getPostableAccounts(type: kAccountAsset))
+          .firstWhere((a) => a.id != arAccount!.id);
+      await db.updateAccount(arAccount!.copyWith(parentId: someOtherAsset.id));
+      final after = await db.getReceivableAccount();
+      expect(after!.parentId, isNull, reason: 'حساب کنترلی سیستمی نباید زیرمجموعه چیز دیگری شود');
+    });
+
+    test('انتخاب یک حساب سیستمی به‌عنوان والد یک حساب جدید رد می‌شود', () async {
+      final arAccount = await db.getReceivableAccount();
+      expect(
+        () => db.insertAccount(AccountModel(
+          name: 'زیرحساب اشتباه',
+          type: kAccountAsset,
+          parentId: arAccount!.id,
+          createdAt: '1404/01/01',
+        )),
+        throwsA(isA<Exception>()),
+        reason: 'اگر مجاز بود، AR غیرقابل‌ثبت (non-postable) می‌شد و تمام Workflowهای مالی می‌شکستند',
+      );
+    });
+
+    test('حذف حساب سیستمی رد می‌شود (Regression مرحله ۱)', () async {
+      final arAccount = await db.getReceivableAccount();
+      expect(() => db.deleteAccount(arAccount!.id!), throwsA(isA<Exception>()));
+    });
+  });
+
+  group('مرحله ۱.۱ — مورد ۲: تغییرناپذیری Counterparty پروژه دارای سابقه مالی', () {
+    test('سناریو ۱ - بدون سابقه مالی: تغییر کارفرما مجاز است', () async {
+      final cpA = await createCounterparty('کارفرمای A');
+      final cpB = await createCounterparty('کارفرمای B');
+      final projectId = await createProject(cpA);
+
+      final project = await db.getProject(projectId);
+      await db.updateProject(project!.copyWith(counterpartyId: cpB));
+
+      final after = await db.getProject(projectId);
+      expect(after!.counterpartyId, cpB);
+    });
+
+    test('سناریو ۲ - با سابقه مالی (پیش از Finalize): تغییر کارفرما رد می‌شود', () async {
+      final cpA = await createCounterparty('کارفرمای A');
+      final cpB = await createCounterparty('کارفرمای B');
+      final projectId = await createProject(cpA);
+      final cashAccount = (await db.getCashAccounts()).first;
+
+      // فقط یک پیش‌دریافت، بدون Finalization
+      await db.receiveProjectPayment(
+        projectId: projectId, cashAccountId: cashAccount.id!, amount: 10000000, date: '1404/01/05');
+
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(counterpartyId: cpB)),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('سناریو ۳ - پروژه Finalized: تغییر کارفرما رد می‌شود', () async {
+      final cpA = await createCounterparty('کارفرمای A');
+      final cpB = await createCounterparty('کارفرمای B');
+      final projectId = await createProject(cpA);
+      await db.finalizeProject(projectId: projectId, finalAmount: 50000000, date: '1404/02/01');
+
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(counterpartyId: cpB)),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('سناریو ۴ - تغییر اطلاعات غیرمالی (عنوان) پروژه Finalize‌نشده مجاز است', () async {
+      final cpA = await createCounterparty('کارفرمای A');
+      final projectId = await createProject(cpA);
+      final project = await db.getProject(projectId);
+      await db.updateProject(project!.copyWith(title: 'عنوان جدید'));
+      final after = await db.getProject(projectId);
+      expect(after!.title, 'عنوان جدید');
+    });
+  });
+
+  group('مرحله ۱.۱ — مورد ۳/۴: Integrity و State Machine در updateProject', () {
+    test('پروژه عادی نمی‌تواند مستقیماً از طریق updateProject به نهایی‌شده تبدیل شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(status: kProjectStatusFinalized)),
+        throwsA(isA<Exception>()),
+        reason: 'Finalization بدون finalAmount/Journal واقعی نباید ممکن باشد',
+      );
+    });
+
+    test('پروژه نهایی‌شده نمی‌تواند از طریق Update عمومی به لغوشده تبدیل شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/01/01');
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(status: kProjectStatusCancelled)),
+        throwsA(isA<Exception>()),
+        reason: 'ترکیب Finalized+Cancelled در این مدل معتبر نیست',
+      );
+    });
+
+    test('پروژه عادی نمی‌تواند مستقیماً از طریق updateProject به لغوشده تبدیل شود'
+        ' (اصلاح مرحله ۱.۱ - قبلاً این مسیر مجاز بود، اکنون باید از cancelProject'
+        ' اختصاصی عبور کند)', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(status: kProjectStatusCancelled)),
+        throwsA(isA<Exception>()),
+        reason: 'State transition به Cancelled باید صریح و از Workflow اختصاصی باشد',
+      );
+    });
+
+    test('cancelProject به‌درستی پروژه عادی را لغو می‌کند (Workflow اختصاصی جدید)', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.cancelProject(projectId);
+      final after = await db.getProject(projectId);
+      expect(after!.status, kProjectStatusCancelled);
+    });
+
+    test('cancelProject روی پروژه نهایی‌شده رد می‌شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/01/01');
+      expect(() => db.cancelProject(projectId), throwsA(isA<Exception>()));
+    });
+
+    test('finalizeProject روی پروژه لغوشده رد می‌شود (تکمیل Invariant Cancelled+Finalized)', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.cancelProject(projectId);
+      expect(
+        () => db.finalizeProject(projectId: projectId, finalAmount: 1000000, date: '1404/01/01'),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('ترکیب نامعتبر Cancelled+finalAmount رد می‌شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(
+            project!.copyWith(status: kProjectStatusCancelled, finalAmount: 1000)),
+        throwsA(isA<Exception>()),
+      );
+    });
+
+    test('پروژه نهایی‌شده: تلاش برای تغییر finalAmount از Update عمومی رد می‌شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/01/01');
+      final project = await db.getProject(projectId);
+      expect(
+        () => db.updateProject(project!.copyWith(finalAmount: 99999999)),
+        throwsA(isA<Exception>()),
+      );
+    });
+  });
+
+  group('مورد ۶/۹ — مقدار صریح Journal Source در هر دو مسیر', () {
+    test('Workflow سیستمی (Finalization) دقیقاً source=system تولید می‌کند', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/01/01');
+      final entries = await db.getJournalEntries(projectId: projectId);
+      expect(entries, isNotEmpty);
+      for (final e in entries) {
+        expect(e.source, kJournalSourceSystem);
+      }
+    });
+
+    test('createManualJournal دقیقاً source=manual تولید می‌کند، حتی اگر ورودی چیز دیگری بدهد', () async {
+      final cpId = await createCounterparty('محمد');
+      final cash = (await db.getCashAccounts()).first;
+      final income = (await db.getPostableAccounts()).firstWhere((a) => a.type == kAccountIncome);
+      final entryId = await db.createManualJournal(JournalEntryModel(
+        date: '1404/01/01',
+        createdAt: '1404/01/01',
+        source: kJournalSourceSystem, // تلاش عمدی برای گمراه‌کردن - باید نادیده گرفته شود
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 200000, counterpartyId: cpId),
+          JournalLineModel(accountId: income.id!, credit: 200000, counterpartyId: cpId),
+        ],
+      ));
+      final entry = await db.getJournalEntry(entryId);
+      expect(entry!.source, kJournalSourceManual,
+          reason: 'createManualJournal باید صرف‌نظر از source ورودی، manual را enforce کند');
+    });
+  });
+
+  group('مورد ۸ — یادداشت درباره Backup/Restore', () {
+    test('insertJournalEntry پایه، مقدار source ورودی را دست‌نخورده نگه می‌دارد'
+        ' (پیش‌نیاز صحت Restore - رجوع به گزارش نهایی برای محدودیت پوشش تست)', () async {
+      // این تست خودِ فایل پشتیبان یا FilePicker را شبیه‌سازی نمی‌کند (نیازمند
+      // Mock کردن Platform Channel فراتر از sqflite_common_ffi است)؛ فقط
+      // تضمین می‌کند که تابع پایه‌ای که BackupService برای Restore استفاده
+      // می‌کند (insertJournalEntry، نه createManualJournal/createSystemJournal)
+      // مقدار source را force نمی‌کند - دقیقاً رفتاری که Restore به آن متکی است.
+      final cpId = await createCounterparty('محمد');
+      final cash = (await db.getCashAccounts()).first;
+      final income = (await db.getPostableAccounts()).firstWhere((a) => a.type == kAccountIncome);
+
+      final systemLikeId = await db.insertJournalEntry(JournalEntryModel(
+        date: '1404/01/01',
+        createdAt: '1404/01/01',
+        source: kJournalSourceSystem,
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 300000, counterpartyId: cpId),
+          JournalLineModel(accountId: income.id!, credit: 300000, counterpartyId: cpId),
+        ],
+      ));
+      final restored = await db.getJournalEntry(systemLikeId);
+      expect(restored!.source, kJournalSourceSystem,
+          reason: 'Restore یک سند سیستمی قدیمی نباید آن را به manual تبدیل کند');
+    });
+  });
+}

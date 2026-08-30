@@ -50,6 +50,38 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
     });
   }
 
+  /// لغو پروژه: یک Workflow مستقل و کوچک، نه یک انتخاب ساده در فرم عمومی
+  /// ویرایش پروژه. اطلاعات مالی (اسناد، رویدادهای قیمت) دست‌نخورده می‌مانند؛
+  /// فقط وضعیت عملیاتی پروژه تغییر می‌کند.
+  Future<void> _cancelProject() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('لغو پروژه'),
+        content: const Text(
+            'وضعیت این پروژه به «لغوشده» تغییر می‌کند. اسناد مالی و تاریخچه قیمت حذف نمی‌شوند. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('لغو پروژه', style: TextStyle(color: AppColors.negative))),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      try {
+        await _db.cancelProject(_project.id!);
+        final updated = await _db.getProject(_project.id!);
+        if (updated != null && mounted) setState(() => _project = updated);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        }
+      }
+    }
+  }
+
   Future<void> _deleteProject() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -101,6 +133,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> {
               }
             },
           ),
+          if (_project.status != kProjectStatusCancelled &&
+              _project.status != kProjectStatusFinalized)
+            IconButton(
+              icon: const Icon(Icons.block_outlined),
+              tooltip: 'لغو پروژه',
+              onPressed: _cancelProject,
+            ),
           IconButton(icon: const Icon(Icons.delete_outline), onPressed: _deleteProject),
         ],
       ),

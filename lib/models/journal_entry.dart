@@ -49,6 +49,12 @@ class JournalLineModel {
   }
 }
 
+const String kJournalSourceSystem = 'system';
+
+/// یک سند دستی/فرم سریع معمولی که کاربر مستقیماً ثبت کرده - تنها مقداری
+/// که سند را واقعاً «قابل حذف» می‌کند.
+const String kJournalSourceManual = 'manual';
+
 class JournalEntryModel {
   final int? id;
   final String date; // شمسی yyyy/mm/dd
@@ -56,13 +62,29 @@ class JournalEntryModel {
   final String createdAt;
   final List<JournalLineModel> lines;
 
+  /// منشأ سند: null/هر مقدار دیگر یعنی سند دستی یا فرم سریع معمولی (قابل
+  /// حذف)؛ kJournalSourceSystem یعنی توسط یک Workflow مالی ساختاریافته
+  /// (Finalization/Discount/Final Adjustment/Project Payment) ساخته شده و
+  /// نباید حذف فیزیکی شود.
+  final String? source;
+
   JournalEntryModel({
     this.id,
     required this.date,
     this.description,
     required this.createdAt,
     required this.lines,
+    this.source,
   });
+
+  bool get isSystemGenerated => source == kJournalSourceSystem;
+
+  /// آیا این سند واقعاً قابل حذف فیزیکی است؟ طبق تصمیم مرحله Integrity
+  /// Closure: فقط source == manual (صریح) قابل حذف است. اگر source برابر
+  /// system باشد یا حتی NULL/نامشخص باشد (مثلاً سندهای قدیمی‌تر از افزودن
+  /// این ستون که واقعاً می‌توانستند System-generated بوده باشند)، محافظه‌کارانه
+  /// غیرقابل‌حذف در نظر گرفته می‌شود - حدس زده نمی‌شود که NULL یعنی «دستی».
+  bool get isDeletable => source == kJournalSourceManual;
 
   int get totalDebit => lines.fold<int>(0, (s, l) => s + l.debit);
   int get totalCredit => lines.fold<int>(0, (s, l) => s + l.credit);
@@ -76,6 +98,7 @@ class JournalEntryModel {
       'id': id,
       'date': date,
       'description': description,
+      'source': source,
       'createdAt': createdAt,
     };
   }
@@ -87,6 +110,7 @@ class JournalEntryModel {
       description: map['description'] as String?,
       createdAt: map['createdAt'] as String,
       lines: lines ?? const [],
+      source: map['source'] as String?,
     );
   }
 }

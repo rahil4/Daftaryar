@@ -128,7 +128,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
     );
 
     try {
-      await _db.insertJournalEntry(entry);
+      await _db.createManualJournal(entry);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       ScaffoldMessenger.of(context)

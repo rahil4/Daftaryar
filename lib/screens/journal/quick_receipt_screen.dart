@@ -12,10 +12,15 @@ import '../../widgets/persian_amount_field.dart';
 
 enum _ReceiptMode { cash, creditSale, settleReceivable }
 
-/// ثبت دریافت/درآمد با سه حالت مجزا (مرحله ۳ - چرخه AR):
-/// - نقدی: بدهکار صندوق/بانک، بستانکار درآمد (بدون تأثیر بر مطالبات)
-/// - ایجاد طلب (نسیه): بدهکار حساب‌های دریافتنی، بستانکار درآمد (بدون تأثیر بر نقد)
-/// - دریافت طلب (تسویه): بدهکار صندوق/بانک، بستانکار حساب‌های دریافتنی (بدون ایجاد درآمد جدید)
+/// ثبت دریافت/درآمد.
+///
+/// نکته مهم (Financial Data Integrity - مورد ۱۰): وقتی یک پروژه انتخاب شده
+/// باشد، این فرم دیگر از حالت‌های نقدی/ایجاد طلب/دریافت طلب استفاده
+/// نمی‌کند و کل عملیات به receiveProjectPayment() واگذار می‌شود؛ آن تابع
+/// به‌صورت هوشمند پیش از Finalization به «پیش‌دریافت مشتری» و پس از آن به
+/// تسویه «حساب‌های دریافتنی» می‌رود - هرگز مستقیم Revenue شناسایی نمی‌کند
+/// برای پروژه‌ای که هنوز Finalize نشده. سه حالت قبلی فقط برای دریافت
+/// بدون پروژه (یا دریافت عمومی) باقی می‌مانند، بدون هیچ تغییری.
 class QuickReceiptScreen extends StatefulWidget {
   final int? presetProjectId;
   final int? presetCounterpartyId;
@@ -43,6 +48,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   int? _projectId;
   int? _counterpartyId;
   double? _currentReceivable;
+  ProjectModel? _selectedProject; // برای تشخیص isFinalized پروژه انتخاب‌شده
   bool _loading = true;
   bool _saving = false;
 
@@ -64,9 +70,13 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
     final counterparties = await _db.getCounterparties();
 
     int? initialCounterpartyId = _counterpartyId;
-    if (initialCounterpartyId == null && _projectId != null) {
+    ProjectModel? selectedProject;
+    if (_projectId != null) {
       final matches = projects.where((p) => p.id == _projectId);
-      if (matches.isNotEmpty) initialCounterpartyId = matches.first.counterpartyId;
+      if (matches.isNotEmpty) {
+        selectedProject = matches.first;
+        initialCounterpartyId ??= selectedProject.counterpartyId;
+      }
     }
 
     setState(() {
@@ -77,12 +87,24 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
       _cashAccountId = asset.isNotEmpty ? asset.first.id : null;
       _incomeAccountId = income.isNotEmpty ? income.first.id : null;
       _counterpartyId = initialCounterpartyId;
+      _selectedProject = selectedProject;
       _loading = false;
     });
     await _refreshReceivableHint();
   }
 
   Future<void> _refreshReceivableHint() async {
+    if (_projectId != null) {
+      // برای دریافت مرتبط با پروژه، مانده مرتبط خودِ همان پروژه نمایش داده
+      // می‌شود (نه مانده کلی طرف حساب)، چون مقصد سند بر همین اساس تعیین می‌شود.
+      if (_selectedProject != null && _selectedProject!.isFinalized) {
+        final bal = await _db.projectReceivableBalance(_projectId!);
+        if (mounted) setState(() => _currentReceivable = bal);
+      } else if (mounted) {
+        setState(() => _currentReceivable = null);
+      }
+      return;
+    }
     if (_mode == _ReceiptMode.settleReceivable && _counterpartyId != null) {
       final bal = await _db.receivableBalance(_counterpartyId!);
       if (mounted) setState(() => _currentReceivable = bal);
@@ -96,13 +118,18 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
       _projectId = projectId;
       if (projectId != null) {
         final matches = _projects.where((p) => p.id == projectId);
-        if (matches.isNotEmpty) _counterpartyId = matches.first.counterpartyId;
+        if (matches.isNotEmpty) {
+          _selectedProject = matches.first;
+          _counterpartyId = matches.first.counterpartyId;
+        }
+      } else {
+        _selectedProject = null;
       }
     });
     _refreshReceivableHint();
   }
 
-  bool get _requiresCounterparty => _mode != _ReceiptMode.cash;
+  bool get _requiresCounterparty => _projectId == null && _mode != _ReceiptMode.cash;
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
@@ -114,60 +141,81 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
 
     setState(() => _saving = true);
     final amount = (parsePersianAmount(_amount.text) ?? 0).round();
-    JournalEntryModel entry;
-
-    if (_mode == _ReceiptMode.cash) {
-      if (_cashAccountId == null || _incomeAccountId == null) return;
-      entry = JournalEntryModel(
-        date: _date,
-        description: _description.text.trim().isEmpty ? 'دریافت وجه' : _description.text.trim(),
-        createdAt: todayJalaliString(),
-        lines: [
-          JournalLineModel(
-              accountId: _cashAccountId!, debit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-          JournalLineModel(
-              accountId: _incomeAccountId!, credit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-        ],
-      );
-    } else if (_mode == _ReceiptMode.creditSale) {
-      final arAccount = await _db.getReceivableAccount();
-      if (arAccount == null || _incomeAccountId == null) {
-        setState(() => _saving = false);
-        return;
-      }
-      entry = JournalEntryModel(
-        date: _date,
-        description:
-            _description.text.trim().isEmpty ? 'ایجاد طلب (فروش نسیه)' : _description.text.trim(),
-        createdAt: todayJalaliString(),
-        lines: [
-          JournalLineModel(
-              accountId: arAccount.id!, debit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-          JournalLineModel(
-              accountId: _incomeAccountId!, credit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-        ],
-      );
-    } else {
-      final arAccount = await _db.getReceivableAccount();
-      if (arAccount == null || _cashAccountId == null) {
-        setState(() => _saving = false);
-        return;
-      }
-      entry = JournalEntryModel(
-        date: _date,
-        description: _description.text.trim().isEmpty ? 'دریافت طلب' : _description.text.trim(),
-        createdAt: todayJalaliString(),
-        lines: [
-          JournalLineModel(
-              accountId: _cashAccountId!, debit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-          JournalLineModel(
-              accountId: arAccount.id!, credit: amount, projectId: _projectId, counterpartyId: _counterpartyId),
-        ],
-      );
-    }
 
     try {
-      await _db.insertJournalEntry(entry);
+      if (_projectId != null) {
+        // مسیر پروژه‌محور: کل منطق تشخیص پیش‌دریافت/تسویه طلب به
+        // receiveProjectPayment سپرده می‌شود - این فرم دیگر خودش تصمیم
+        // نمی‌گیرد کدام حساب بستانکار شود.
+        if (_cashAccountId == null) {
+          setState(() => _saving = false);
+          return;
+        }
+        await _db.receiveProjectPayment(
+          projectId: _projectId!,
+          cashAccountId: _cashAccountId!,
+          amount: amount.toDouble(),
+          date: _date,
+          description: _description.text.trim(),
+        );
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
+
+      JournalEntryModel entry;
+      if (_mode == _ReceiptMode.cash) {
+        if (_cashAccountId == null || _incomeAccountId == null) {
+          setState(() => _saving = false);
+          return;
+        }
+        entry = JournalEntryModel(
+          date: _date,
+          description: _description.text.trim().isEmpty ? 'دریافت وجه' : _description.text.trim(),
+          createdAt: todayJalaliString(),
+          lines: [
+            JournalLineModel(
+                accountId: _cashAccountId!, debit: amount, counterpartyId: _counterpartyId),
+            JournalLineModel(
+                accountId: _incomeAccountId!, credit: amount, counterpartyId: _counterpartyId),
+          ],
+        );
+      } else if (_mode == _ReceiptMode.creditSale) {
+        final arAccount = await _db.getReceivableAccount();
+        if (arAccount == null || _incomeAccountId == null) {
+          setState(() => _saving = false);
+          return;
+        }
+        entry = JournalEntryModel(
+          date: _date,
+          description:
+              _description.text.trim().isEmpty ? 'ایجاد طلب (فروش نسیه)' : _description.text.trim(),
+          createdAt: todayJalaliString(),
+          lines: [
+            JournalLineModel(
+                accountId: arAccount.id!, debit: amount, counterpartyId: _counterpartyId),
+            JournalLineModel(
+                accountId: _incomeAccountId!, credit: amount, counterpartyId: _counterpartyId),
+          ],
+        );
+      } else {
+        final arAccount = await _db.getReceivableAccount();
+        if (arAccount == null || _cashAccountId == null) {
+          setState(() => _saving = false);
+          return;
+        }
+        entry = JournalEntryModel(
+          date: _date,
+          description: _description.text.trim().isEmpty ? 'دریافت طلب' : _description.text.trim(),
+          createdAt: todayJalaliString(),
+          lines: [
+            JournalLineModel(
+                accountId: _cashAccountId!, debit: amount, counterpartyId: _counterpartyId),
+            JournalLineModel(
+                accountId: arAccount.id!, credit: amount, counterpartyId: _counterpartyId),
+          ],
+        );
+      }
+      await _db.createManualJournal(entry);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       ScaffoldMessenger.of(context)
@@ -180,7 +228,9 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   @override
   Widget build(BuildContext context) {
     final amountValue = parsePersianAmount(_amount.text);
-    final overLimit = _mode == _ReceiptMode.settleReceivable &&
+    final isProjectLinked = _projectId != null;
+    final overLimit = !isProjectLinked &&
+        _mode == _ReceiptMode.settleReceivable &&
         _currentReceivable != null &&
         amountValue != null &&
         amountValue > _currentReceivable!;
@@ -194,21 +244,36 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  SegmentedButton<_ReceiptMode>(
-                    segments: const [
-                      ButtonSegment(value: _ReceiptMode.cash, label: Text('نقدی')),
-                      ButtonSegment(value: _ReceiptMode.creditSale, label: Text('ایجاد طلب')),
-                      ButtonSegment(value: _ReceiptMode.settleReceivable, label: Text('دریافت طلب')),
-                    ],
-                    selected: {_mode},
-                    onSelectionChanged: (s) {
-                      setState(() {
-                        _mode = s.first;
-                        _amount.clear();
-                      });
-                      _refreshReceivableHint();
-                    },
-                  ),
+                  if (!isProjectLinked)
+                    SegmentedButton<_ReceiptMode>(
+                      segments: const [
+                        ButtonSegment(value: _ReceiptMode.cash, label: Text('نقدی')),
+                        ButtonSegment(value: _ReceiptMode.creditSale, label: Text('ایجاد طلب')),
+                        ButtonSegment(value: _ReceiptMode.settleReceivable, label: Text('دریافت طلب')),
+                      ],
+                      selected: {_mode},
+                      onSelectionChanged: (s) {
+                        setState(() {
+                          _mode = s.first;
+                          _amount.clear();
+                        });
+                        _refreshReceivableHint();
+                      },
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.brass.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        (_selectedProject?.isFinalized ?? false)
+                            ? 'این پروژه نهایی شده؛ دریافت به‌عنوان تسویه طلب ثبت می‌شود.'
+                            : 'این پروژه هنوز نهایی نشده؛ دریافت به‌عنوان پیش‌دریافت ثبت می‌شود (نه درآمد).',
+                        style: const TextStyle(fontSize: 12, color: AppColors.brass),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   PersianAmountField(
                     controller: _amount,
@@ -218,7 +283,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                         ? 'مبلغ معتبر وارد کنید'
                         : null,
                   ),
-                  if (_mode != _ReceiptMode.creditSale) ...[
+                  if (isProjectLinked || _mode != _ReceiptMode.creditSale) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
                       value: _cashAccountId,
@@ -229,7 +294,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                       onChanged: (v) => setState(() => _cashAccountId = v),
                     ),
                   ],
-                  if (_mode != _ReceiptMode.settleReceivable) ...[
+                  if (!isProjectLinked && _mode != _ReceiptMode.settleReceivable) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
                       value: _incomeAccountId,
@@ -251,12 +316,18 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                       ..._counterparties.map((c) => DropdownMenuItem(
                           value: c.id, child: Text('${c.name} (${c.roles.join('، ')})'))),
                     ],
-                    onChanged: (v) {
-                      setState(() => _counterpartyId = v);
-                      _refreshReceivableHint();
-                    },
+                    // وقتی دریافت به پروژه وصل است، طرف حساب از خودِ پروژه
+                    // مشخص می‌شود و قابل تغییر دستی نیست.
+                    onChanged: isProjectLinked
+                        ? null
+                        : (v) {
+                            setState(() => _counterpartyId = v);
+                            _refreshReceivableHint();
+                          },
                   ),
-                  if (_mode == _ReceiptMode.settleReceivable && _currentReceivable != null) ...[
+                  if (!isProjectLinked &&
+                      _mode == _ReceiptMode.settleReceivable &&
+                      _currentReceivable != null) ...[
                     const SizedBox(height: 6),
                     Text(
                       'مانده طلب فعلی این طرف حساب: ${formatMoney(_currentReceivable!)}',
@@ -270,6 +341,13 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                           style: TextStyle(fontSize: 12, color: AppColors.negative, fontWeight: FontWeight.w700),
                         ),
                       ),
+                  ],
+                  if (isProjectLinked && _currentReceivable != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'مانده طلب فعلی این پروژه: ${formatMoney(_currentReceivable!)}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    ),
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(

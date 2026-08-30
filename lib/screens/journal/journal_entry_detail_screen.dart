@@ -56,17 +56,28 @@ class _JournalEntryDetailScreenState extends State<JournalEntryDetailScreen> {
       ),
     );
     if (confirm == true) {
-      await _db.deleteJournalEntry(widget.entryId);
-      if (mounted) Navigator.pop(context, true);
+      try {
+        await _db.deleteJournalEntry(widget.entryId);
+        if (mounted) Navigator.pop(context, true);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        }
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isSystemGenerated = _entry?.isSystemGenerated ?? false;
     return Scaffold(
       appBar: AppBar(
         title: Text('سند شماره ${pn(widget.entryId)}'),
-        actions: [IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete)],
+        actions: [
+          if (!isSystemGenerated)
+            IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
+        ],
       ),
       body: _loading || _entry == null
           ? const Center(child: CircularProgressIndicator())
@@ -74,6 +85,19 @@ class _JournalEntryDetailScreenState extends State<JournalEntryDetailScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  if (isSystemGenerated)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.brass.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'این سند توسط یک عملیات مالی سیستم (نهایی‌سازی/تخفیف/اصلاح/دریافت پروژه) ایجاد شده و برای حفظ یکپارچگی حساب‌ها قابل حذف نیست.',
+                        style: TextStyle(fontSize: 12, color: AppColors.brass),
+                      ),
+                    ),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),

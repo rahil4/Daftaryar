@@ -35,6 +35,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   List<CounterpartyModel> _counterparties = [];
   int? _selectedCounterpartyId;
+  bool _hasFinancialHistory = false;
   bool _loading = true;
   bool _saving = false;
 
@@ -50,8 +51,14 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
 
   Future<void> _loadCounterparties() async {
     final list = await _db.getCounterparties();
+    bool hasHistory = false;
+    if (widget.existing?.id != null) {
+      hasHistory = widget.existing!.isFinalized ||
+          await _db.projectHasFinancialHistory(widget.existing!.id!);
+    }
     setState(() {
       _counterparties = list;
+      _hasFinancialHistory = hasHistory;
       _loading = false;
     });
   }
@@ -85,13 +92,24 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
       agreedAmount: parsePersianAmount(_amount.text) ?? 0,
       description: _description.text.trim().isEmpty ? null : _description.text.trim(),
       createdAt: widget.existing?.createdAt ?? todayJalaliString(),
+      finalAmount: widget.existing?.finalAmount,
+      finalizedDate: widget.existing?.finalizedDate,
+      finalizedNote: widget.existing?.finalizedNote,
     );
-    if (widget.existing == null) {
-      await _db.insertProject(model);
-    } else {
-      await _db.updateProject(model);
+    try {
+      if (widget.existing == null) {
+        await _db.insertProject(model);
+      } else {
+        await _db.updateProject(model);
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        setState(() => _saving = false);
+      }
     }
-    if (mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -122,17 +140,27 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                           items: _counterparties
                               .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name)))
                               .toList(),
-                          onChanged: (v) => setState(() => _selectedCounterpartyId = v),
+                          onChanged: _hasFinancialHistory
+                              ? null
+                              : (v) => setState(() => _selectedCounterpartyId = v),
                         ),
                       ),
                       const SizedBox(width: 8),
                       IconButton.filled(
-                        onPressed: _addNewCounterpartyInline,
+                        onPressed: _hasFinancialHistory ? null : _addNewCounterpartyInline,
                         icon: const Icon(Icons.person_add_alt_1_outlined),
                         style: IconButton.styleFrom(backgroundColor: AppColors.surfaceAlt),
                       ),
                     ],
                   ),
+                  if (_hasFinancialHistory)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        'این پروژه سابقه مالی دارد (سند حسابداری یا تغییر مبلغ ثبت‌شده)؛ کارفرمای آن قابل تغییر نیست.',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     value: _projectType,
@@ -143,14 +171,25 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     onChanged: (v) => setState(() => _projectType = v!),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: _status,
-                    decoration: const InputDecoration(labelText: 'وضعیت'),
-                    items: [...kProjectStatuses, kProjectStatusFinalized, kProjectStatusCancelled]
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _status = v!),
-                  ),
+                  // Finalized/Cancelled عمداً از گزینه‌های این دراپ‌داون حذف
+                  // شده‌اند: این دو وضعیت فقط باید از طریق Workflow اختصاصی
+                  // خودشان (finalizeProject / لغو پروژه از صفحه جزئیات) ایجاد
+                  // شوند، نه با یک انتخاب ساده در فرم عمومی ویرایش پروژه.
+                  if (_status == kProjectStatusFinalized || _status == kProjectStatusCancelled)
+                    InputDecorator(
+                      decoration: const InputDecoration(labelText: 'وضعیت'),
+                      child: Text(_status,
+                          style: const TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      value: _status,
+                      decoration: const InputDecoration(labelText: 'وضعیت'),
+                      items: kProjectStatuses
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                          .toList(),
+                      onChanged: (v) => setState(() => _status = v!),
+                    ),
                   const SizedBox(height: 12),
                   JalaliDateField(
                     label: 'تاریخ شروع',

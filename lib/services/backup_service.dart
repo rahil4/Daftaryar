@@ -154,6 +154,11 @@ class BackupService {
         description: map['description'] as String?,
         createdAt: map['createdAt'] as String? ?? map['date'] as String,
         lines: lines,
+        // اگر فایل پشتیبان قدیمی‌تر از افزودن این فیلد باشد، map['source']
+        // به‌طور طبیعی غایب/NULL است - که طبق semantics جدید یعنی
+        // legacy/محافظت‌شده (نه این‌که حدس زده شود «دستی» بوده)؛ اگر فایل
+        // پشتیبان جدید باشد، مقدار واقعی (system/manual) عیناً حفظ می‌شود.
+        source: map['source'] as String?,
       );
       if (entry.isBalanced) {
         await _db.insertJournalEntry(entry);

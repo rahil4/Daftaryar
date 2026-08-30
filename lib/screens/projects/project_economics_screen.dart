@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../models/financial_reports.dart';
 import '../../models/project_economics.dart';
 import '../../services/project_economics_service.dart';
 import '../../theme/app_theme.dart';

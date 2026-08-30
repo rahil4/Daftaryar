@@ -6,6 +6,7 @@ import '../../db/database_helper.dart';
 import '../../models/account.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../dashboard/management_dashboard_screen.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/section_title.dart';
 import '../../services/pdf_export_service.dart';
@@ -28,6 +29,16 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
     return Scaffold(
       appBar: AppBar(
         title: const Text('گزارش‌ها'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.dashboard_customize_outlined),
+            tooltip: 'داشبورد مدیریتی',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ManagementDashboardScreen()),
+            ),
+          ),
+        ],
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,

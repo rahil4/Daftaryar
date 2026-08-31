@@ -16,9 +16,7 @@ import 'project_economics_service.dart';
 /// (`getAllPriceEventsInRange`) در DatabaseHelper است.
 class OperationalPerformanceService {
   final DatabaseHelper _db;
-  final FinancialMetricsService _metrics;
   final FinancialReportingService _reporting;
-  final ProjectEconomicsService _economics;
 
   OperationalPerformanceService({
     DatabaseHelper? db,
@@ -26,9 +24,8 @@ class OperationalPerformanceService {
     FinancialReportingService? reporting,
     ProjectEconomicsService? economics,
   })  : _db = db ?? DatabaseHelper.instance,
-        _metrics = metrics ?? FinancialMetricsService(db),
-        _reporting = reporting ?? FinancialReportingService(db: db, metrics: metrics),
-        _economics = economics ?? ProjectEconomicsService(db: db, metrics: metrics, reporting: reporting);
+        _reporting = reporting ??
+            FinancialReportingService(db: db, metrics: metrics ?? FinancialMetricsService(db));
 
   bool _inRange(String? date, String fromDate, String toDate) {
     if (date == null) return false;

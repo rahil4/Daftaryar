@@ -401,7 +401,7 @@ class DatabaseHelper {
     String? where = includeInactive ? null : 'isActive = 1';
     List<Object?> args = [];
     if (query != null && query.isNotEmpty) {
-      final searchClause = '(name LIKE ? OR phone LIKE ?)';
+      const searchClause = '(name LIKE ? OR phone LIKE ?)';
       where = where == null ? searchClause : '$where AND $searchClause';
       args = ['%$query%', '%$query%'];
     }

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
 import '../../models/journal_entry.dart';
-import '../../models/project.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 

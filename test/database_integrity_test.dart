@@ -25,7 +25,7 @@ void main() {
   });
 
   Future<int> createCounterparty(String name) async {
-    final now = '1404/01/01';
+    const now = '1404/01/01';
     return db.insertCounterparty(CounterpartyModel(
       name: name,
       createdAt: now,

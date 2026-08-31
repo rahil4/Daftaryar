@@ -15,7 +15,6 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:daftaryar/db/database_helper.dart';
 import 'package:daftaryar/models/account.dart';
 import 'package:daftaryar/models/counterparty.dart';
-import 'package:daftaryar/models/journal_entry.dart';
 import 'package:daftaryar/models/project.dart';
 import 'package:daftaryar/services/backup_service.dart';
 

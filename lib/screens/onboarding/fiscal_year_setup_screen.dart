@@ -79,7 +79,7 @@ class _FiscalYearSetupScreenState extends State<FiscalYearSetupScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<int>(
-                    value: _day,
+                    initialValue: _day,
                     decoration: const InputDecoration(labelText: 'روز'),
                     items: List.generate(daysInMonth, (i) => i + 1)
                         .map((d) => DropdownMenuItem(value: d, child: Text(pn(d))))
@@ -91,7 +91,7 @@ class _FiscalYearSetupScreenState extends State<FiscalYearSetupScreen> {
                 Expanded(
                   flex: 2,
                   child: DropdownButtonFormField<int>(
-                    value: _month,
+                    initialValue: _month,
                     decoration: const InputDecoration(labelText: 'ماه'),
                     items: List.generate(12, (i) => i + 1)
                         .map((m) => DropdownMenuItem(value: m, child: Text(jalaliMonthName(m))))

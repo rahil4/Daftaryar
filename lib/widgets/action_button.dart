@@ -30,7 +30,7 @@ class AppActionButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: color.withOpacity(0.32),
+                color: color.withValues(alpha: 0.32),
                 blurRadius: 14,
                 offset: const Offset(0, 6),
               ),

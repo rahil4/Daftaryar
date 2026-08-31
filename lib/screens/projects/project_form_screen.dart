@@ -135,7 +135,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<int>(
-                          value: _selectedCounterpartyId,
+                          initialValue: _selectedCounterpartyId,
                           decoration: const InputDecoration(labelText: 'کارفرما *'),
                           items: _counterparties
                               .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name)))
@@ -163,7 +163,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    value: _projectType,
+                    initialValue: _projectType,
                     decoration: const InputDecoration(labelText: 'نوع پروژه'),
                     items: kProjectTypes
                         .map((t) => DropdownMenuItem(value: t, child: Text(t)))
@@ -183,7 +183,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                     )
                   else
                     DropdownButtonFormField<String>(
-                      value: _status,
+                      initialValue: _status,
                       decoration: const InputDecoration(labelText: 'وضعیت'),
                       items: kProjectStatuses
                           .map((s) => DropdownMenuItem(value: s, child: Text(s)))

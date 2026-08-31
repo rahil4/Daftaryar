@@ -224,7 +224,7 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: AppColors.textSecondary.withOpacity(0.15),
+                          color: AppColors.textSecondary.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Text('این طرف حساب غیرفعال است',

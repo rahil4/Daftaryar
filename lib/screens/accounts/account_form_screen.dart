@@ -116,7 +116,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    value: _type,
+                    initialValue: _type,
                     decoration: const InputDecoration(labelText: 'نوع حساب'),
                     items: kAccountTypes
                         .map((t) => DropdownMenuItem(value: t, child: Text(t)))
@@ -130,7 +130,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _parentId,
+                    initialValue: _parentId,
                     decoration: const InputDecoration(labelText: 'حساب والد (اختیاری)'),
                     items: [
                       const DropdownMenuItem(value: null, child: Text('بدون والد (حساب کل)')),

@@ -44,7 +44,7 @@ class AppTheme {
         error: AppColors.negative,
         onPrimary: Color(0xFF15100A),
       ),
-      appBarTheme: AppBarTheme(
+      appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         surfaceTintColor: Colors.transparent,

@@ -21,7 +21,7 @@ class PeriodSelectorWidget extends StatelessWidget {
             child: ChoiceChip(
               label: Text(kDashboardPeriodLabels[preset]!),
               selected: isSelected,
-              selectedColor: AppColors.brass.withOpacity(0.25),
+              selectedColor: AppColors.brass.withValues(alpha: 0.25),
               onSelected: (_) => onChanged(preset),
             ),
           );

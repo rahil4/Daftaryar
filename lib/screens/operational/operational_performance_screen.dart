@@ -89,7 +89,7 @@ class _OperationalPerformanceScreenState extends State<OperationalPerformanceScr
                 margin: const EdgeInsets.only(bottom: 6),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.textSecondary.withOpacity(0.1),
+                  color: AppColors.textSecondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(w, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),

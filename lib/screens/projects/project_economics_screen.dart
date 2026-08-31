@@ -76,7 +76,7 @@ class _ProjectEconomicsScreenState extends State<ProjectEconomicsScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.brass.withOpacity(0.15),
+                    color: AppColors.brass.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(_statusLabel(a.profitabilityStatus),

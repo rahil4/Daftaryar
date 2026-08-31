@@ -89,7 +89,7 @@ class _JournalEntryDetailScreenState extends State<JournalEntryDetailScreen> {
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: AppColors.brass.withOpacity(0.12),
+                        color: AppColors.brass.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Text(

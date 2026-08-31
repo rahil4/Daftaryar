@@ -313,7 +313,7 @@ class _RangeSelector extends StatelessWidget {
         child: ChoiceChip(
           label: Text(label),
           selected: selected,
-          selectedColor: AppColors.brass.withOpacity(0.18),
+          selectedColor: AppColors.brass.withValues(alpha: 0.18),
           labelStyle: TextStyle(
             color: selected ? AppColors.brass : AppColors.textSecondary,
             fontWeight: selected ? FontWeight.w700 : FontWeight.normal,

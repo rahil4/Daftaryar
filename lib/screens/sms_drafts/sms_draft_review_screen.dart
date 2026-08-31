@@ -209,7 +209,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: _cashAccountId,
+                  initialValue: _cashAccountId,
                   decoration: InputDecoration(
                       labelText: _type == 'دریافت' ? 'واریز به حساب' : 'پرداخت از حساب'),
                   items: _cashAccounts
@@ -220,7 +220,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                 if (!_isSettlement) ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
-                    value: _counterAccountId,
+                    initialValue: _counterAccountId,
                     isExpanded: true,
                     decoration: InputDecoration(
                         labelText: _type == 'دریافت' ? 'بابت درآمد' : 'بابت هزینه'),
@@ -232,7 +232,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                 ],
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(
-                  value: _counterpartyId,
+                  initialValue: _counterpartyId,
                   isExpanded: true,
                   decoration: InputDecoration(
                       labelText: _isSettlement ? 'طرف حساب *' : 'طرف حساب (اختیاری)'),
@@ -268,7 +268,7 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
                 ],
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int?>(
-                  value: _projectId,
+                  initialValue: _projectId,
                   decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('—')),

@@ -167,8 +167,10 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
       await _db.createManualJournal(entry);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -218,7 +220,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   if (_mode != _ExpenseMode.settlePayable) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
-                      value: _expenseAccountId,
+                      initialValue: _expenseAccountId,
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'بابت هزینه'),
                       items: _expenseAccounts
@@ -230,7 +232,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   if (_mode != _ExpenseMode.creditExpense) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
-                      value: _cashAccountId,
+                      initialValue: _cashAccountId,
                       decoration: const InputDecoration(labelText: 'پرداخت از حساب'),
                       items: _cashAccounts
                           .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
@@ -240,7 +242,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _counterpartyId,
+                    initialValue: _counterpartyId,
                     isExpanded: true,
                     decoration: InputDecoration(
                         labelText: _requiresCounterparty ? 'طرف حساب *' : 'طرف حساب (اختیاری)'),
@@ -271,7 +273,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _projectId,
+                    initialValue: _projectId,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
                     items: [

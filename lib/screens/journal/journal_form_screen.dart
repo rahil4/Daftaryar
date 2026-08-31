@@ -131,8 +131,10 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
       await _db.createManualJournal(entry);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -227,7 +229,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<int>(
-                    value: line.accountId,
+                    initialValue: line.accountId,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'حساب', isDense: true),
                     items: _accounts
@@ -267,7 +269,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<int?>(
-              value: line.counterpartyId,
+              initialValue: line.counterpartyId,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'طرف حساب (اختیاری)', isDense: true),
               items: [
@@ -279,7 +281,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
             ),
             const SizedBox(height: 8),
             DropdownButtonFormField<int?>(
-              value: line.projectId,
+              initialValue: line.projectId,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'پروژه (اختیاری)', isDense: true),
               items: [

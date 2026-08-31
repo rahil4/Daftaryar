@@ -218,8 +218,10 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
       await _db.createManualJournal(entry);
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -264,7 +266,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: AppColors.brass.withOpacity(0.12),
+                        color: AppColors.brass.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -286,7 +288,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   if (isProjectLinked || _mode != _ReceiptMode.creditSale) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
-                      value: _cashAccountId,
+                      initialValue: _cashAccountId,
                       decoration: const InputDecoration(labelText: 'واریز به حساب'),
                       items: _cashAccounts
                           .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
@@ -297,7 +299,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   if (!isProjectLinked && _mode != _ReceiptMode.settleReceivable) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
-                      value: _incomeAccountId,
+                      initialValue: _incomeAccountId,
                       decoration: const InputDecoration(labelText: 'بابت درآمد'),
                       items: _incomeAccounts
                           .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
@@ -307,7 +309,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _counterpartyId,
+                    initialValue: _counterpartyId,
                     isExpanded: true,
                     decoration: InputDecoration(
                         labelText: _requiresCounterparty ? 'طرف حساب *' : 'طرف حساب (اختیاری)'),
@@ -351,7 +353,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(
-                    value: _projectId,
+                    initialValue: _projectId,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
                     items: [

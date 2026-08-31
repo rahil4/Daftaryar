@@ -94,7 +94,7 @@ class _ManualSmsEntryScreenState extends State<ManualSmsEntryScreen> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppColors.negative.withOpacity(0.1),
+                  color: AppColors.negative.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.negative),
                 ),
@@ -109,7 +109,7 @@ class _ManualSmsEntryScreenState extends State<ManualSmsEntryScreen> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppColors.positive.withOpacity(0.1),
+                  color: AppColors.positive.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.positive),
                 ),

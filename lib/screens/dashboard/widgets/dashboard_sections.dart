@@ -382,7 +382,7 @@ Widget _reconciliationChip(bool ok) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: (ok ? AppColors.positive : AppColors.negative).withOpacity(0.12),
+      color: (ok ? AppColors.positive : AppColors.negative).withValues(alpha: 0.12),
       borderRadius: BorderRadius.circular(8),
       border: Border.all(color: ok ? AppColors.positive : AppColors.negative),
     ),

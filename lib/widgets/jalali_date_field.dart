@@ -129,7 +129,7 @@ class _JalaliPickerSheetState extends State<_JalaliPickerSheet> {
     String Function(int)? display,
   }) {
     return DropdownButtonFormField<int>(
-      value: value,
+      initialValue: value,
       decoration: InputDecoration(labelText: label, isDense: true),
       items: items
           .map((e) => DropdownMenuItem(value: e, child: Text(display != null ? display(e) : pn(e))))

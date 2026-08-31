@@ -291,7 +291,7 @@ class _JournalListScreenState extends State<JournalListScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
-            color: active ? AppColors.brass.withOpacity(0.15) : AppColors.surfaceAlt,
+            color: active ? AppColors.brass.withValues(alpha: 0.15) : AppColors.surfaceAlt,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: active ? AppColors.brass : AppColors.gridLine),
           ),

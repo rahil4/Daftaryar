@@ -307,7 +307,7 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color),
       ),
@@ -693,7 +693,7 @@ class _ReceivePaymentSheetState extends State<_ReceivePaymentSheet> {
                 PersianAmountField(controller: _amount, label: 'مبلغ (تومان) *'),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: _cashAccountId,
+                  initialValue: _cashAccountId,
                   decoration: const InputDecoration(labelText: 'واریز به حساب'),
                   items: _cashAccounts
                       .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))

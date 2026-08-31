@@ -21,7 +21,7 @@ class _CounterpartyFormScreenState extends State<CounterpartyFormScreen> {
   late final _nationalId = TextEditingController(text: widget.existing?.nationalId ?? '');
   late final _address = TextEditingController(text: widget.existing?.address ?? '');
   late final _notes = TextEditingController(text: widget.existing?.notes ?? '');
-  late Set<String> _selectedRoles = {...(widget.existing?.roles ?? [kRoleCustomer])};
+  final Set<String> _selectedRoles = {...(widget.existing?.roles ?? [kRoleCustomer])};
   late bool _isActive = widget.existing?.isActive ?? true;
 
   List<String> _availableRoles = kDefaultCounterpartyRoles;

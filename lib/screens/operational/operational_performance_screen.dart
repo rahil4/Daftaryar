@@ -32,7 +32,7 @@ class _OperationalPerformanceScreenState extends State<OperationalPerformanceScr
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final range = DashboardPeriodResolver.resolve(_preset);
+    final range = await _service.resolvePeriod(_preset);
     final data = await _service.buildOperationalPerformance(period: range);
     setState(() {
       _data = data;
@@ -159,7 +159,8 @@ class _OperationalPerformanceScreenState extends State<OperationalPerformanceScr
           _stat('دریافتی بازه', _fmt(d.totalReceived)),
           _stat('مانده طلب (پایان بازه)', _fmt(d.receivableBalance)),
           _stat('بستانکاری مشتری (پایان بازه)', _fmt(d.customerCredit)),
-          _stat('نرخ وصول', _fmt(d.collectionRate, pct: true)),
+          _stat('نسبت دریافت نقدی به درآمد دوره', _fmt(d.periodReceiptToRevenueRatio, pct: true)),
+          _stat('نرخ وصول مطالبات این بازه', _fmt(d.periodArCollectionRate, pct: true)),
           _stat('شکاف وصول', _fmt(d.collectionGap)),
         ]),
         _section('تمرکز مشتری (کل عمر داده‌ها)'),

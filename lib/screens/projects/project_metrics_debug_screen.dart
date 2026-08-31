@@ -85,6 +85,12 @@ class _ProjectMetricsDebugScreenState extends State<ProjectMetricsDebugScreen> {
                   _row('وضعیت', r.status),
                   _row('درآمد محاسبه‌شده', _fmt(r.calculatedGrossRevenue)),
                   _row('مانده واقعی Ledger', _fmt(r.ledgerRevenueBalance)),
+                  if (r.status != 'NOT_APPLICABLE') _row('اختلاف', _fmt(r.difference)),
+                  if (r.finalAmount != null) _row('مبلغ نهایی اصلی', _fmt(r.finalAmount)),
+                  if (r.finalAdjustments != null && r.finalAdjustments != 0)
+                    _row('اصلاحات پس از نهایی‌سازی', _fmt(r.finalAdjustments)),
+                  if (r.discountAmount != null && r.discountAmount != 0)
+                    _row('تخفیف (فقط جهت اطلاع)', _fmt(r.discountAmount)),
                   if (r.note != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),

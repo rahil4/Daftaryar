@@ -109,10 +109,12 @@ class ReceivablesSection extends StatelessWidget {
           crossAxisSpacing: 10,
           childAspectRatio: 1.9,
           children: [
-            _miniStat('مانده مطالبات (AR)', _fmt(data.receivableBalance)),
+            _miniStat('مانده مطالبات (AR) - پایان بازه', _fmt(data.receivableBalance)),
             _miniStat('پیش‌دریافت مشتریان', _fmt(data.advanceBalance)),
             _miniStat('بستانکاری مشتری', _fmt(data.customerCreditBalance)),
-            _miniStat('نرخ وصول', _fmt(data.collectionRate, pct: true)),
+            _miniStat('نسبت دریافت نقدی به درآمد دوره', _fmt(data.periodReceiptToRevenueRatio, pct: true)),
+            _miniStat('نرخ وصول مطالبات این بازه', _fmt(data.periodArCollectionRate, pct: true)),
+            _miniStat('نسبت مانده مطالبات به درآمد دوره', _fmt(data.closingReceivableToPeriodRevenueRatio, pct: true)),
           ],
         ),
         const SizedBox(height: 10),
@@ -147,13 +149,21 @@ class SettlementSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(child: _miniStat('نهایی‌شده', pn(data.finalizedProjectsCount))),
-        const SizedBox(width: 8),
-        Expanded(child: _miniStat('تسویه‌شده', pn(data.settledProjectsCount))),
-        const SizedBox(width: 8),
-        Expanded(child: _miniStat('تسویه‌نشده', pn(data.unsettledProjectsCount))),
+        const Text('وضعیت فعلی پروژه‌ها (مستقل از بازه انتخابی)',
+            style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(child: _miniStat('نهایی‌شده', pn(data.finalizedProjectsCount))),
+            const SizedBox(width: 8),
+            Expanded(child: _miniStat('تسویه‌شده', pn(data.settledProjectsCount))),
+            const SizedBox(width: 8),
+            Expanded(child: _miniStat('تسویه‌نشده', pn(data.unsettledProjectsCount))),
+          ],
+        ),
       ],
     );
   }

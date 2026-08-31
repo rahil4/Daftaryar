@@ -29,6 +29,27 @@ class KpiValue {
 /// View Model کامل داشبورد مدیریتی - فقط برای نمایش، هرگز در دیتابیس
 /// ذخیره نمی‌شود و خودش هیچ محاسبه Ledger‌ای انجام نمی‌دهد؛ همه مقادیرش از
 /// FinancialReportingService/FinancialMetricsService پر می‌شوند.
+///
+/// طبقه‌بندی صریح Time Basis (مورد ۷/۲۰ مرحله Reporting Semantics):
+///
+/// == PERIOD METRICS (فقط رویدادهای [fromDate, toDate]) ==
+/// netRevenue, directProjectCost, projectContribution, officeExpense,
+/// projectOverhead, operatingResult, operatingMargin (بخش KPI Summary) +
+/// تمام بخش Cash Position + periodReceiptToRevenueRatio +
+/// closingReceivableToPeriodRevenueRatio (صورت‌کسر Balance ولی مخرج Period) +
+/// periodArCollectionRate + receivableMovement (increase/decrease همان بازه) +
+/// discount/adjustment/pricing بخش Pricing.
+///
+/// == CURRENT / LIFETIME STATE (مستقل از بازه انتخابی) ==
+/// receivableBalance, customerCreditBalance, advanceBalance (این سه Closing
+/// Balance «الان»‌اند، نه فقط پایان بازه انتخابی - هرچند از نظر عددی با
+/// انتخاب toDate=امروز یکی می‌شوند) + finalizedProjectsCount/
+/// settledProjectsCount/unsettledProjectsCount + allProjects/worstProjects/
+/// bestProjects/outstandingProjects/lossProjects (تمام تاریخچه پروژه‌ها) +
+/// customers/top5CustomersRevenueShare (Lifetime، رجوع به مستندات
+/// FinancialReportingService.getTopCustomersRevenueShare).
+///
+/// این دو دسته هرگز نباید در یک مقایسه یا نمودار به‌اشتباه ترکیب شوند.
 class ManagementDashboardData {
   final String? fromDate;
   final String? toDate;
@@ -55,14 +76,35 @@ class ManagementDashboardData {
   final bool cashReconciles;
 
   // Receivables
-  final double receivableBalance;
+  final double receivableBalance; // Closing Balance - مانده مطالبات در پایان بازه (مستقل، نه یک Ratio)
   final double customerCreditBalance;
   final double advanceBalance;
   final Map<String, double> receivableMovement; // opening/newReceivables/collections/adjustments/other/closing
-  final double? collectionRate;
-  final double? outstandingRatio;
 
-  // Settlement
+  /// نسبت دریافتی نقدی بازه به درآمد شناسایی‌شده همان بازه - **نرخ وصول
+  /// مطالبات همین بازه نیست**، چون دریافتی می‌تواند بابت مطالبات قدیمی‌تر
+  /// باشد. عمداً periodReceiptToRevenueRatio نام‌گذاری شد (نه collectionRate)
+  /// تا با نسخه Lifetime سطح پروژه/مشتری (ProjectFinancialMetrics.collectionRate)
+  /// اشتباه گرفته نشود.
+  final double? periodReceiptToRevenueRatio;
+
+  /// نسبت مانده مطالبات در پایان بازه (یک Balance) به درآمد همان بازه (یک
+  /// Flow) - یک شاخص مدیریتی مکمل است، نه استاندارد Collection KPI. برای
+  /// بازه‌های کوتاه با درآمد کم و مطالبات انباشته قدیمی می‌تواند اعداد
+  /// بسیار بزرگ (مثلاً >۱۰۰۰٪) بدهد که لزوماً وضعیت بد نیست.
+  final double? closingReceivableToPeriodRevenueRatio;
+
+  /// شاخص دقیق‌تر وصول: دریافتی واقعی این بازه تقسیم بر (مانده طلب ابتدای
+  /// بازه + طلب جدید همین بازه) - یعنی «چه سهمی از مطالباتی که می‌توانستیم
+  /// در این بازه وصول کنیم واقعاً وصول شد». null اگر مخرج صفر باشد.
+  final double? periodArCollectionRate;
+
+  // Settlement - هشدار مهم (مورد ۲۲ مرحله Reporting Semantics): این سه
+  // شمارش، وضعیت فعلی/زنده تمام پروژه‌ها را نشان می‌دهند (Current State)،
+  // نه تعداد پروژه‌هایی که «در طول بازه انتخابی» Finalize/Settle شده‌اند.
+  // چون سیستم هیچ تاریخ رویداد Settlement مستقلی ثبت نمی‌کند، چنین ادعایی
+  // (Settled-in-Period) قابل ساخت نیست؛ همیشه با برچسب «وضعیت فعلی» نمایش
+  // داده شوند، نه به‌عنوان رویداد همان بازه انتخابی.
   final int finalizedProjectsCount;
   final int settledProjectsCount;
   final int unsettledProjectsCount;
@@ -128,8 +170,9 @@ class ManagementDashboardData {
     required this.customerCreditBalance,
     required this.advanceBalance,
     required this.receivableMovement,
-    required this.collectionRate,
-    required this.outstandingRatio,
+    required this.periodReceiptToRevenueRatio,
+    required this.closingReceivableToPeriodRevenueRatio,
+    required this.periodArCollectionRate,
     required this.finalizedProjectsCount,
     required this.settledProjectsCount,
     required this.unsettledProjectsCount,

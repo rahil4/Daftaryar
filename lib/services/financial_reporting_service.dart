@@ -194,6 +194,7 @@ class FinancialReportingService {
       receivableBalance: cm.receivableBalance,
       customerCredit: cm.customerCredit,
       directProjectCost: cm.directProjectCost,
+      directProjectCostAllProjects: cm.directProjectCostAllProjects,
       projectContribution: cm.projectContribution,
       contributionMargin: cm.contributionMargin,
       collectionRate: cm.collectionRate,
@@ -239,7 +240,14 @@ class FinancialReportingService {
     return reports;
   }
 
-  /// سهم Top-N مشتری از درآمد خالص کل دفتر (تمرکز مشتری)
+  /// سهم Top-N مشتری از درآمد خالص کل دفتر (تمرکز مشتری). **این شاخص
+  /// Lifetime است، نه Period** - چون Attribution دقیق «کدام بخش از درآمد هر
+  /// مشتری واقعاً در یک بازه مشخص شناسایی شده» با معماری فعلی (که Revenue
+  /// را در سطح Customer فقط بر اساس مجموع پروژه‌های Finalized می‌شناسد، نه
+  /// با فیلتر تاریخ Finalization هر پروژه) به‌طور قابل‌اتکا ممکن نیست. طبق
+  /// تصمیم صریح مرحله Reporting Semantics (مورد ۸)، به‌جای ساختن یک نسخه
+  /// Period-based با Attribution نامطمئن، این محدودیت آشکارا مستند و در UI
+  /// اعلام می‌شود؛ حدسی برای «تمرکز مشتری این بازه» ساخته نشد.
   Future<double?> getTopCustomersRevenueShare(int topN) async {
     final reports = await getAllCustomerReports(sortBy: CustomerReportSort.netRevenue);
     if (reports.isEmpty) return null;

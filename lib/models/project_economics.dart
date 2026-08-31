@@ -169,6 +169,8 @@ class CustomerEconomicAnalysis {
 
   /// فقط از پروژه‌های Finalized (طبق تعریف رسمی این مرحله)
   final double totalNetRevenue;
+  /// هم‌جمعیت با totalNetRevenue (فقط Finalized) - رجوع به
+  /// CustomerFinancialMetrics.directProjectCost برای توضیح کامل.
   final double totalDirectCost;
   final double? totalContribution;
   final double? contributionMargin;

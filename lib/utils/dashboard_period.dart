@@ -45,8 +45,17 @@ class DashboardPeriodResolver {
     Jalali? today,
     String? customFrom,
     String? customTo,
+    // پیش‌فرض ۱/۱ یعنی سال مالی = سال تقویمی (وقتی کاربر سال مالی سفارشی
+    // تنظیم نکرده)؛ با این پیش‌فرض، رفتار قبلی این دو Preset بدون تغییر
+    // باقی می‌ماند. اگر کاربر سال مالی سفارشی تنظیم کرده باشد (از طریق
+    // DatabaseHelper.getFiscalYearStart)، Caller باید مقدار واقعی را اینجا
+    // پاس دهد تا این‌سال/سال‌قبل واقعاً بر مبنای سال مالی محاسبه شوند - نه
+    // همیشه فروردین تا اسفند تقویمی، صرف‌نظر از تنظیمات کاربر.
+    int fiscalYearStartMonth = 1,
+    int fiscalYearStartDay = 1,
   }) {
     final now = today ?? Jalali.now();
+    final isCalendarYear = fiscalYearStartMonth == 1 && fiscalYearStartDay == 1;
     switch (preset) {
       case DashboardPeriodPreset.today:
         return DashboardPeriodRange(
@@ -94,18 +103,20 @@ class DashboardPeriodResolver {
             label: kDashboardPeriodLabels[preset]!);
 
       case DashboardPeriodPreset.thisYear:
-        final start = Jalali(now.year, 1, 1);
-        final decEnd = Jalali(now.year, 12, 1);
-        final end = Jalali(now.year, 12, decEnd.monthLength);
+        final fy = currentFiscalYearRange(fiscalYearStartMonth, fiscalYearStartDay, now);
         return DashboardPeriodRange(
-            fromDate: jalaliToString(start), toDate: jalaliToString(end), label: kDashboardPeriodLabels[preset]!);
+            fromDate: jalaliToString(fy[0]),
+            toDate: jalaliToString(fy[1]),
+            label: isCalendarYear ? kDashboardPeriodLabels[preset]! : 'سال مالی جاری');
 
       case DashboardPeriodPreset.lastYear:
-        final start = Jalali(now.year - 1, 1, 1);
-        final decEnd = Jalali(now.year - 1, 12, 1);
-        final end = Jalali(now.year - 1, 12, decEnd.monthLength);
+        final fy = currentFiscalYearRange(fiscalYearStartMonth, fiscalYearStartDay, now);
+        final lastFyStart = fy[0].addYears(-1);
+        final lastFyEnd = fy[1].addYears(-1);
         return DashboardPeriodRange(
-            fromDate: jalaliToString(start), toDate: jalaliToString(end), label: kDashboardPeriodLabels[preset]!);
+            fromDate: jalaliToString(lastFyStart),
+            toDate: jalaliToString(lastFyEnd),
+            label: isCalendarYear ? kDashboardPeriodLabels[preset]! : 'سال مالی قبل');
 
       case DashboardPeriodPreset.custom:
         final from = customFrom ?? jalaliToString(now);
@@ -142,19 +153,27 @@ class DashboardPeriodResolver {
     'اسفند',
   ];
 
+  /// فهرست بازه‌های ماهانه بین دو تاریخ - هر Bucket دقیقاً با بازه واقعی
+  /// [fromDate, toDate] برخورد (Intersection) دارد؛ اولین Bucket از خودِ
+  /// fromDate شروع می‌شود (نه لزوماً روز اول ماه) و آخرین Bucket دقیقاً در
+  /// toDate تمام می‌شود (نه لزوماً آخر ماه). این‌طوری برای یک بازه سفارشی
+  /// مثل «۱۵ مرداد تا ۱۰ شهریور»، هیچ روزی خارج از بازه انتخابی وارد Trend
+  /// نمی‌شود. برای Periodهای کامل ماه/سال (که fromDate/toDate خودشان دقیقاً
+  /// اول/آخر ماه‌اند)، رفتار قبلی بدون تغییر باقی می‌ماند.
   static List<DashboardPeriodRange> monthlyBuckets(String fromDate, String toDate) {
     final start = parseJalaliString(fromDate)!;
     final end = parseJalaliString(toDate)!;
     final buckets = <DashboardPeriodRange>[];
-    var cursor = Jalali(start.year, start.month, 1);
-    while (cursor.year < end.year || (cursor.year == end.year && cursor.month <= end.month)) {
-      final monthEnd = Jalali(cursor.year, cursor.month, cursor.monthLength);
+    var cursor = start;
+    while (cursor.compareTo(end) <= 0) {
+      final naturalMonthEnd = Jalali(cursor.year, cursor.month, cursor.monthLength);
+      final bucketEnd = naturalMonthEnd.compareTo(end) <= 0 ? naturalMonthEnd : end;
       buckets.add(DashboardPeriodRange(
         fromDate: jalaliToString(cursor),
-        toDate: jalaliToString(monthEnd),
+        toDate: jalaliToString(bucketEnd),
         label: '${_monthNames[cursor.month - 1]} ${cursor.year}',
       ));
-      cursor = cursor.month == 12 ? Jalali(cursor.year + 1, 1, 1) : Jalali(cursor.year, cursor.month + 1, 1);
+      cursor = bucketEnd.addDays(1);
     }
     return buckets;
   }

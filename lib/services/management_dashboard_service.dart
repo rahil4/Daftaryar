@@ -28,7 +28,14 @@ class ManagementDashboardService {
     bool includeComparison = true,
     bool includeTrend = true,
   }) async {
-    final range = DashboardPeriodResolver.resolve(preset, customFrom: customFrom, customTo: customTo);
+    final fy = await _db.getFiscalYearStart();
+    final range = DashboardPeriodResolver.resolve(
+      preset,
+      customFrom: customFrom,
+      customTo: customTo,
+      fiscalYearStartMonth: fy['month']!,
+      fiscalYearStartDay: fy['day']!,
+    );
     final previousRange =
         includeComparison ? DashboardPeriodResolver.previousPeriodOf(range) : null;
 
@@ -158,8 +165,19 @@ class ManagementDashboardService {
       customerCreditBalance: totalCredit,
       advanceBalance: totalAdvance,
       receivableMovement: receivableMovement,
-      collectionRate: period.netRevenue != 0 ? (period.customerReceipts / period.netRevenue) * 100 : null,
-      outstandingRatio: period.netRevenue != 0 ? (totalReceivable / period.netRevenue) * 100 : null,
+      periodReceiptToRevenueRatio:
+          period.netRevenue != 0 ? (period.customerReceipts / period.netRevenue) * 100 : null,
+      closingReceivableToPeriodRevenueRatio:
+          period.netRevenue != 0 ? (totalReceivable / period.netRevenue) * 100 : null,
+      // مورد ۳: شاخص دقیق‌تر AR Collection - فقط چون Opening/NewReceivables/
+      // Collections با اطمینان از Ledger (arMovement) قابل استخراجند این‌جا
+      // اضافه شد؛ اگر مخرج (مانده ابتدای بازه + طلب جدید) صفر باشد یعنی
+      // اصلاً چیزی برای وصول موجود نبوده، پس null معنادار است.
+      periodArCollectionRate: (receivableMovement['opening']! + receivableMovement['newReceivables']!) != 0
+          ? (receivableMovement['collections']! /
+                  (receivableMovement['opening']! + receivableMovement['newReceivables']!)) *
+              100
+          : null,
       finalizedProjectsCount: finalizedCount,
       settledProjectsCount: settledCount,
       unsettledProjectsCount: unsettledCount,

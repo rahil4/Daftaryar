@@ -131,6 +131,8 @@ class FinancialMetricsService {
     final finalAdjustments = events
         .where((e) => e.type == kPriceEventFinalAdjustment)
         .fold<double>(0, (s, e) => s + e.amount);
+    final discountAmount =
+        events.where((e) => e.type == kPriceEventDiscount).fold<double>(0, (s, e) => s + e.amount.abs());
     final calculatedGrossRevenue = project.finalAmount! + finalAdjustments;
     final ledgerRevenueBalance = await _db.projectRevenueLedgerBalance(projectId);
     final matches = (calculatedGrossRevenue - ledgerRevenueBalance).abs() < 1;
@@ -140,6 +142,9 @@ class FinancialMetricsService {
       ledgerRevenueBalance: ledgerRevenueBalance,
       revenueMatches: matches,
       status: matches ? 'OK' : 'MISMATCH',
+      finalAmount: project.finalAmount,
+      finalAdjustments: finalAdjustments,
+      discountAmount: discountAmount,
       note: matches
           ? null
           : 'مانده واقعی حساب درآمد در Ledger با finalAmount+FINAL_ADJUSTMENTها یکسان نیست؛ احتمالاً سندی خارج از مسیر رسمی (finalizeProject/recordFinalAdjustment) این حساب را برای این پروژه دستکاری کرده.',
@@ -153,16 +158,29 @@ class FinancialMetricsService {
   /// Revenue قطعی ندارد). مقادیر مستقیماً از حساب‌های سطح-طرف‌حساب خوانده
   /// می‌شوند (نه با جمع‌زدن Metrics هر پروژه)، تا سطرهایی که به طرف حساب
   /// وصل‌اند ولی projectId ندارند هم به‌درستی لحاظ شوند.
+  ///
+  /// تصمیم صریح Time-Basis (مرحله Reporting Semantics، مورد ۵): پیش‌تر
+  /// «directProjectCost» روی همه پروژه‌ها (حتی Finalize‌نشده) جمع می‌شد در
+  /// حالی که Revenue فقط از پروژه‌های Finalized می‌آمد - یعنی صورت و مخرج
+  /// Contribution/Margin از دو جمعیت متفاوت بودند. تصمیم گرفته شد:
+  /// - directProjectCost (این فیلد) اکنون فقط پروژه‌های Finalized را شامل
+  ///   می‌شود، دقیقاً هم‌جمعیت با Revenue - تا Contribution/Margin معنای
+  ///   مالی درستی داشته باشند (سود واقعی همان کارِ درآمدزاشده).
+  /// - directProjectCostAllProjects (فیلد جدید) هزینه واقعی صرف‌شده روی
+  ///   تمام پروژه‌های این مشتری را - شامل پروژه‌های در جریان (WIP) - جداگانه
+  ///   و با نام صریح گزارش می‌کند، تا این اطلاعات از بین نرود.
   Future<CustomerFinancialMetrics> getCustomerMetrics(int counterpartyId) async {
     final allProjects = await _db.getProjects(counterpartyId: counterpartyId);
     final finalizedProjects = allProjects.where((p) => p.isFinalized).toList();
 
     double grossRevenue = 0;
     double discountAmount = 0;
+    double directProjectCost = 0;
     for (final p in finalizedProjects) {
       final m = await _computeProjectMetrics(p);
       grossRevenue += m.grossRevenue ?? 0;
       discountAmount += m.discountAmount;
+      directProjectCost += m.directProjectCost;
     }
     final netRevenue = grossRevenue - discountAmount;
 
@@ -171,9 +189,9 @@ class FinancialMetricsService {
     final receivableBalance = await _db.receivableBalance(counterpartyId);
     final customerCredit = await _db.counterpartyCustomerCreditBalance(counterpartyId);
 
-    double directProjectCost = 0;
+    double directProjectCostAllProjects = 0;
     for (final p in allProjects) {
-      directProjectCost += await _db.projectDirectCost(p.id!);
+      directProjectCostAllProjects += await _db.projectDirectCost(p.id!);
     }
 
     final projectContribution = netRevenue - directProjectCost;
@@ -194,6 +212,7 @@ class FinancialMetricsService {
       receivableBalance: receivableBalance,
       customerCredit: customerCredit,
       directProjectCost: directProjectCost,
+      directProjectCostAllProjects: directProjectCostAllProjects,
       projectContribution: projectContribution,
       contributionMargin: contributionMargin,
       collectionRate: collectionRate,

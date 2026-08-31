@@ -35,6 +35,24 @@ class OperationalPerformanceService {
     return date.compareTo(fromDate) >= 0 && date.compareTo(toDate) <= 0;
   }
 
+  /// حل بازه یک Preset با در نظر گرفتن تنظیمات واقعی سال مالی کاربر - UI
+  /// نباید مستقیم به DatabaseHelper.getFiscalYearStart دسترسی داشته باشد
+  /// (طبق اصل «UI فقط نمایش دهد»)؛ این متد آن دانش را در Service نگه می‌دارد.
+  Future<DashboardPeriodRange> resolvePeriod(
+    DashboardPeriodPreset preset, {
+    String? customFrom,
+    String? customTo,
+  }) async {
+    final fy = await _db.getFiscalYearStart();
+    return DashboardPeriodResolver.resolve(
+      preset,
+      customFrom: customFrom,
+      customTo: customTo,
+      fiscalYearStartMonth: fy['month']!,
+      fiscalYearStartDay: fy['day']!,
+    );
+  }
+
   Future<OperationalPerformanceData> buildOperationalPerformance({
     required DashboardPeriodRange period,
     bool includeComparison = true,
@@ -74,6 +92,17 @@ class OperationalPerformanceService {
         : null;
 
     // ---------- Volume vs Financial Volume ----------
+    // محدودیت مستند (مورد ۲۳ مرحله Reporting Semantics): صورت این کسر
+    // (periodReport.netRevenue) از Ledger و بر مبنای JournalEntry.date
+    // می‌آید - یعنی اگر یک پروژه قدیمی‌تر (Finalize‌شده در بازه‌ای قبل‌تر)
+    // در همین بازه یک FINAL_ADJUSTMENT بگیرد، آن مبلغ هم در این صورت‌کسر
+    // وارد می‌شود. اما مخرج (finalizedInPeriod.length) فقط پروژه‌هایی را
+    // می‌شمارد که خودِ Finalization‌شان (نه Adjustment) در همین بازه رخ داده.
+    // در نتیجه در حضور چنین Adjustmentهایی، صورت و مخرج دقیقاً از یک
+    // جمعیت نمی‌آیند. به‌جای ساختن Query پیچیده‌تر برای تفکیک «Revenue فقط
+    // ناشی از Finalizationهای همین بازه» (که خودش نیازمند فرض‌های جدید
+    // درباره نحوه تفکیک است)، این محدودیت آشکارا همین‌جا مستند شد؛ عدد در
+    // غیاب Adjustment میان‌بازه‌ای کاملاً صحیح است.
     final revenuePerFinalizedProject =
         finalizedInPeriod.isNotEmpty ? periodReport.netRevenue / finalizedInPeriod.length : null;
     final contributionPerFinalizedProject = (finalizedInPeriod.isNotEmpty && periodReport.projectContribution != null)
@@ -136,10 +165,15 @@ class OperationalPerformanceService {
 
     // ---------- Collection Performance ----------
     final receivableMovement =
-        await _reporting.getReceivableMovement(toDate: period.toDate);
+        await _reporting.getReceivableMovement(fromDate: period.fromDate, toDate: period.toDate);
     final creditMovement = await _reporting.getCustomerCreditMovement(toDate: period.toDate);
-    final collectionRate =
+    final periodReceiptToRevenueRatio =
         periodReport.netRevenue != 0 ? (periodReport.customerReceipts / periodReport.netRevenue) * 100 : null;
+    // مورد ۳: شاخص دقیق‌تر - فقط چون Opening/NewReceivables/Collections با
+    // اطمینان از arMovement قابل استخراجند اضافه شد.
+    final arDenominator = receivableMovement['opening']! + receivableMovement['newReceivables']!;
+    final periodArCollectionRate =
+        arDenominator != 0 ? (receivableMovement['collections']! / arDenominator) * 100 : null;
     final collectionGap = periodReport.netRevenue - periodReport.customerReceipts;
 
     // ---------- WIP (وضعیت فعلی) ----------
@@ -193,7 +227,7 @@ class OperationalPerformanceService {
             current: finalizedInPeriod.length.toDouble(),
             previous: previousProjects.length.toDouble()),
         FinancialPeriodComparison.compute(
-            metricName: 'collectionRate', current: collectionRate ?? 0, previous: null),
+            metricName: 'periodReceiptToRevenueRatio', current: periodReceiptToRevenueRatio ?? 0, previous: null),
         FinancialPeriodComparison.compute(
             metricName: 'receivable',
             current: receivableMovement['closing'] ?? 0,
@@ -222,7 +256,7 @@ class OperationalPerformanceService {
     final alerts = _buildAlerts(
       lossCount: lossCount,
       marginChangePoints: marginChangePoints,
-      collectionRate: collectionRate,
+      periodReceiptToRevenueRatio: periodReceiptToRevenueRatio,
       discountRate: discountRate,
       diagnostics: diagnostics,
     );
@@ -267,7 +301,8 @@ class OperationalPerformanceService {
       totalReceived: periodReport.customerReceipts,
       receivableBalance: receivableMovement['closing'] ?? 0,
       customerCredit: creditMovement['closing'] ?? 0,
-      collectionRate: collectionRate,
+      periodReceiptToRevenueRatio: periodReceiptToRevenueRatio,
+      periodArCollectionRate: periodArCollectionRate,
       collectionGap: collectionGap,
       wipProjectCount: wipReports.length,
       wipInitialEstimate: wipInitialEstimate,
@@ -290,7 +325,7 @@ class OperationalPerformanceService {
   List<ManagementAlert> _buildAlerts({
     required int lossCount,
     required double? marginChangePoints,
-    required double? collectionRate,
+    required double? periodReceiptToRevenueRatio,
     required double? discountRate,
     required FinancialReportDiagnostics diagnostics,
   }) {

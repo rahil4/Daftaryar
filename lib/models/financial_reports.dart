@@ -154,18 +154,27 @@ class CustomerFinancialReport {
   final double receivableBalance;
   final double customerCredit;
 
+  /// هم‌جمعیت با Revenue/Discount (فقط پروژه‌های Finalized) - رجوع به
+  /// CustomerFinancialMetrics.directProjectCost برای توضیح کامل تصمیم.
   final double directProjectCost;
+  /// هزینه مستقیم تمام پروژه‌ها شامل WIP - در Contribution/Margin استفاده
+  /// نمی‌شود، فقط جهت اطلاع در دسترس است.
+  final double directProjectCostAllProjects;
   final double? projectContribution;
   final double? contributionMargin;
 
+  /// نسبت Lifetime، نه Period.
   final double? collectionRate;
+  /// نسبت Closing AR (کل عمر) به Net Revenue (کل عمر) - Lifetime.
   final double? outstandingRatio;
 
   final double? averageProjectValue;
   final double? averageDiscountRate;
 
   /// سهم این مشتری از درآمد خالص کل دفتر - null اگر درآمد دفتر صفر باشد یا
-  /// در این محاسبه مشخص نشده باشد (توسط سرویس پر می‌شود).
+  /// در این محاسبه مشخص نشده باشد (توسط سرویس پر می‌شود). این شاخص Lifetime
+  /// است؛ رجوع به گزارش نهایی مرحله Reporting Semantics برای دلیل عدم وجود
+  /// نسخه Period-based (نیازمند Attribution دقیق‌تر که معماری فعلی ندارد).
   final double? revenueShareOfOffice;
 
   CustomerFinancialReport({
@@ -182,6 +191,7 @@ class CustomerFinancialReport {
     required this.receivableBalance,
     required this.customerCredit,
     required this.directProjectCost,
+    required this.directProjectCostAllProjects,
     required this.projectContribution,
     required this.contributionMargin,
     required this.collectionRate,
@@ -281,8 +291,16 @@ class FinancialPeriodComparison {
     required double? previous,
   }) {
     final growthAmount = previous != null ? current - previous : null;
+    // مورد ۲۴ مرحله Reporting Semantics: برای شاخص‌هایی که می‌توانند منفی
+    // باشند (مثل Contribution/Operating Result در یک دوره زیان‌ده)، اگر
+    // مستقیم از previous (نه قدرمطلق آن) به‌عنوان مخرج استفاده شود، ممکن
+    // است علامت نرخ رشد معکوس و گمراه‌کننده شود - مثلاً رفتن از -10 به +10
+    // با فرمول ساده (current-previous)/previous به‌جای رشد مثبت، عدد
+    // "-200%" می‌دهد. استفاده از قدرمطلق مخرج این مشکل را برای همه
+    // Metricها (چه همیشه مثبت مثل Revenue، چه بالقوه منفی) به‌طور یکسان و
+    // صحیح حل می‌کند.
     final growthRate =
-        (previous != null && previous != 0) ? ((current - previous) / previous) * 100 : null;
+        (previous != null && previous != 0) ? ((current - previous) / previous.abs()) * 100 : null;
     return FinancialPeriodComparison._(
       metricName: metricName,
       currentValue: current,
@@ -374,6 +392,7 @@ class FinancialReportDiagnostics {
       revenueLedgerMismatchCount > 0 ||
       negativeARCount > 0 ||
       negativeAdvanceCount > 0 ||
+      negativeCustomerCreditCount > 0 ||
       cashReconciliationErrors > 0;
 }
 

@@ -30,7 +30,11 @@ class ProjectFinancialMetrics {
   final double? projectContribution; // netRevenue - directProjectCost
   final double? contributionMargin; // درصد، null اگر netRevenue==0
 
+  /// نسبت Lifetime دریافتی کل عمر پروژه به Revenue کل عمر پروژه - نه یک
+  /// بازه؛ مقایسه آن با نسخه Period-based سطح Dashboard/Operational
+  /// Performance (که نام و معنای متفاوتی دارند) اشتباه است.
   final double? collectionRate; // درصد، null اگر netRevenue==0
+  /// نسبت Closing AR (کل عمر) به Net Revenue (کل عمر) - Lifetime.
   final double? outstandingRatio; // درصد، null اگر netRevenue==0
 
   final double? priceIncreaseAmount; // finalAmount - initialEstimate
@@ -84,11 +88,26 @@ class CustomerFinancialMetrics {
   final double receivableBalance;
   final double customerCredit;
 
+  /// هزینه مستقیم پروژه‌های Finalized این مشتری - عمداً هم‌جمعیت با
+  /// Revenue/Discount (نه همه پروژه‌ها)، چون این مقدار مبنای محاسبه
+  /// projectContribution/contributionMargin است و صورت/مخرج باید از یک
+  /// جمعیت بیایند.
   final double directProjectCost;
+
+  /// هزینه مستقیم تمام پروژه‌های این مشتری، شامل پروژه‌های در جریان (WIP)
+  /// که هنوز Finalize نشده‌اند. این عدد در محاسبه Contribution/Margin
+  /// استفاده نمی‌شود (چون Revenue متناظرش هنوز قطعی نیست) - فقط برای
+  /// دیدن کل هزینه واقعی صرف‌شده روی این مشتری در دسترس است.
+  final double directProjectCostAllProjects;
+
   final double? projectContribution;
   final double? contributionMargin;
 
+  /// نسبت Lifetime (کل عمر داده‌ها)، نه محدود به یک بازه؛ رجوع کنید به
+  /// PeriodFinancialReport برای معادل Period-based با نام و معنای متفاوت.
   final double? collectionRate;
+
+  /// نسبت Closing AR (کل عمر) به Net Revenue (کل عمر) - Lifetime، نه Period.
   final double? outstandingRatio;
 
   final double? averageProjectValue; // netRevenue / projectCount
@@ -104,6 +123,7 @@ class CustomerFinancialMetrics {
     required this.receivableBalance,
     required this.customerCredit,
     required this.directProjectCost,
+    required this.directProjectCostAllProjects,
     required this.projectContribution,
     required this.contributionMargin,
     required this.collectionRate,
@@ -186,6 +206,17 @@ class ProjectReconciliation {
   final String status; // 'OK' یا 'MISMATCH' یا 'NOT_APPLICABLE'
   final String? note;
 
+  // مورد ۲۷ مرحله Reporting Semantics: «از تشخیص به گزارش دقیق» - این
+  // فیلدها زمینه کامل محاسبه calculatedGrossRevenue را فراهم می‌کنند تا در
+  // صورت MISMATCH، کاربر بدون کوئری دستی دیتابیس بفهمد عدد از کجا آمده.
+  final double? finalAmount; // مبلغ نهایی اصلی (خام، هرگز overwrite نشده)
+  final double? finalAdjustments; // مجموع علامت‌دار FINAL_ADJUSTMENTها
+  final double? discountAmount; // مجموع تخفیف (فقط جهت اطلاع؛ در calculatedGrossRevenue دخالت ندارد چون آن Gross است نه Net)
+
+  /// calculatedGrossRevenue - ledgerRevenueBalance؛ فقط جهت خوانایی به‌عنوان
+  /// getter محاسبه می‌شود، مقدار مستقلی ذخیره نمی‌کند.
+  double get difference => calculatedGrossRevenue - ledgerRevenueBalance;
+
   ProjectReconciliation({
     required this.projectId,
     required this.calculatedGrossRevenue,
@@ -193,5 +224,8 @@ class ProjectReconciliation {
     required this.revenueMatches,
     required this.status,
     this.note,
+    this.finalAmount,
+    this.finalAdjustments,
+    this.discountAmount,
   });
 }

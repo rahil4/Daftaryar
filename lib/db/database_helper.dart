@@ -2355,8 +2355,13 @@ class DatabaseHelper {
     // برای AR: افزایش (بدهکار) طرف‌مقابل Revenue => رکورد جدید طلب.
     // کاهش (بستانکار) طرف‌مقابل Cash/Bank => وصولی واقعی.
     // کاهش طرف‌مقابل Discount یا Revenue (اصلاح منفی) => اصلاحیه.
-    // بقیه (مثلاً انتقال پیش‌دریافت) => «سایر» تا حدس زده نشود.
-    double increase = 0, decreaseByCash = 0, decreaseByAdjustment = 0, other = 0;
+    // بقیه (مثلاً انتقال پیش‌دریافت) => «سایر»، با علامت افزایش/کاهش جدا
+    // نگه‌داشته می‌شود (نه جمع بدون علامت) تا Identity ریاضی
+    // opening + increase + otherIncrease - decreaseByCash -
+    // decreaseByAdjustment - otherDecrease = closing همیشه دقیقاً برقرار
+    // بماند و بدون حدس‌زدن قابل تست باشد.
+    double increase = 0, decreaseByCash = 0, decreaseByAdjustment = 0;
+    double otherIncrease = 0, otherDecrease = 0;
     for (final row in rows) {
       final d = (row['d'] as num).toDouble();
       final c = (row['c'] as num).toDouble();
@@ -2368,7 +2373,7 @@ class DatabaseHelper {
         if (otherKey == kSystemKeyProjectRevenue || otherKey == kSystemKeyCustomerAdvance) {
           increase += amount;
         } else {
-          other += amount;
+          otherIncrease += amount;
         }
       }
       if (reduceAmount > 0) {
@@ -2377,20 +2382,43 @@ class DatabaseHelper {
         } else if (otherKey == kSystemKeyServiceDiscount || otherKey == kSystemKeyProjectRevenue) {
           decreaseByAdjustment += reduceAmount;
         } else {
-          other += reduceAmount;
+          otherDecrease += reduceAmount;
         }
       }
     }
+
+    // سطرهای متعلق به اسناد غیر-دقیقاً-دوسطری (مثلاً یک سند دستی سه‌سطری) با
+    // Self-Join بالا قابل طبقه‌بندی دقیق نیستند؛ اما دقیقاً طبق همان اصلاحی
+    // که قبلاً برای classifyCashFlow انجام شد، این سطرها نباید کامل از
+    // محاسبه حذف شوند (وگرنه Identity می‌شکند) - به‌جایش کامل و با علامت
+    // صحیح در «سایر» لحاظ می‌شوند.
+    final unclassified = await db.rawQuery('''
+      SELECT COALESCE(SUM(cl.debit),0) as d, COALESCE(SUM(cl.credit),0) as c
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      WHERE cl.accountId = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) != 2
+        $projectWhere $dateWhere
+    ''', [accountId, ...projectArgs, ...dateArgs]);
+    final unclassifiedD = (unclassified.first['d'] as num).toDouble();
+    final unclassifiedC = (unclassified.first['c'] as num).toDouble();
+    otherIncrease += debitNormal ? unclassifiedD : unclassifiedC;
+    otherDecrease += debitNormal ? unclassifiedC : unclassifiedD;
+
     return {
       'increase': increase,
       'decreaseByCash': decreaseByCash,
       'decreaseByAdjustment': decreaseByAdjustment,
-      'other': other,
+      'otherIncrease': otherIncrease,
+      'otherDecrease': otherDecrease,
     };
   }
 
   /// حرکت مانده حساب دریافتنی (AR) در یک بازه - Opening/Closing مستقیماً از
   /// Ledger؛ تفکیک increase/collections/adjustments با محدودیت مستندشده بالا.
+  /// Identity قابل‌تست: opening + newReceivables - collections - adjustments
+  /// + other = closing (که "other" علامت‌دار است: افزایش‌های نامشخص منهای
+  /// کاهش‌های نامشخص، نه جمع بی‌علامت آن‌ها).
   Future<Map<String, double>> arMovement({String? fromDate, String? toDate, int? projectId}) async {
     final account = await getReceivableAccount();
     if (account == null) {
@@ -2424,12 +2452,16 @@ class DatabaseHelper {
       'newReceivables': movement['increase']!,
       'collections': movement['decreaseByCash']!,
       'adjustments': movement['decreaseByAdjustment']!,
-      'other': movement['other']!,
+      // علامت‌دار: افزایش‌های نامشخص منهای کاهش‌های نامشخص - این‌طوری
+      // Identity جمع‌وتفریق همیشه دقیقاً برقرار می‌ماند، نه فقط تقریبی.
+      'other': movement['otherIncrease']! - movement['otherDecrease']!,
       'closing': closing,
     };
   }
 
-  /// حرکت مانده پیش‌دریافت (Customer Advance) در یک بازه
+  /// حرکت مانده پیش‌دریافت (Customer Advance) در یک بازه. Identity قابل‌تست:
+  /// opening + newAdvances - advanceApplied + other = closing (که "other"
+  /// علامت‌دار است، نه جمع بی‌علامت افزایش/کاهش‌های نامشخص).
   Future<Map<String, double>> advanceMovement({String? fromDate, String? toDate, int? projectId}) async {
     final account = await getCustomerAdvanceAccount();
     if (account == null) {
@@ -2474,7 +2506,7 @@ class DatabaseHelper {
         AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
         $projectWhere $dateWhere
     ''', [account.id, ...projectArgs, ...dateArgs]);
-    double newAdvances = 0, applied = 0, other = 0;
+    double newAdvances = 0, applied = 0, otherIncrease = 0, otherDecrease = 0;
     for (final row in rows) {
       final d = (row['d'] as num).toDouble();
       final c = (row['c'] as num).toDouble();
@@ -2483,22 +2515,37 @@ class DatabaseHelper {
         if (otherKey == kSystemKeyCash || otherKey == kSystemKeyBank) {
           newAdvances += c;
         } else {
-          other += c;
+          otherIncrease += c;
         }
       }
       if (d > 0) {
         if (otherKey == kSystemKeyReceivable) {
           applied += d;
         } else {
-          other += d;
+          otherDecrease += d;
         }
       }
     }
+
+    // همان اصلاح classifyCashFlow/arMovement: سطرهای متعلق به اسناد
+    // غیر-دقیقاً-دوسطری نباید کامل از محاسبه حذف شوند - در «سایر» با علامت
+    // صحیح لحاظ می‌شوند.
+    final unclassified = await db.rawQuery('''
+      SELECT COALESCE(SUM(cl.debit),0) as d, COALESCE(SUM(cl.credit),0) as c
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      WHERE cl.accountId = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) != 2
+        $projectWhere $dateWhere
+    ''', [account.id, ...projectArgs, ...dateArgs]);
+    otherIncrease += (unclassified.first['c'] as num).toDouble();
+    otherDecrease += (unclassified.first['d'] as num).toDouble();
+
     return {
       'opening': opening,
       'newAdvances': newAdvances,
       'advanceApplied': applied,
-      'other': other,
+      'other': otherIncrease - otherDecrease,
       'closing': closing,
     };
   }

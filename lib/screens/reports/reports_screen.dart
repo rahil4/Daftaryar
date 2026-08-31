@@ -606,8 +606,11 @@ class _AnalysisTabState extends State<_AnalysisTab> {
     });
   }
 
-  double _pctChange(double now, double prev) {
-    if (prev == 0) return now == 0 ? 0 : 100;
+  /// درصد تغییر - اگر previous صفر باشد، رشد از نظر ریاضی معنا ندارد؛ طبق
+  /// اصل Zero-vs-Null این مرحله (نه Infinity، نه یک عدد ساختگی مثل ۱۰۰٪)،
+  /// null برمی‌گرداند تا UI آن را «—» نشان دهد.
+  double? _pctChange(double now, double prev) {
+    if (prev == 0) return null;
     return ((now - prev) / prev.abs()) * 100;
   }
 
@@ -624,8 +627,8 @@ class _AnalysisTabState extends State<_AnalysisTab> {
     final prevExpense = _comparison['prevExpense'] ?? 0;
     final prevProfit = _comparison['prevProfit'] ?? 0;
 
-    final expenseRatio = thisIncome == 0 ? 0.0 : (thisExpense / thisIncome) * 100;
-    final profitMargin = thisIncome == 0 ? 0.0 : (thisProfit / thisIncome) * 100;
+    final expenseRatio = thisIncome == 0 ? null : (thisExpense / thisIncome) * 100;
+    final profitMargin = thisIncome == 0 ? null : (thisProfit / thisIncome) * 100;
 
     return BlueprintGridBackground(
       child: RefreshIndicator(
@@ -782,7 +785,7 @@ class _ComparisonRow extends StatelessWidget {
   final String label;
   final double now;
   final double prev;
-  final double pct;
+  final double? pct;
   final bool lowerIsBetter;
 
   const _ComparisonRow({
@@ -795,9 +798,12 @@ class _ComparisonRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isGood = lowerIsBetter ? pct <= 0 : pct >= 0;
-    final color = pct == 0 ? AppColors.textSecondary : (isGood ? AppColors.positive : AppColors.negative);
-    final arrow = pct > 0 ? '▲' : (pct < 0 ? '▼' : '—');
+    final p = pct;
+    final isGood = p == null ? null : (lowerIsBetter ? p <= 0 : p >= 0);
+    final color = p == null
+        ? AppColors.textSecondary
+        : (p == 0 ? AppColors.textSecondary : (isGood! ? AppColors.positive : AppColors.negative));
+    final arrow = p == null ? '—' : (p > 0 ? '▲' : (p < 0 ? '▼' : '—'));
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -810,7 +816,8 @@ class _ComparisonRow extends StatelessWidget {
             children: [
               Text(formatMoney(now), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
               const SizedBox(width: 8),
-              Text('$arrow ${pn(pct.abs().toStringAsFixed(0))}٪', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
+              Text(p == null ? '—' : '$arrow ${pn(p.abs().toStringAsFixed(0))}٪',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
             ],
           ),
         ],
@@ -822,13 +829,14 @@ class _ComparisonRow extends StatelessWidget {
 /// ردیف نسبت درصدی با نوار افقی ساده
 class _RatioRow extends StatelessWidget {
   final String label;
-  final double percent;
+  final double? percent;
   final Color color;
   const _RatioRow({required this.label, required this.percent, required this.color});
 
   @override
   Widget build(BuildContext context) {
-    final clamped = percent.clamp(0, 100).toDouble();
+    final p = percent;
+    final clamped = p == null ? 0.0 : p.clamp(0, 100).toDouble();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
       child: Column(
@@ -838,8 +846,8 @@ class _RatioRow extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(label, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
-              Text('${pn(percent.toStringAsFixed(0))}٪',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color)),
+              Text(p == null ? '—' : '${pn(p.toStringAsFixed(0))}٪',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: p == null ? AppColors.textSecondary : color)),
             ],
           ),
           const SizedBox(height: 6),
@@ -849,7 +857,7 @@ class _RatioRow extends StatelessWidget {
               value: clamped / 100,
               minHeight: 5,
               backgroundColor: AppColors.surfaceAlt,
-              valueColor: AlwaysStoppedAnimation(color),
+              valueColor: AlwaysStoppedAnimation(p == null ? AppColors.surfaceAlt : color),
             ),
           ),
         ],

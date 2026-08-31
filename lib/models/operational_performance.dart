@@ -76,7 +76,17 @@ class OperationalPerformanceData {
   final double totalReceived; // بر مبنای JournalEntry.date در بازه
   final double receivableBalance; // مانده در پایان بازه (Closing)
   final double customerCredit; // مانده در پایان بازه (Closing)
-  final double? collectionRate;
+
+  /// نسبت دریافتی نقدی بازه به درآمد همان بازه - ممکن است شامل وصول
+  /// مطالبات قدیمی‌تر باشد؛ «نرخ وصول مطالبات همین بازه» نیست (رجوع به
+  /// periodArCollectionRate برای آن مفهوم دقیق‌تر).
+  final double? periodReceiptToRevenueRatio;
+
+  /// دریافتی واقعی بازه تقسیم بر (مانده طلب ابتدای بازه + طلب جدید همان
+  /// بازه) - شاخص دقیق‌تر «چه سهمی از مطالبات قابل‌وصول این بازه واقعاً
+  /// وصول شد». null اگر مخرج صفر باشد.
+  final double? periodArCollectionRate;
+
   final double? collectionGap;
 
   // ---------- بخش ۷: Work In Progress (وضعیت فعلی، نه محدود به بازه) ----------
@@ -142,7 +152,8 @@ class OperationalPerformanceData {
     required this.totalReceived,
     required this.receivableBalance,
     required this.customerCredit,
-    required this.collectionRate,
+    required this.periodReceiptToRevenueRatio,
+    required this.periodArCollectionRate,
     required this.collectionGap,
     required this.wipProjectCount,
     required this.wipInitialEstimate,

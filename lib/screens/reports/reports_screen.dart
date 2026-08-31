@@ -4,6 +4,7 @@ import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/financial_reports.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../dashboard/management_dashboard_screen.dart';
@@ -59,6 +60,19 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
 }
 
 /// ---------------- تب سود و زیان: صورت استاندارد سبک سنتی ----------------
+/// تب سود و زیان سنتی (بر مبنای نوع حساب - Income/Expense Chart of Accounts).
+///
+/// طبقه‌بندی Audit مرحله ۲.۱ (Reporting Layer Closure): این تب و توابع
+/// `accountTypeBreakdown` که مصرف می‌کند، **تکرار لایه Metrics/Reporting
+/// نیستند** (Category 2 - محاسبه‌ای که به‌درستی در UI/این لایه باقی می‌ماند).
+/// دلیل: این‌جا خط‌به‌خط بر مبنای **نام هر حساب** در دفتر کل شکسته می‌شود
+/// (مثلاً «درآمد نقشه‌برداری» جدا از «درآمد پیگیری ثبتی»)، در حالی که لایه
+/// Reporting/Metrics فقط مجموع‌های طبقه‌بندی‌شده بر اساس systemKey
+/// (Project Revenue/Direct Cost/Overhead/Office Expense) را می‌دهد، نه
+/// شکست ریز به تفکیک تک‌تک حساب‌ها. این دو یک مفهوم مشترک با دو سطح
+/// جزئیات متفاوت نیستند؛ یک گزارش «تراز حسابداری سنتی» در مقابل یک گزارش
+/// «اقتصاد پروژه» است. جایگزین‌کردن این تب با خروجی Reporting Layer باعث
+/// از‌دست‌رفتن جزئیات تک‌حسابی می‌شد که این تب دقیقاً برایش ساخته شده.
 class _ProfitLossTab extends StatefulWidget {
   const _ProfitLossTab();
 
@@ -91,6 +105,15 @@ class _ProfitLossTabState extends State<_ProfitLossTab> {
     if (mode == _RangeMode.month) {
       range = currentMonthToDateRange(today);
     } else if (mode == _RangeMode.fiscalYear) {
+      // مورد ۹/۱۰ مرحله ۲ / بند Fiscal Year مرحله ۲.۱: این خط از همان تابع
+      // مرجع سال مالی (currentFiscalYearRange) استفاده می‌کند که
+      // DashboardPeriodResolver.resolve هم داخلاً برای پیش‌نمایش
+      // thisYear/lastYear از آن استفاده می‌کند - یعنی منطق سال مالی
+      // موازی یا دوباره‌سازی‌شده نیست، فقط نقطه ورودی متفاوتی به همان
+      // تابع مشترک است. علت استفاده مستقیم (نه از طریق DashboardPeriodResolver
+      // خودش): این تب سه حالت (این‌ماه/سال‌مالی/سفارشی) دارد که با Enum
+      // DashboardPeriodPreset یک‌به‌یک منطبق نیست؛ عبورش از آن Enum یک
+      // تغییر ساختاری بزرگ‌تر از محدوده این مرحله (Closure، نه Redesign) بود.
       final fy = await _db.getFiscalYearStart();
       range = currentFiscalYearRange(fy['month']!, fy['day']!, today);
     } else {
@@ -374,6 +397,14 @@ class _EmptyLine extends StatelessWidget {
 }
 
 /// ---------------- تب تراز آزمایشی: مانده تجمعی همه حساب‌ها ----------------
+/// تب تراز آزمایشی (Trial Balance).
+///
+/// طبقه‌بندی Audit مرحله ۲.۱: این یک آرتیفکت بنیادی حسابداری دوطرفه است
+/// (اثبات تساوی جمع بدهکار و بستانکار کل دفتر حساب‌ها، تجمعی از ابتدا تا
+/// امروز) - مفهومی کاملاً متفاوت و مستقل از «اقتصاد پروژه/مشتری» که لایه
+/// Metrics/Reporting پوشش می‌دهد. `_db.trialBalance()` تنها و مرجع صحیح
+/// این داده است؛ هیچ سرویس Metrics/Reporting معادلی برایش وجود ندارد یا
+/// باید داشته باشد (Category 2).
 class _TrialBalanceTab extends StatefulWidget {
   const _TrialBalanceTab();
 
@@ -564,6 +595,27 @@ class _TrialBalanceRow extends StatelessWidget {
 }
 
 /// ---------------- تب تحلیل و روند ----------------
+/// تب تحلیل و روند (بر مبنای Income/Expense به تفکیک نوع حساب، نه
+/// systemKey پروژه‌محور).
+///
+/// طبقه‌بندی Audit مرحله ۲.۱:
+/// - `monthlyTrend`/`monthOverMonthComparison` (Category 2): این‌ها «کل
+///   درآمد/هزینه بر مبنای نوع حساب Income/Expense» را محاسبه می‌کنند، نه
+///   Net Revenue/Direct Cost/Operating Result طبقه‌بندی‌شده بر اساس
+///   systemKey (که در PeriodFinancialReport است). این دو معنای متفاوتی
+///   دارند (مثلاً «هزینه» این‌جا شامل تخفیف هم می‌شود، در حالی که در
+///   Reporting Layer طبق مورد ۱۵ مرحله ۲، Discount هرگز Direct Cost حساب
+///   نمی‌شود) - طبق قانون «بدون شواهد قطعی، فرمول یکی نشود»، این تفاوت
+///   عمداً دست‌نخورده ماند و همین‌جا مستند شد، نه این‌که حدس زده یا یکی
+///   فرض شود کدام درست‌تر است.
+/// - `avgMonthlyFixedCost`/`avgRevenuePerProject` (Category 2): بر مبنای
+///   حساب‌های نام‌محور خاص (نه systemKey) و روی جمعیت متفاوتی (میانگین
+///   فقط بین پروژه‌های دارای دریافت) محاسبه می‌شوند؛ معادل مستقیمی در
+///   لایه Reporting ندارند.
+/// - فرمول نرخ رشد (`_pctChange`) که تکرار مستقیم فرمول موجود در
+///   `FinancialPeriodComparison.compute` بود (Category 3)، حذف و به همان
+///   منبع مرجع واحد وصل شد؛ منبع داده (thisIncome/prevIncome و...) تغییر
+///   نکرد.
 class _AnalysisTab extends StatefulWidget {
   const _AnalysisTab();
 
@@ -606,12 +658,14 @@ class _AnalysisTabState extends State<_AnalysisTab> {
     });
   }
 
-  /// درصد تغییر - اگر previous صفر باشد، رشد از نظر ریاضی معنا ندارد؛ طبق
-  /// اصل Zero-vs-Null این مرحله (نه Infinity، نه یک عدد ساختگی مثل ۱۰۰٪)،
-  /// null برمی‌گرداند تا UI آن را «—» نشان دهد.
+  /// درصد تغییر - به‌جای بازتولید فرمول رشد در این فایل، از منبع مرجع واحد
+  /// این محاسبه (FinancialPeriodComparison.compute، از لایه Reporting) عبور
+  /// می‌کند تا فرمول فقط در یک‌جا نگه‌داری شود (مرحله ۲.۱ - Authoritative
+  /// Source Rule). داده ورودی (thisIncome/prevIncome و...) همچنان از همین
+  /// صفحه (تعریف سنتی «کل درآمد/هزینه بر اساس نوع حساب») می‌آید - این تغییر
+  /// نمی‌کند، فقط خودِ فرمول ریاضی محاسبه درصد یکی شد.
   double? _pctChange(double now, double prev) {
-    if (prev == 0) return null;
-    return ((now - prev) / prev.abs()) * 100;
+    return FinancialPeriodComparison.compute(metricName: '_', current: now, previous: prev).growthRate;
   }
 
   @override

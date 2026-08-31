@@ -86,7 +86,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
             a.type == _type &&
             a.id != widget.existing?.id &&
             !descendantIds.contains(a.id) &&
-            !a.isSystem)
+            (!a.isSystem || a.allowChildren))
         .toList();
 
     return Scaffold(

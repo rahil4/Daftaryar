@@ -494,4 +494,86 @@ void main() {
           reason: 'Restore یک سند سیستمی قدیمی نباید آن را به manual تبدیل کند');
     });
   });
+
+  group('Account Hierarchy (گزینه A) — تفکیک Leaf-Lock از Identity Protection', () {
+    test('صندوق/بانک اکنون می‌توانند زیرحساب بگیرند (allowChildren=true)', () async {
+      final assetAccounts = await db.getAccounts(type: kAccountAsset);
+      final bankAccount = assetAccounts.firstWhere((a) => a.systemKey == kSystemKeyBank);
+      expect(bankAccount.allowChildren, true);
+      final newSubAccountId = await db.insertAccount(AccountModel(
+        name: 'بانک ملی',
+        type: kAccountAsset,
+        parentId: bankAccount.id,
+        createdAt: '1404/01/01',
+      ));
+      final saved = await db.getAccount(newSubAccountId);
+      expect(saved!.parentId, bankAccount.id,
+          reason: 'برخلاف قبل از این تغییر، ساخت زیرحساب زیر «بانک» اکنون باید مجاز باشد');
+    });
+
+    test('حساب‌های کنترلی واقعی (AR/Advance/Revenue/Overhead/Discount) همچنان'
+        ' Leaf-Locked هستند (Regression محافظت قبلی)', () async {
+      final controlKeys = [
+        kSystemKeyReceivable,
+        kSystemKeyCustomerAdvance,
+        kSystemKeyProjectRevenue,
+        kSystemKeyProjectOverhead,
+        kSystemKeyServiceDiscount,
+      ];
+      final allAccounts = await db.getAccounts();
+      for (final key in controlKeys) {
+        final acc = allAccounts.firstWhere((a) => a.systemKey == key);
+        expect(acc.allowChildren, false, reason: '$key باید Leaf-Locked بماند');
+        expect(
+          () => db.insertAccount(AccountModel(
+              name: 'زیرحساب اشتباه برای $key',
+              type: acc.type,
+              parentId: acc.id,
+              createdAt: '1404/01/01')),
+          throwsA(isA<Exception>()),
+          reason: '$key هرگز نباید بتواند والد شود؛ وگرنه Workflowهای مالی که مستقیم'
+              ' روی id آن سند می‌زنند می‌شکنند',
+        );
+      }
+    });
+
+    test('ویرایش عمومی نمی‌تواند allowChildren یک حساب سیستمی را دستکاری کند', () async {
+      final arAccount = await db.getReceivableAccount();
+      await db.updateAccount(arAccount!.copyWith(allowChildren: true));
+      final after = await db.getReceivableAccount();
+      expect(after!.allowChildren, false,
+          reason: 'allowChildren یک حساب کنترلی باید مثل systemKey/isSystem/type محافظت‌شده باشد');
+    });
+
+    test('وصولی مستقیم به یک زیرحساب بانکی، در AR Movement به‌درستی «وصولی نقدی» طبقه‌بندی می‌شود'
+        ' (رفع اثر جانبی Movement Classification)', () async {
+      final assetAccounts2 = await db.getAccounts(type: kAccountAsset);
+      final bankAccount = assetAccounts2.firstWhere((a) => a.systemKey == kSystemKeyBank);
+      final bankMelliId = await db.insertAccount(AccountModel(
+        name: 'بانک ملی',
+        type: kAccountAsset,
+        parentId: bankAccount.id,
+        createdAt: '1404/01/01',
+      ));
+
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId, agreedAmount: 100000000);
+      await db.finalizeProject(projectId: projectId, finalAmount: 100000000, date: '1404/01/10');
+
+      // دریافت مستقیم به زیرحساب «بانک ملی» (نه خودِ «بانک»)، از طریق سند
+      // دستی چون Workflow آماده receiveProjectPayment حساب صندوق/بانک را
+      // از getCashAccounts می‌گیرد که بانک ملی را هم به‌درستی برمی‌گرداند.
+      final cashAccounts = await db.getCashAccounts();
+      expect(cashAccounts.any((a) => a.id == bankMelliId), true,
+          reason: 'getCashAccounts باید بانک ملی را هم به‌عنوان حساب نقدی/بانکی بشناسد');
+
+      await db.receiveProjectPayment(
+          projectId: projectId, cashAccountId: bankMelliId, amount: 40000000, date: '1404/01/15');
+
+      final movement = await db.arMovement(projectId: projectId);
+      expect(movement['collections'], 40000000,
+          reason: 'وصولی به زیرحساب بانکی باید Collections طبقه‌بندی شود، نه «سایر»'
+              ' (بدون این اصلاح، otherKey مستقیم null بود چون بانک ملی خودش systemKey ندارد)');
+    });
+  });
 }

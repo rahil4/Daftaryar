@@ -114,6 +114,12 @@ jobs:
       - name: دریافت بسته‌ها
         run: flutter pub get
 
+      - name: بررسی کیفیت کد (flutter analyze)
+        run: flutter analyze
+
+      - name: اجرای تست‌ها (flutter test)
+        run: flutter test
+
       - name: ساخت APK ریلیز
         run: flutter build apk --release --split-per-abi
 

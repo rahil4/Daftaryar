@@ -36,6 +36,18 @@ class AccountModel {
   final int? parentId;
   final bool isSystem;
   final String? systemKey; // شناسه پایدار برای حساب‌های کنترلی خاص (AR/AP و...)
+
+  /// آیا این حساب سیستمی اجازه دارد زیرحساب داشته باشد؟ (بدون اثر روی
+  /// حساب‌های غیرسیستمی، که همیشه آزادانه می‌توانند والد شوند). این فیلد
+  /// مفهوم «قفل بودن به‌عنوان برگ/Leaf» را از «محافظت هویتی» (isSystem)
+  /// جدا می‌کند: یک حساب کنترلی واقعی که منطق داخلی برنامه مستقیماً روی
+  /// شناسه‌اش سند می‌زند یا جمع می‌بندد (مثل حساب‌های دریافتنی) هرگز نباید
+  /// زیرحساب بگیرد (allowChildren=false)، اما یک حساب سیستمی که فقط
+  /// نقطه شروع یک سلسله‌مراتب است (مثل «بانک» که زیرش «بانک ملی/ملت»
+  /// می‌آید) باید بتواند (allowChildren=true). برای حساب‌های غیرسیستمی
+  /// این مقدار بی‌اثر است.
+  final bool allowChildren;
+
   final String createdAt;
 
   AccountModel({
@@ -46,6 +58,7 @@ class AccountModel {
     this.parentId,
     this.isSystem = false,
     this.systemKey,
+    this.allowChildren = false,
     required this.createdAt,
   });
 
@@ -58,6 +71,7 @@ class AccountModel {
       'parentId': parentId,
       'isSystem': isSystem ? 1 : 0,
       'systemKey': systemKey,
+      'allowChildren': allowChildren ? 1 : 0,
       'createdAt': createdAt,
     };
   }
@@ -71,6 +85,11 @@ class AccountModel {
       parentId: map['parentId'] as int?,
       isSystem: (map['isSystem'] as int) == 1,
       systemKey: map['systemKey'] as String?,
+      // فایل پشتیبان قدیمی‌تر از افزودن این فیلد ممکن است اصلاً این ستون
+      // را نداشته باشد؛ پیش‌فرض محافظه‌کارانه false (Leaf-Locked) است -
+      // برای Backupهای بسیار قدیمی که این مفهوم را نمی‌شناختند، امن‌تر
+      // است فرض کنیم زیرحساب مجاز نیست تا بعداً Migration واقعی تصمیم بگیرد.
+      allowChildren: map['allowChildren'] == null ? false : (map['allowChildren'] as int) == 1,
       createdAt: map['createdAt'] as String,
     );
   }
@@ -84,6 +103,7 @@ class AccountModel {
     bool clearParent = false,
     bool? isSystem,
     String? systemKey,
+    bool? allowChildren,
     String? createdAt,
   }) {
     return AccountModel(
@@ -94,6 +114,7 @@ class AccountModel {
       parentId: clearParent ? null : (parentId ?? this.parentId),
       isSystem: isSystem ?? this.isSystem,
       systemKey: systemKey ?? this.systemKey,
+      allowChildren: allowChildren ?? this.allowChildren,
       createdAt: createdAt ?? this.createdAt,
     );
   }

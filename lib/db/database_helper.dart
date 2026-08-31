@@ -27,7 +27,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -62,6 +62,25 @@ class DatabaseHelper {
       }
       // در صورت وجود duplicate، این مورد باید در گزارش نهایی به‌صراحت اعلام
       // شود (نه silently نادیده گرفته شود) - رجوع کنید به گزارش نهایی این مرحله.
+    }
+    if (oldVersion < 3) {
+      // مورد «Account Hierarchy — گزینه A»: تفکیک Leaf-Lock از Identity
+      // Protection. پیش‌فرض ستون برای همه سطرهای موجود 0 (Leaf-Locked)
+      // است - محافظه‌کارانه‌ترین حالت برای داده مالی موجود؛ سپس فقط برای
+      // حساب‌های سیستمی‌ای که واقعاً باید بتوانند زیرحساب بگیرند (صندوق/بانک
+      // + همهٔ حساب‌های سیستمی بدون systemKey که هیچ منطق داخلی به هویتشان
+      // وابسته نیست + هزینه مستقیم پروژه که systemKey‌اش عملاً بلااستفاده
+      // است)، صریحاً به 1 تغییر داده می‌شود. حساب‌های کنترلی واقعی
+      // (AR/AP/پیش‌دریافت/بستانکاری/درآمد پروژه‌ها/سربار/تخفیف) عمداً از
+      // این لیست کنار گذاشته شده‌اند تا Leaf-Locked باقی بمانند - این
+      // تصمیم بر اساس Code Usage واقعی گرفته شد، نه حدس (رجوع به گزارش
+      // تحلیل معماری حساب‌ها).
+      await db.execute('ALTER TABLE accounts ADD COLUMN allowChildren INTEGER NOT NULL DEFAULT 0');
+      const hierarchySafeSystemKeys = [kSystemKeyCash, kSystemKeyBank, kSystemKeyDirectProjectCost];
+      await db.execute('''
+        UPDATE accounts SET allowChildren = 1
+        WHERE isSystem = 1 AND (systemKey IS NULL OR systemKey IN (${hierarchySafeSystemKeys.map((_) => '?').join(',')}))
+      ''', hierarchySafeSystemKeys);
     }
   }
 
@@ -144,6 +163,7 @@ class DatabaseHelper {
         parentId INTEGER,
         isSystem INTEGER NOT NULL DEFAULT 0,
         systemKey TEXT,
+        allowChildren INTEGER NOT NULL DEFAULT 0,
         createdAt TEXT NOT NULL,
         FOREIGN KEY (parentId) REFERENCES accounts (id) ON DELETE SET NULL
       )
@@ -215,9 +235,10 @@ class DatabaseHelper {
     await _seedDefaultAccounts(db);
   }
 
-  Future<void> _seedDefaultAccounts(Database db) async {
+  Future<void> _seedDefaultAccounts(DatabaseExecutor db) async {
     final now = DateTime.now().toIso8601String();
-    Future<int> add(String code, String name, String type, {int? parentId, String? systemKey}) {
+    Future<int> add(String code, String name, String type,
+        {int? parentId, String? systemKey, bool allowChildren = false}) {
       return db.insert('accounts', {
         'code': code,
         'name': name,
@@ -225,13 +246,19 @@ class DatabaseHelper {
         'parentId': parentId,
         'isSystem': 1,
         'systemKey': systemKey,
+        'allowChildren': allowChildren ? 1 : 0,
         'createdAt': now,
       });
     }
 
-    // دارایی
-    await add('1000', 'صندوق', kAccountAsset, systemKey: kSystemKeyCash);
-    await add('1010', 'بانک', kAccountAsset, systemKey: kSystemKeyBank);
+    // دارایی - صندوق/بانک فقط نقطه شروع سلسله‌مراتب‌اند (مثل «بانک ملی» زیر
+    // «بانک»)؛ کد مصرف‌کننده (getCashAccounts/_isCashOrBankAccount) از قبل
+    // با پیمایش زنجیره والد برای همین سناریو طراحی شده بود.
+    await add('1000', 'صندوق', kAccountAsset, systemKey: kSystemKeyCash, allowChildren: true);
+    await add('1010', 'بانک', kAccountAsset, systemKey: kSystemKeyBank, allowChildren: true);
+    // حساب‌های دریافتنی: Control Account واقعی - منطق داخلی (finalizeProject و...)
+    // مستقیم روی id همین حساب سند می‌زند؛ اگر زیرحساب بگیرد، آن سندها با
+    // خطای «حساب دارای زیرحساب است» شکست می‌خورند. هرگز نباید Parent شود.
     await add('1100', 'حساب‌های دریافتنی', kAccountAsset, systemKey: kSystemKeyReceivable);
 
     // بدهی
@@ -240,38 +267,47 @@ class DatabaseHelper {
     await add('2020', 'بستانکاری مشتری (مازاد دریافتی)', kAccountLiability,
         systemKey: kSystemKeyCustomerCredit);
 
-    // حقوق صاحبان سرمایه
-    await add('3000', 'سرمایه', kAccountEquity);
+    // حقوق صاحبان سرمایه - فقط یک حساب پیش‌فرض، هیچ منطقی به هویتش وابسته نیست
+    await add('3000', 'سرمایه', kAccountEquity, allowChildren: true);
 
-    // درآمد
-    await add('4000', 'درآمد نقشه‌برداری', kAccountIncome);
-    await add('4010', 'درآمد پیگیری ثبتی', kAccountIncome);
+    // درآمد - «درآمد پروژه‌ها» تنها Control Account واقعی این گروه است
+    // (finalizeProject/recordFinalAdjustment مستقیم روی آن سند می‌زنند)؛
+    // بقیه صرفاً پیش‌فرض‌های راحتی‌اند و هیچ کدی به هویتشان وابسته نیست.
+    await add('4000', 'درآمد نقشه‌برداری', kAccountIncome, allowChildren: true);
+    await add('4010', 'درآمد پیگیری ثبتی', kAccountIncome, allowChildren: true);
     await add('4020', 'درآمد پروژه‌ها', kAccountIncome, systemKey: kSystemKeyProjectRevenue);
-    await add('4090', 'سایر درآمدها', kAccountIncome);
+    await add('4090', 'سایر درآمدها', kAccountIncome, allowChildren: true);
 
-    // هزینه
-    await add('5000', 'هزینه‌های دفتر', kAccountExpense);
-    await add('5010', 'هزینه‌های ثبتی/اداری پروژه', kAccountExpense);
-    await add('5020', 'حقوق و دستمزد', kAccountExpense);
-    await add('5030', 'هزینه‌های نقشه‌برداری', kAccountExpense);
-    await add('5040', 'حمل و نقل', kAccountExpense);
-    await add('5050', 'هزینه مستقیم پروژه', kAccountExpense, systemKey: kSystemKeyDirectProjectCost);
+    // هزینه - سربار پروژه‌ها و تخفیف خدمات Control Account واقعی‌اند
+    // (officeOverheadTotal/officeExpenseTotal با تطبیق دقیق id جمع می‌بندند
+    // یا مستثنی می‌کنند؛ recordProjectDiscount مستقیم به تخفیف سند می‌زند).
+    // «هزینه مستقیم پروژه» با وجود داشتن systemKey، در عمل توسط هیچ کدی با
+    // آن شناسه مستقیم جست‌وجو/سند نمی‌شود (Direct Cost بر مبنای نوع حساب +
+    // projectId محاسبه می‌شود، نه این id خاص) - بنابراین زیرحساب گرفتنش
+    // بی‌خطر است.
+    await add('5000', 'هزینه‌های دفتر', kAccountExpense, allowChildren: true);
+    await add('5010', 'هزینه‌های ثبتی/اداری پروژه', kAccountExpense, allowChildren: true);
+    await add('5020', 'حقوق و دستمزد', kAccountExpense, allowChildren: true);
+    await add('5030', 'هزینه‌های نقشه‌برداری', kAccountExpense, allowChildren: true);
+    await add('5040', 'حمل و نقل', kAccountExpense, allowChildren: true);
+    await add('5050', 'هزینه مستقیم پروژه', kAccountExpense,
+        systemKey: kSystemKeyDirectProjectCost, allowChildren: true);
     await add('5060', 'سربار عمومی پروژه‌ها', kAccountExpense, systemKey: kSystemKeyProjectOverhead);
     await add('5070', 'تخفیف خدمات', kAccountExpense, systemKey: kSystemKeyServiceDiscount);
-    await add('5090', 'سایر هزینه‌های عمومی', kAccountExpense);
+    await add('5090', 'سایر هزینه‌های عمومی', kAccountExpense, allowChildren: true);
   }
 
   // ---------------- Counterparties (طرف حساب) ----------------
 
-  Future<int> insertCounterparty(CounterpartyModel c) async {
-    final db = await database;
+  Future<int> insertCounterparty(CounterpartyModel c, [DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     final id = await db.insert(
         'counterparties',
         c.toMap()
           ..remove('id')
           ..remove('roles'));
     if (c.roles.isNotEmpty) {
-      await setCounterpartyRoles(id, c.roles);
+      await setCounterpartyRoles(id, c.roles, executor);
     }
     return id;
   }
@@ -322,9 +358,9 @@ class DatabaseHelper {
   }
 
   /// مجموعه نقش‌های یک طرف حساب را با مجموعه داده‌شده جایگزین می‌کند (نه اضافه)
-  Future<void> setCounterpartyRoles(int counterpartyId, List<String> roleNames) async {
-    final db = await database;
-    await db.transaction((txn) async {
+  Future<void> setCounterpartyRoles(int counterpartyId, List<String> roleNames,
+      [DatabaseExecutor? executor]) async {
+    Future<void> body(DatabaseExecutor txn) async {
       await txn.delete('counterparty_role_assignments',
           where: 'counterpartyId = ?', whereArgs: [counterpartyId]);
       for (final roleName in roleNames) {
@@ -339,7 +375,14 @@ class DatabaseHelper {
         await txn.insert('counterparty_role_assignments',
             {'counterpartyId': counterpartyId, 'roleId': roleId});
       }
-    });
+    }
+
+    if (executor != null) {
+      await body(executor);
+      return;
+    }
+    final db = await database;
+    await db.transaction((txn) => body(txn));
   }
 
   Future<List<CounterpartyRoleModel>> getAllRoles() async {
@@ -404,8 +447,8 @@ class DatabaseHelper {
   }
 
   // ---------------- Projects ----------------
-  Future<int> insertProject(ProjectModel p) async {
-    final db = await database;
+  Future<int> insertProject(ProjectModel p, [DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     return db.insert('projects', p.toMap()..remove('id'));
   }
 
@@ -557,18 +600,18 @@ class DatabaseHelper {
   /// آن می‌نویسند (Finalization، Discount، Receipt و...) می‌شکنند. این
   /// بررسی مستقل از این‌که خودِ حساب سیستمی است یا نه اجرا می‌شود، چون خطر
   /// از سمت «حساب دیگری که این را به‌عنوان والد انتخاب می‌کند» هم می‌آید.
-  Future<void> _rejectSystemAccountAsParent(int? parentId) async {
+  Future<void> _rejectSystemAccountAsParent(int? parentId, [DatabaseExecutor? executor]) async {
     if (parentId == null) return;
-    final parent = await getAccount(parentId);
-    if (parent != null && parent.isSystem) {
+    final parent = await getAccount(parentId, executor);
+    if (parent != null && parent.isSystem && !parent.allowChildren) {
       throw Exception(
           'حساب «${parent.name}» یک حساب کنترلی سیستمی است و نمی‌تواند والد حساب دیگری باشد.');
     }
   }
 
-  Future<int> insertAccount(AccountModel a) async {
-    await _rejectSystemAccountAsParent(a.parentId);
-    final db = await database;
+  Future<int> insertAccount(AccountModel a, [DatabaseExecutor? executor]) async {
+    await _rejectSystemAccountAsParent(a.parentId, executor);
+    final db = executor ?? await database;
     return db.insert('accounts', a.toMap()..remove('id'));
   }
 
@@ -586,11 +629,12 @@ class DatabaseHelper {
         ..['systemKey'] = existing.systemKey
         ..['isSystem'] = 1
         ..['type'] = existing.type
-        ..['parentId'] = existing.parentId;
+        ..['parentId'] = existing.parentId
+        ..['allowChildren'] = existing.allowChildren ? 1 : 0;
       return db.update('accounts', protectedMap, where: 'id = ?', whereArgs: [a.id]);
     }
-    // حساب معمولی: اگر والد جدید یک حساب سیستمی باشد، رد می‌شود (تا آن
-    // حساب سیستمی به‌طور ناخواسته non-postable نشود)
+    // حساب معمولی: اگر والد جدید یک حساب سیستمی Leaf-Locked باشد، رد
+    // می‌شود (تا آن حساب سیستمی به‌طور ناخواسته non-postable نشود)
     await _rejectSystemAccountAsParent(a.parentId);
     return db.update('accounts', a.toMap(), where: 'id = ?', whereArgs: [a.id]);
   }
@@ -614,8 +658,8 @@ class DatabaseHelper {
     await db.delete('accounts', where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<List<AccountModel>> getAccounts({String? type}) async {
-    final db = await database;
+  Future<List<AccountModel>> getAccounts({String? type, DatabaseExecutor? executor}) async {
+    final db = executor ?? await database;
     final maps = type == null
         ? await db.query('accounts', orderBy: 'type ASC, code ASC')
         : await db.query('accounts',
@@ -632,8 +676,8 @@ class DatabaseHelper {
     return all.where((a) => !all.any((x) => x.parentId == a.id)).toList();
   }
 
-  Future<AccountModel?> getAccount(int id) async {
-    final db = await database;
+  Future<AccountModel?> getAccount(int id, [DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     final maps = await db.query('accounts', where: 'id = ?', whereArgs: [id]);
     if (maps.isEmpty) return null;
     return AccountModel.fromMap(maps.first);
@@ -782,8 +826,14 @@ class DatabaseHelper {
   /// تمام قوانین پایه Double-Entry اینجا enforce می‌شوند تا هیچ مسیر دیگری
   /// (فرم سریع، سند دستی، بازیابی پشتیبان، پیش‌نویس پیامکی) نتواند آن‌ها را
   /// دور بزند.
-  Future<int> insertJournalEntry(JournalEntryModel entry) async {
-    await _validateJournalEntry(entry);
+  Future<int> insertJournalEntry(JournalEntryModel entry, [DatabaseExecutor? executor]) async {
+    await _validateJournalEntry(entry, executor);
+    if (executor != null) {
+      // یک تراکنش والد (مثلاً Restore اتمیک) از قبل باز است؛ نباید تراکنش
+      // تودرتوی جدید باز کنیم (باعث Deadlock در sqflite می‌شود) - مستقیم
+      // با همان executor بنویس.
+      return _writeJournalEntryRaw(executor, entry);
+    }
     // ثبت اتمیک: هدر سند و همه سطرهایش در یک تراکنش دیتابیس - در صورت بروز
     // هر خطا (مثلاً نقض یکی از CHECK constraint های سطح دیتابیس)، کل عملیات
     // rollback می‌شود و نه هدر ناقص باقی می‌ماند و نه سطر یتیم.
@@ -1381,8 +1431,8 @@ class DatabaseHelper {
   }
 
   // ---------------- تنظیمات برنامه (کلید-مقدار) ----------------
-  Future<void> setSetting(String key, String value) async {
-    final db = await database;
+  Future<void> setSetting(String key, String value, [DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     await db.insert('app_settings', {'key': key, 'value': value},
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -1402,9 +1452,17 @@ class DatabaseHelper {
     return {for (final m in maps) m['key'] as String: m['value'] as String? ?? ''};
   }
 
-  Future<void> setAllSettings(Map<String, String> settings) async {
+  /// کلیدهای تنظیمات با ماهیت امنیتی/حساس - این‌ها هرگز نباید در فایل
+  /// پشتیبان عادی صادر شوند (رجوع به BackupService.exportToFile) و حتی اگر
+  /// به هر دلیلی (فایل پشتیبان قدیمی یا دستکاری‌شده) در ورودی Restore
+  /// حضور داشته باشند، به‌صورت دفاعی این‌جا هم نادیده گرفته می‌شوند تا
+  /// Restore هرگز نتواند قفل امنیتی فعلی دستگاه مقصد را تغییر دهد.
+  static const List<String> kSecuritySettingKeys = ['pin_hash', 'lock_enabled', 'biometric_enabled'];
+
+  Future<void> setAllSettings(Map<String, String> settings, [DatabaseExecutor? executor]) async {
     for (final entry in settings.entries) {
-      await setSetting(entry.key, entry.value);
+      if (kSecuritySettingKeys.contains(entry.key)) continue;
+      await setSetting(entry.key, entry.value, executor);
     }
   }
 
@@ -1626,8 +1684,8 @@ class DatabaseHelper {
 
   /// درج خام رویداد قیمت بدون اعتبارسنجی/Journal اضافه - فقط برای بازیابی
   /// پشتیبان که خودِ اسناد حسابداری متناظر را جداگانه وارد می‌کند
-  Future<int> insertProjectPriceEventRaw(ProjectPriceEventModel e) async {
-    final db = await database;
+  Future<int> insertProjectPriceEventRaw(ProjectPriceEventModel e, [DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     return db.insert('project_price_events', e.toMap()..remove('id'));
   }
 
@@ -2316,6 +2374,23 @@ class DatabaseHelper {
   /// مستند: فقط اسناد دقیقاً دوسطری قابل طبقه‌بندی دقیق‌اند (که تمام مسیرهای
   /// خودکار برنامه چنین‌اند)؛ سطرهای اسناد دستی چندسطری در دسته «سایر»
   /// قرار می‌گیرند، نه این‌که حدس زده شوند.
+  /// آیا حساب با شناسه داده‌شده، خودش یا یکی از اجدادش (تا هر عمقی)
+  /// Cash/Bank است؟ دقیقاً همان منطق _isCashOrBankAccount ولی بر مبنای
+  /// نگاشت id→حساب (برای استفاده در طبقه‌بندی Movement که فقط id/parentId/
+  /// systemKey طرف‌مقابل سند را از Query دارد، نه لیست همان نوع حساب).
+  /// این تابع برای رفع اثر جانبی allowChildren=true روی صندوق/بانک لازم
+  /// شد: بدون آن، وصولی مستقیم به یک زیرحساب بانکی (مثل «بانک ملی») به
+  /// اشتباه «سایر» طبقه‌بندی می‌شد، نه «وصولی نقدی».
+  bool _isCashOrBankById(int? accountId, Map<int, AccountModel> byId) {
+    var current = accountId != null ? byId[accountId] : null;
+    while (current != null) {
+      if (current.systemKey == kSystemKeyCash || current.systemKey == kSystemKeyBank) return true;
+      if (current.parentId == null) return false;
+      current = byId[current.parentId];
+    }
+    return false;
+  }
+
   Future<Map<String, double>> _classifyControlAccountMovement({
     required int accountId,
     required bool debitNormal,
@@ -2324,6 +2399,10 @@ class DatabaseHelper {
     String? toDate,
   }) async {
     final db = await database;
+    // برای پیمایش زنجیره والد طرف‌مقابل سند (تشخیص صحیح Cash/Bank حتی اگر
+    // مستقیم به یک زیرحساب بانکی سند خورده باشد، نه خودِ حساب «بانک»).
+    final allAccounts = await getAccounts();
+    final accountsById = {for (final a in allAccounts) if (a.id != null) a.id!: a};
     String dateWhere = '';
     List<Object?> dateArgs = [];
     if (fromDate != null) {
@@ -2342,7 +2421,8 @@ class DatabaseHelper {
     }
 
     final rows = await db.rawQuery('''
-      SELECT cl.debit as d, cl.credit as c, otherAcc.systemKey as otherSystemKey
+      SELECT cl.debit as d, cl.credit as c, otherAcc.id as otherAccountId,
+             otherAcc.systemKey as otherSystemKey
       FROM journal_lines cl
       JOIN journal_entries je ON je.id = cl.entryId
       JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
@@ -2353,7 +2433,8 @@ class DatabaseHelper {
     ''', [accountId, ...projectArgs, ...dateArgs]);
 
     // برای AR: افزایش (بدهکار) طرف‌مقابل Revenue => رکورد جدید طلب.
-    // کاهش (بستانکار) طرف‌مقابل Cash/Bank => وصولی واقعی.
+    // کاهش (بستانکار) طرف‌مقابل Cash/Bank (یا هر زیرحساب آن، مثل «بانک
+    // ملی») => وصولی واقعی.
     // کاهش طرف‌مقابل Discount یا Revenue (اصلاح منفی) => اصلاحیه.
     // بقیه (مثلاً انتقال پیش‌دریافت) => «سایر»، با علامت افزایش/کاهش جدا
     // نگه‌داشته می‌شود (نه جمع بدون علامت) تا Identity ریاضی
@@ -2366,6 +2447,7 @@ class DatabaseHelper {
       final d = (row['d'] as num).toDouble();
       final c = (row['c'] as num).toDouble();
       final otherKey = row['otherSystemKey'] as String?;
+      final otherAccountId = row['otherAccountId'] as int?;
       final amount = debitNormal ? d : c; // مقداری که این حساب را افزایش می‌دهد
       final reduceAmount = debitNormal ? c : d; // مقداری که این حساب را کاهش می‌دهد
 
@@ -2377,7 +2459,7 @@ class DatabaseHelper {
         }
       }
       if (reduceAmount > 0) {
-        if (otherKey == kSystemKeyCash || otherKey == kSystemKeyBank) {
+        if (_isCashOrBankById(otherAccountId, accountsById)) {
           decreaseByCash += reduceAmount;
         } else if (otherKey == kSystemKeyServiceDiscount || otherKey == kSystemKeyProjectRevenue) {
           decreaseByAdjustment += reduceAmount;
@@ -2480,6 +2562,10 @@ class DatabaseHelper {
     // برای Advance: افزایش (بستانکار) با طرف‌مقابل Cash => پیش‌دریافت جدید.
     // کاهش (بدهکار) با طرف‌مقابل AR => اعمال‌شده در تسویه (انتقال به AR در Finalization).
     final db = await database;
+    // برای پیمایش زنجیره والد طرف‌مقابل سند (تشخیص صحیح Cash/Bank حتی اگر
+    // مستقیم به یک زیرحساب بانکی سند خورده باشد).
+    final allAccounts = await getAccounts();
+    final accountsById = {for (final a in allAccounts) if (a.id != null) a.id!: a};
     String dateWhere = '';
     List<Object?> dateArgs = [];
     if (fromDate != null) {
@@ -2497,7 +2583,8 @@ class DatabaseHelper {
       projectArgs.add(projectId);
     }
     final rows = await db.rawQuery('''
-      SELECT cl.debit as d, cl.credit as c, otherAcc.systemKey as otherSystemKey
+      SELECT cl.debit as d, cl.credit as c, otherAcc.id as otherAccountId,
+             otherAcc.systemKey as otherSystemKey
       FROM journal_lines cl
       JOIN journal_entries je ON je.id = cl.entryId
       JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
@@ -2511,8 +2598,9 @@ class DatabaseHelper {
       final d = (row['d'] as num).toDouble();
       final c = (row['c'] as num).toDouble();
       final otherKey = row['otherSystemKey'] as String?;
+      final otherAccountId = row['otherAccountId'] as int?;
       if (c > 0) {
-        if (otherKey == kSystemKeyCash || otherKey == kSystemKeyBank) {
+        if (_isCashOrBankById(otherAccountId, accountsById)) {
           newAdvances += c;
         } else {
           otherIncrease += c;
@@ -2578,8 +2666,8 @@ class DatabaseHelper {
     };
   }
 
-  Future<void> wipeAll() async {
-    final db = await database;
+  Future<void> wipeAll([DatabaseExecutor? executor]) async {
+    final db = executor ?? await database;
     await db.delete('journal_lines');
     await db.delete('journal_entries');
     await db.delete('projects');

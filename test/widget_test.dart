@@ -3,6 +3,7 @@
 // دارد، نه «MyApp»)؛ چون test/widget_test.dart در مخزن وجود نداشت،
 // «flutter create» در CI هر بار نسخه پیش‌فرض خودش را می‌ساخت و کامپایل آن
 // شکست می‌خورد. این نسخه واقعی برنامه را Smoke-Test می‌کند.
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 

@@ -18,37 +18,214 @@ Widget _sectionTitle(String title) {
   );
 }
 
-/// بخش خلاصه KPIهای اصلی
-class KpiOverviewSection extends StatelessWidget {
+/// بخش A — وضعیت مالی فعلی: پنج مانده «الان» (مستقل از بازه انتخابی)، باید
+/// همیشه نمایش داده شود حتی اگر بازه انتخابی هیچ فعالیتی نداشته باشد؛ هیچ
+/// محاسبه مالی جدیدی اینجا انجام نمی‌شود، فقط diagnostics.hasIssues موجود
+/// برای کارت پنجم خوانده می‌شود.
+class CurrentStateSection extends StatelessWidget {
   final ManagementDashboardData data;
-  const KpiOverviewSection({super.key, required this.data});
+  const CurrentStateSection({super.key, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final healthy = !data.diagnostics.hasIssues;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('وضعیت مالی فعلی'),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child:
+              Text('مستقل از بازه انتخابی', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final cols = constraints.maxWidth > 640 ? 5 : 2;
+            return GridView.count(
+              crossAxisCount: cols,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 8,
+              childAspectRatio: cols == 2 ? 1.5 : 1.15,
+              children: [
+                KpiCard(title: 'موجودی نقد', kpi: KpiValue(value: data.closingCash)),
+                KpiCard(title: 'مطالبات جاری', kpi: KpiValue(value: data.receivableBalance)),
+                KpiCard(title: 'پیش‌دریافت', kpi: KpiValue(value: data.advanceBalance)),
+                KpiCard(title: 'بستانکاری مشتریان', kpi: KpiValue(value: data.customerCreditBalance)),
+                _HealthStatusCard(healthy: healthy),
+              ],
+            );
+          },
+        ),
+        if (data.bankBalances.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text('ریز موجودی حساب‌ها', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Column(
+                children: [for (final b in data.bankBalances) _row(b.name, _fmt(b.balance))],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// کارت وضعیت سلامت داده - فقط از diagnostics.hasIssues موجود می‌خواند،
+/// هیچ قانون تشخیصی جدیدی نمی‌سازد
+class _HealthStatusCard extends StatelessWidget {
+  final bool healthy;
+  const _HealthStatusCard({required this.healthy});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = healthy ? AppColors.positive : AppColors.negative;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('سلامت داده‌ها', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(healthy ? Icons.check_circle_outline : Icons.error_outline, color: color, size: 18),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(healthy ? 'خوب' : 'نیاز به بررسی',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// بخش B — عملکرد دوره انتخاب‌شده: شش KPI دوره‌ای؛ دو مورد اول (نتیجه
+/// عملیاتی، سود ناخالص) تأکید بصری قوی‌تر دارند چون KPI اصلی مدیریتی‌اند.
+class PeriodPerformanceSection extends StatelessWidget {
+  final ManagementDashboardData data;
+  const PeriodPerformanceSection({super.key, required this.data});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionTitle('سودآوری'),
+        _sectionTitle('عملکرد دوره انتخاب‌شده'),
+        Row(
+          children: [
+            Expanded(child: KpiCard(title: 'نتیجه عملیاتی', kpi: data.operatingResult, emphasized: true)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: KpiCard(title: 'سود ناخالص', kpi: data.projectContribution, emphasized: true)),
+          ],
+        ),
+        const SizedBox(height: 10),
         GridView.count(
           crossAxisCount: 2,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.7,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.6,
           children: [
-            KpiCard(title: 'درآمد خالص', kpi: data.netRevenue),
-            KpiCard(title: 'هزینه مستقیم پروژه', kpi: data.directProjectCost),
-            KpiCard(title: 'سود ناخالص پروژه‌ها', kpi: data.projectContribution),
-            KpiCard(title: 'سربار پروژه‌ها', kpi: data.projectOverhead),
-            KpiCard(title: 'هزینه‌های دفتر', kpi: data.officeExpense),
-            KpiCard(title: 'نتیجه عملیاتی', kpi: data.operatingResult),
-            KpiCard(title: 'حاشیه عملیاتی', kpi: data.operatingMargin, isPercentage: true),
+            KpiCard(title: 'درآمد شناسایی‌شده', kpi: data.netRevenue),
+            KpiCard(title: 'هزینه مستقیم', kpi: data.directProjectCost),
+            KpiCard(title: 'سربار', kpi: data.projectOverhead),
+            KpiCard(title: 'هزینه اداری', kpi: data.officeExpense),
           ],
         ),
       ],
     );
   }
+}
+
+/// بخش C — وصول مطالبات دوره: حرکت کامل مطالبات (نه فقط یک عدد) + دو نرخ
+/// وصول کاملاً مجزا (هرگز با هم یکی نمی‌شوند) + نسبت مانده به درآمد با
+/// توضیح صریح که یک نسبت مانده/جریان است، نه شاخص استاندارد وصول.
+class ReceivableCollectionSection extends StatelessWidget {
+  final ManagementDashboardData data;
+  const ReceivableCollectionSection({super.key, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = data.receivableMovement;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle('وصول مطالبات دوره'),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 10),
+          child: Text('حرکت مطالبات', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+        ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              children: [
+                _row('مطالبات ابتدای دوره', _fmt(m['opening'])),
+                _row('مطالبات ایجادشده', _fmt(m['newReceivables'])),
+                _row('وصول‌شده', '- ${_fmt(m['collections'])}'),
+                _row('تعدیلات', '- ${_fmt(m['adjustments'])}'),
+                if ((m['other'] ?? 0) != 0) _row('سایر', _fmt(m['other'])),
+                const Divider(),
+                _row('مطالبات پایان دوره', _fmt(m['closing']), bold: true),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.35,
+          children: [
+            _explainedStat('نرخ وصول مطالبات', _fmt(data.periodArCollectionRate, pct: true),
+                'بر مبنای مطالبات قابل وصول در این بازه'),
+            _explainedStat(
+                'نسبت دریافت نقدی به درآمد دوره', _fmt(data.periodReceiptToRevenueRatio, pct: true), null),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _explainedStat('نسبت مانده مطالبات به درآمد دوره',
+            _fmt(data.closingReceivableToPeriodRevenueRatio, pct: true),
+            'نسبت مانده به جریان است، نه شاخص استاندارد وصول'),
+      ],
+    );
+  }
+}
+
+Widget _explainedStat(String label, String value, String? explanation) {
+  return Card(
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+          const SizedBox(height: 4),
+          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          if (explanation != null) ...[
+            const SizedBox(height: 3),
+            Text(explanation, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+          ],
+        ],
+      ),
+    ),
+  );
 }
 
 /// بخش وضعیت نقدینگی - کاملاً جدا از سودآوری
@@ -62,7 +239,7 @@ class CashPositionSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionTitle('نقدینگی'),
+        _sectionTitle('جریان نقدی دوره'),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -80,75 +257,6 @@ class CashPositionSection extends StatelessWidget {
                 _row('موجودی پایان دوره', _fmt(data.closingCash), bold: true),
                 const SizedBox(height: 8),
                 _reconciliationChip(data.cashReconciles),
-              ],
-            ),
-          ),
-        ),
-        if (data.bankBalances.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          const Text('موجودی فعلی هر حساب (مستقل از بازه انتخابی)',
-              style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                children: [
-                  for (final b in data.bankBalances) _row(b.name, _fmt(b.balance)),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// بخش مطالبات و پیش‌دریافت/بستانکاری - این سه مفهوم هرگز یکی نمی‌شوند
-class ReceivablesSection extends StatelessWidget {
-  final ManagementDashboardData data;
-  const ReceivablesSection({super.key, required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final m = data.receivableMovement;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionTitle('مطالبات و وصول'),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          childAspectRatio: 1.9,
-          children: [
-            _miniStat('مانده مطالبات (AR) - پایان بازه', _fmt(data.receivableBalance)),
-            _miniStat('پیش‌دریافت مشتریان', _fmt(data.advanceBalance)),
-            _miniStat('بستانکاری مشتری', _fmt(data.customerCreditBalance)),
-            _miniStat('نسبت دریافت نقدی به درآمد دوره', _fmt(data.periodReceiptToRevenueRatio, pct: true)),
-            _miniStat('نرخ وصول مطالبات این بازه', _fmt(data.periodArCollectionRate, pct: true)),
-            _miniStat('نسبت مانده مطالبات به درآمد دوره', _fmt(data.closingReceivableToPeriodRevenueRatio, pct: true)),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('حرکت مطالبات این بازه', style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
-                _row('مانده ابتدای دوره', _fmt(m['opening'])),
-                _row('طلب جدید', _fmt(m['newReceivables'])),
-                _row('وصولی', '- ${_fmt(m['collections'])}'),
-                _row('اصلاحات (تخفیف/اصلاح)', '- ${_fmt(m['adjustments'])}'),
-                if ((m['other'] ?? 0) != 0) _row('سایر', _fmt(m['other'])),
-                const Divider(),
-                _row('مانده پایان دوره', _fmt(m['closing']), bold: true),
               ],
             ),
           ),

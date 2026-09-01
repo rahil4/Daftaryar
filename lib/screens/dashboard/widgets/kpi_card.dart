@@ -10,8 +10,10 @@ class KpiCard extends StatelessWidget {
   final String title;
   final KpiValue kpi;
   final bool isPercentage;
+  final bool emphasized;
 
-  const KpiCard({super.key, required this.title, required this.kpi, this.isPercentage = false});
+  const KpiCard(
+      {super.key, required this.title, required this.kpi, this.isPercentage = false, this.emphasized = false});
 
   String _formatValue(double? v) {
     if (v == null) return '—';
@@ -27,18 +29,27 @@ class KpiCard extends StatelessWidget {
     final growthIcon = growth == null ? null : (growth >= 0 ? '▲' : '▼');
 
     return Card(
+      shape: emphasized
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12), side: const BorderSide(color: AppColors.brass, width: 1))
+          : null,
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.all(emphasized ? 16 : 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-            const SizedBox(height: 6),
+            Text(title,
+                style: TextStyle(
+                    fontSize: emphasized ? 12.5 : 12,
+                    color: emphasized ? AppColors.brass : AppColors.textSecondary,
+                    fontWeight: emphasized ? FontWeight.w700 : FontWeight.normal)),
+            SizedBox(height: emphasized ? 8 : 6),
             FittedBox(
               fit: BoxFit.scaleDown,
               alignment: AlignmentDirectional.centerStart,
               child: Text(_formatValue(kpi.value),
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  style: TextStyle(
+                      fontSize: emphasized ? 24 : 18, fontWeight: FontWeight.w800)),
             ),
             if (growth != null) ...[
               const SizedBox(height: 4),

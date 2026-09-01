@@ -16,10 +16,15 @@ import 'widgets/period_selector_widget.dart';
 import 'widgets/trend_chart_widget.dart';
 import '../operational/operational_performance_screen.dart';
 
-/// تب یکپارچه «داشبورد» - ادغام داشبورد سریع پیشین (اقدامات سریع + پیش‌نویس
-/// پیامکی) با داشبورد مدیریتی (ManagementDashboardService). این صفحه فقط
-/// مصرف‌کننده ManagementDashboardService است و هیچ محاسبه مالی مستقلی انجام
-/// نمی‌دهد.
+/// تب یکپارچه «داشبورد مدیریتی» - ادغام اقدامات سریع/پیش‌نویس پیامکی با
+/// داشبورد مدیریتی (ManagementDashboardService). این صفحه فقط مصرف‌کننده
+/// ManagementDashboardService است و هیچ محاسبه مالی مستقلی انجام نمی‌دهد؛
+/// همه فرمول‌ها (KPI، حرکت مطالبات، تطبیق نقدی، Diagnostics) از مدل/سرویس
+/// موجود می‌آیند.
+///
+/// سلسله‌مراتب اطلاعاتی (به ترتیب اولویت مدیریتی):
+/// وضعیت مالی فعلی (مستقل از بازه) → هشدارها (اگر باشند) → عملکرد دوره →
+/// وصول مطالبات → جریان نقدی + روند → جزئیات ثانویه (پشت سوییچ کوچک).
 class ManagementDashboardScreen extends StatefulWidget {
   const ManagementDashboardScreen({super.key});
 
@@ -68,8 +73,22 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('داشبورد'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('داشبورد مدیریتی'),
+            Text('وضعیت مالی و عملکرد دفتر',
+                style: TextStyle(
+                    fontSize: 11, color: AppColors.textSecondary.withValues(alpha: 0.9), fontWeight: FontWeight.w400)),
+          ],
+        ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'به‌روزرسانی',
+            onPressed: _loading ? null : _load,
+          ),
           IconButton(
             icon: const Icon(Icons.query_stats_outlined),
             tooltip: 'عملکرد عملیاتی',
@@ -105,6 +124,10 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                   _load();
                 },
               ),
+              if (_data != null) ...[
+                const SizedBox(height: 10),
+                _periodNotice(_data!.periodLabel),
+              ],
               const SizedBox(height: 16),
               if (_loading)
                 const Padding(
@@ -128,60 +151,120 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
     );
   }
 
+  /// نوار فشردهٔ «بازه گزارش» - فقط periodLabel موجود را نمایش می‌دهد، هیچ
+  /// تاریخی خودش نمی‌سازد.
+  Widget _periodNotice(String label) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.gridLine),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.event_note_outlined, size: 14, color: AppColors.brass),
+          const SizedBox(width: 6),
+          Text('بازه گزارش: $label',
+              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContent(ManagementDashboardData data) {
+    // نکته حیاتی (مورد ۱۸): نبود فعالیت در بازه انتخابی به‌معنای نبود
+    // وضعیت مالی برای کل دفتر نیست - وضعیت مالی فعلی (بخش A) همیشه نمایش
+    // داده می‌شود، صرف‌نظر از این‌که بازه انتخابی فعالیتی داشته یا نه.
     final hasAnyActivity = data.allProjects.isNotEmpty ||
         data.netRevenue.value != 0 ||
         data.customerReceipts != 0 ||
         data.otherCashInflows != 0;
 
-    if (!hasAnyActivity) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 60),
-        child: Center(
-          child: Text('هیچ فعالیت مالی‌ای در بازه انتخاب‌شده ثبت نشده است.',
-              style: TextStyle(color: AppColors.textSecondary)),
-        ),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(data.periodLabel, style: const TextStyle(color: AppColors.brass, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 12),
-        // خلاصه همیشه‌در‌دید: فقط ۳ کارت کلیدی + یک نمودار روند - بدون
-        // نیاز به اسکرول برای دیدن «امروز چطور بوده». بقیه (۵ بخش) پشت یک
-        // سوییچ داخل همین صفحه هستند، نه در همان اسکرول اول.
-        GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 8,
-          childAspectRatio: 1.05,
-          children: [
-            KpiCard(title: 'درآمد', kpi: data.netRevenue),
-            KpiCard(title: 'سود', kpi: data.operatingResult),
-            KpiCard(title: 'نقدینگی', kpi: KpiValue(value: data.closingCash)),
-          ],
-        ),
-        const SizedBox(height: 14),
-        TrendChartWidget(title: 'روند درآمد خالص', points: data.revenueTrend, color: AppColors.positive),
-        const SizedBox(height: 22),
-        _DashboardDetailTabs(data: data),
+        // ---------- بخش A: وضعیت مالی فعلی (همیشه نمایان) ----------
+        CurrentStateSection(data: data),
+
+        // ---------- هشدارهای مدیریتی: بدون قایم‌شدن پشت سوییچ ----------
+        if (data.alerts.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          AlertsSection(data: data),
+        ],
+
+        if (!hasAnyActivity)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 36),
+            child: Center(
+              child: Text('در این بازه فعالیت مالی ثبت نشده است.',
+                  style: TextStyle(color: AppColors.textSecondary)),
+            ),
+          )
+        else ...[
+          // ---------- بخش B: عملکرد دوره انتخاب‌شده ----------
+          const SizedBox(height: 8),
+          PeriodPerformanceSection(data: data),
+
+          // ---------- بخش C: وصول مطالبات دوره ----------
+          const SizedBox(height: 8),
+          ReceivableCollectionSection(data: data),
+
+          // ---------- بخش D + روند: دو ستونه در صفحه‌های عریض ----------
+          const SizedBox(height: 20),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final trend = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionHeading('روند عملکرد'),
+                  TrendChartWidget(
+                      title: 'روند نتیجه عملیاتی', points: data.operatingResultTrend, color: AppColors.info),
+                ],
+              );
+              final cashFlow = CashPositionSection(data: data);
+              if (constraints.maxWidth > 700) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: trend),
+                    const SizedBox(width: 16),
+                    Expanded(child: cashFlow),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [trend, const SizedBox(height: 20), cashFlow],
+              );
+            },
+          ),
+
+          // ---------- جزئیات ثانویه: پشت یک سوییچ کوچک، بدون تکرار KPIهای بالا ----------
+          const SizedBox(height: 20),
+          _DashboardDetailTabs(data: data),
+        ],
         const SizedBox(height: 24),
       ],
     );
   }
+
+  Widget _sectionHeading(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+    );
+  }
 }
 
-enum _DetailGroup { profitability, cashReceivables, performance, diagnostics }
+enum _DetailGroup { profitability, performance, settlement }
 
-/// ۵ بخش تحلیلی عمیق‌تر (که قبلاً همه در یک اسکرول طولانی پشت‌سرهم بودند)
-/// اکنون پشت یک سوییچ ۴تایی داخل همین صفحه‌اند - نه یک TabController واقعی،
-/// چون کل صفحه از قبل داخل یک ListView اسکرول می‌شود و TabBarView به
-/// ارتفاع محدود نیاز دارد؛ این الگو همان الگوی اثبات‌شده در AccountingScreen
-/// است (سوییچ ساده + نمایش شرطی، بدون تودرتویی اسکرول).
+/// جزئیات تحلیلی تکمیلی (نه اطلاعات اصلی مدیریتی که همه در بالا مستقیم
+/// نمایش داده می‌شوند) - این سوییچ عمداً کوچک‌تر از قبل شده چون سودآوری،
+/// نقدینگی، مطالبات و هشدارها دیگر پشت آن قایم نیستند؛ فقط نمودارهای روند
+/// اضافه، قیمت‌گذاری، عملکرد تک‌تک پروژه/مشتری، و تشخیص کامل داده اینجا
+/// باقی مانده‌اند - بدون تکرار KPIهایی که بالای صفحه از قبل دیده شده‌اند.
 class _DashboardDetailTabs extends StatefulWidget {
   final ManagementDashboardData data;
   const _DashboardDetailTabs({required this.data});
@@ -205,26 +288,17 @@ class _DashboardDetailTabsState extends State<_DashboardDetailTabs> {
           _DetailGroup.profitability => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                KpiOverviewSection(data: data),
-                const SizedBox(height: 10),
-                TrendChartWidget(
-                    title: 'روند نتیجه عملیاتی', points: data.operatingResultTrend, color: AppColors.info),
-                const SizedBox(height: 10),
+                SizedBox(
+                  width: 200,
+                  child: KpiCard(title: 'حاشیه عملیاتی', kpi: data.operatingMargin, isPercentage: true),
+                ),
+                const SizedBox(height: 14),
                 TrendChartWidget(
                     title: 'روند خالص تغییر نقدینگی', points: data.cashFlowTrend, color: AppColors.teal),
                 const SizedBox(height: 10),
                 TrendChartWidget(
                     title: 'روند حاشیه سود', points: data.contributionMarginTrend, color: AppColors.brass),
                 PricingSection(data: data),
-              ],
-            ),
-          _DetailGroup.cashReceivables => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CashPositionSection(data: data),
-                ReceivablesSection(data: data),
-                const SizedBox(height: 8),
-                SettlementSection(data: data),
               ],
             ),
           _DetailGroup.performance => Column(
@@ -234,10 +308,10 @@ class _DashboardDetailTabsState extends State<_DashboardDetailTabs> {
                 CustomerPerformanceSection(data: data),
               ],
             ),
-          _DetailGroup.diagnostics => Column(
+          _DetailGroup.settlement => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                AlertsSection(data: data),
+                SettlementSection(data: data),
                 DiagnosticsSection(data: data),
               ],
             ),
@@ -247,17 +321,17 @@ class _DashboardDetailTabsState extends State<_DashboardDetailTabs> {
   }
 }
 
-/// سوییچ ۴تایی به‌شکل Chip قابل‌کلیک، بدون وابستگی به TabController
+/// سوییچ سه‌تایی به‌شکل Chip قابل‌کلیک، بدون وابستگی به TabController (طبق
+/// همان الگوی امن AccountingScreen - بدون تودرتویی اسکرول)
 class _GroupSwitcher extends StatelessWidget {
   final _DetailGroup selected;
   final ValueChanged<_DetailGroup> onChanged;
   const _GroupSwitcher({required this.selected, required this.onChanged});
 
   static const _labels = {
-    _DetailGroup.profitability: 'سودآوری',
-    _DetailGroup.cashReceivables: 'نقدینگی و مطالبات',
-    _DetailGroup.performance: 'عملکرد',
-    _DetailGroup.diagnostics: 'تشخیص و هشدار',
+    _DetailGroup.profitability: 'سودآوری تفصیلی',
+    _DetailGroup.performance: 'عملکرد پروژه/مشتری',
+    _DetailGroup.settlement: 'تسویه و تشخیص',
   };
 
   @override
@@ -295,8 +369,9 @@ class _GroupSwitcher extends StatelessWidget {
       ),
     );
   }
-}/// ردیف دو دکمه اقدام سریع (دریافت/پرداخت) - جایگزین دکمه شناور واحد،
-/// چون هر دو عملیات به یک اندازه پرتکرارند
+}
+
+/// ردیف دو دکمه اقدام سریع (دریافت/پرداخت)
 class _QuickActionsRow extends StatelessWidget {
   final VoidCallback onDone;
   const _QuickActionsRow({required this.onDone});
@@ -367,7 +442,7 @@ class _QuickActionButton extends StatelessWidget {
   }
 }
 
-/// بنر پیش‌نویس‌های پیامکی در انتظار تأیید - منتقل‌شده از DashboardScreen قدیمی
+/// بنر پیش‌نویس‌های پیامکی در انتظار تأیید
 class _PendingSmsBanner extends StatelessWidget {
   final int count;
   final VoidCallback onTap;

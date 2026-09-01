@@ -278,7 +278,7 @@ class _SummaryTab extends StatelessWidget {
                       const SizedBox(height: 4),
                       _amountRow(
                         'مبلغ فعلی (پس از تغییرات)',
-                        formatMoney(currentExpected!),
+                        formatMoney(currentExpected),
                         badge: _deltaBadge(currentExpected - initialEstimate),
                         bold: true,
                       ),

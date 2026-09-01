@@ -103,14 +103,16 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
   @override
   Widget build(BuildContext context) {
     final s = _summary;
-    final content = _loading || s == null
-        ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (widget.embedded)
+    final Widget content;
+    if (_loading || s == null) {
+      content = const Center(child: CircularProgressIndicator());
+    } else {
+      content = RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (widget.embedded)
                   Align(
                     alignment: Alignment.centerLeft,
                     child: IconButton(
@@ -268,8 +270,8 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
                           )),
                   ],
                 ),
-              ),
-            ;
+              );
+    }
 
     if (widget.embedded) return content;
 

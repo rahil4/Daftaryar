@@ -11,6 +11,7 @@ import '../journal/quick_expense_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
+import 'widgets/kpi_card.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/trend_chart_widget.dart';
 import '../operational/operational_performance_screen.dart';
@@ -147,40 +148,154 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(data.periodLabel, style: const TextStyle(color: AppColors.brass, fontWeight: FontWeight.w700)),
-        AlertsSection(data: data),
-        KpiOverviewSection(data: data),
-        CashPositionSection(data: data),
-        const SizedBox(height: 16),
-        _sectionTitle('روند ماهانه'),
+        const SizedBox(height: 12),
+        // خلاصه همیشه‌در‌دید: فقط ۳ کارت کلیدی + یک نمودار روند - بدون
+        // نیاز به اسکرول برای دیدن «امروز چطور بوده». بقیه (۵ بخش) پشت یک
+        // سوییچ داخل همین صفحه هستند، نه در همان اسکرول اول.
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 8,
+          childAspectRatio: 1.05,
+          children: [
+            KpiCard(title: 'درآمد', kpi: data.netRevenue),
+            KpiCard(title: 'سود', kpi: data.operatingResult),
+            KpiCard(title: 'نقدینگی', kpi: KpiValue(value: data.closingCash)),
+          ],
+        ),
+        const SizedBox(height: 14),
         TrendChartWidget(title: 'روند درآمد خالص', points: data.revenueTrend, color: AppColors.positive),
-        const SizedBox(height: 10),
-        TrendChartWidget(title: 'روند نتیجه عملیاتی', points: data.operatingResultTrend, color: AppColors.info),
-        const SizedBox(height: 10),
-        TrendChartWidget(title: 'روند خالص تغییر نقدینگی', points: data.cashFlowTrend, color: AppColors.teal),
-        const SizedBox(height: 10),
-        TrendChartWidget(
-            title: 'روند حاشیه سود', points: data.contributionMarginTrend, color: AppColors.brass),
-        ReceivablesSection(data: data),
-        const SizedBox(height: 8),
-        SettlementSection(data: data),
-        ProjectPerformanceSection(data: data),
-        CustomerPerformanceSection(data: data),
-        PricingSection(data: data),
-        DiagnosticsSection(data: data),
+        const SizedBox(height: 22),
+        _DashboardDetailTabs(data: data),
         const SizedBox(height: 24),
       ],
     );
   }
+}
 
-  Widget _sectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+enum _DetailGroup { profitability, cashReceivables, performance, diagnostics }
+
+/// ۵ بخش تحلیلی عمیق‌تر (که قبلاً همه در یک اسکرول طولانی پشت‌سرهم بودند)
+/// اکنون پشت یک سوییچ ۴تایی داخل همین صفحه‌اند - نه یک TabController واقعی،
+/// چون کل صفحه از قبل داخل یک ListView اسکرول می‌شود و TabBarView به
+/// ارتفاع محدود نیاز دارد؛ این الگو همان الگوی اثبات‌شده در AccountingScreen
+/// است (سوییچ ساده + نمایش شرطی، بدون تودرتویی اسکرول).
+class _DashboardDetailTabs extends StatefulWidget {
+  final ManagementDashboardData data;
+  const _DashboardDetailTabs({required this.data});
+
+  @override
+  State<_DashboardDetailTabs> createState() => _DashboardDetailTabsState();
+}
+
+class _DashboardDetailTabsState extends State<_DashboardDetailTabs> {
+  _DetailGroup _group = _DetailGroup.profitability;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.data;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _GroupSwitcher(selected: _group, onChanged: (g) => setState(() => _group = g)),
+        const SizedBox(height: 16),
+        switch (_group) {
+          _DetailGroup.profitability => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                KpiOverviewSection(data: data),
+                const SizedBox(height: 10),
+                TrendChartWidget(
+                    title: 'روند نتیجه عملیاتی', points: data.operatingResultTrend, color: AppColors.info),
+                const SizedBox(height: 10),
+                TrendChartWidget(
+                    title: 'روند خالص تغییر نقدینگی', points: data.cashFlowTrend, color: AppColors.teal),
+                const SizedBox(height: 10),
+                TrendChartWidget(
+                    title: 'روند حاشیه سود', points: data.contributionMarginTrend, color: AppColors.brass),
+                PricingSection(data: data),
+              ],
+            ),
+          _DetailGroup.cashReceivables => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CashPositionSection(data: data),
+                ReceivablesSection(data: data),
+                const SizedBox(height: 8),
+                SettlementSection(data: data),
+              ],
+            ),
+          _DetailGroup.performance => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProjectPerformanceSection(data: data),
+                CustomerPerformanceSection(data: data),
+              ],
+            ),
+          _DetailGroup.diagnostics => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AlertsSection(data: data),
+                DiagnosticsSection(data: data),
+              ],
+            ),
+        },
+      ],
     );
   }
 }
 
-/// ردیف دو دکمه اقدام سریع (دریافت/پرداخت) - جایگزین دکمه شناور واحد،
+/// سوییچ ۴تایی به‌شکل Chip قابل‌کلیک، بدون وابستگی به TabController
+class _GroupSwitcher extends StatelessWidget {
+  final _DetailGroup selected;
+  final ValueChanged<_DetailGroup> onChanged;
+  const _GroupSwitcher({required this.selected, required this.onChanged});
+
+  static const _labels = {
+    _DetailGroup.profitability: 'سودآوری',
+    _DetailGroup.cashReceivables: 'نقدینگی و مطالبات',
+    _DetailGroup.performance: 'عملکرد',
+    _DetailGroup.diagnostics: 'تشخیص و هشدار',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 34,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: _DetailGroup.values.map((g) {
+          final active = g == selected;
+          return Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(17),
+              onTap: () => onChanged(g),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: active ? AppColors.brass : AppColors.surface,
+                  borderRadius: BorderRadius.circular(17),
+                  border: Border.all(color: active ? AppColors.brass : AppColors.gridLine),
+                ),
+                child: Text(
+                  _labels[g]!,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: active ? const Color(0xFF15100A) : AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}/// ردیف دو دکمه اقدام سریع (دریافت/پرداخت) - جایگزین دکمه شناور واحد،
 /// چون هر دو عملیات به یک اندازه پرتکرارند
 class _QuickActionsRow extends StatelessWidget {
   final VoidCallback onDone;

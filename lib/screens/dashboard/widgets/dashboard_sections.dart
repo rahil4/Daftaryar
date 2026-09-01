@@ -86,8 +86,8 @@ class CashPositionSection extends StatelessWidget {
         ),
         if (data.bankBalances.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text('موجودی فعلی هر حساب (مستقل از بازه انتخابی)',
-              style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+          const Text('موجودی فعلی هر حساب (مستقل از بازه انتخابی)',
+              style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
           const SizedBox(height: 6),
           Card(
             child: Padding(

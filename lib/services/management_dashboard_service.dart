@@ -43,6 +43,12 @@ class ManagementDashboardService {
     final previousPeriod = previousRange != null
         ? await _reporting.getPeriodReport(fromDate: previousRange.fromDate, toDate: previousRange.toDate)
         : null;
+    // موجودی فعلی هر حساب نقدی/بانکی - وضعیت فعلی (Current State)، مستقل
+    // از بازه انتخابی، دقیقاً مثل closingCash کل.
+    final bankBalanceRows = await _db.bankBalances();
+    final bankBalances = bankBalanceRows
+        .map((row) => BankBalanceEntry(name: row['name'] as String, balance: row['balance'] as double))
+        .toList();
 
     KpiValue kpi(double current, double? previous) {
       final growth =
@@ -161,6 +167,7 @@ class ManagementDashboardService {
       otherCashOutflows: period.otherCashOutflows,
       closingCash: period.closingCash,
       cashReconciles: period.cashReconciles,
+      bankBalances: bankBalances,
       receivableBalance: totalReceivable,
       customerCreditBalance: totalCredit,
       advanceBalance: totalAdvance,

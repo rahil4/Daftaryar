@@ -26,6 +26,15 @@ class KpiValue {
   KpiValue({required this.value, this.previousValue, this.growthRate});
 }
 
+/// موجودی فعلی یک حساب نقدی/بانکی مشخص (مثلاً «صندوق دفتر» یا «بانک ملی») -
+/// وضعیت فعلی (Current State)، مستقل از بازه انتخابی، دقیقاً مثل
+/// closingCash کل.
+class BankBalanceEntry {
+  final String name;
+  final double balance;
+  const BankBalanceEntry({required this.name, required this.balance});
+}
+
 /// View Model کامل داشبورد مدیریتی - فقط برای نمایش، هرگز در دیتابیس
 /// ذخیره نمی‌شود و خودش هیچ محاسبه Ledger‌ای انجام نمی‌دهد؛ همه مقادیرش از
 /// FinancialReportingService/FinancialMetricsService پر می‌شوند.
@@ -74,6 +83,7 @@ class ManagementDashboardData {
   final double otherCashOutflows;
   final double closingCash;
   final bool cashReconciles;
+  final List<BankBalanceEntry> bankBalances;
 
   // Receivables
   final double receivableBalance; // Closing Balance - مانده مطالبات در پایان بازه (مستقل، نه یک Ratio)
@@ -166,6 +176,7 @@ class ManagementDashboardData {
     required this.otherCashOutflows,
     required this.closingCash,
     required this.cashReconciles,
+    required this.bankBalances,
     required this.receivableBalance,
     required this.customerCreditBalance,
     required this.advanceBalance,

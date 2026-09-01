@@ -34,8 +34,12 @@ class KpiCard extends StatelessWidget {
           children: [
             Text(title, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
             const SizedBox(height: 6),
-            Text(_formatValue(kpi.value),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(_formatValue(kpi.value),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            ),
             if (growth != null) ...[
               const SizedBox(height: 4),
               Text('$growthIcon ${growth.abs().toStringAsFixed(1)}٪',

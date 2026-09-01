@@ -118,7 +118,13 @@ jobs:
         run: flutter analyze
 
       - name: اجرای تست‌ها (flutter test)
-        run: flutter test
+        # concurrency=1: تمام فایل‌های تست از DatabaseHelper.instance با یک
+        # مسیر فایل ثابت (daftaryar_v9.db) استفاده می‌کنند؛ اجرای پیش‌فرض
+        # موازی فایل‌های تست (هرکدام در یک Isolate جدا) باعث می‌شد چند
+        # Isolate هم‌زمان به همان فایل SQLite دست بزنند و با خطای
+        # «database is locked» شکست بخورند - این یک مشکل زیرساخت تست است،
+        # نه باگ منطقی در کد Production.
+        run: flutter test --concurrency=1
 
       - name: ساخت APK ریلیز
         run: flutter build apk --release --split-per-abi

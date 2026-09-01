@@ -77,8 +77,30 @@ void main() {
   });
 
   group('مورد ۸ — کنترل Overpayment در سطح Project', () {
-    test('دریافت روی پروژه‌ای که خودش مانده طلب ندارد رد می‌شود، حتی اگر طرف'
-        ' حساب در پروژه دیگری مانده مثبت داشته باشد', () async {
+    test('receiveProjectPayment هرگز throw نمی‌کند - مازاد Graceful به بستانکاری مشتری می‌رود (رفتار عمدی Stage 1، نه باگ)', () async {
+      final cpId = await createCounterparty('مشتری مشترک - Overflow');
+      final projectB = await createProject(cpId);
+      await db.finalizeProject(projectId: projectB, finalAmount: 10000000, date: '1404/02/02');
+      final cashAccount = (await db.getCashAccounts()).first;
+
+      // دریافت ۵۰ میلیون روی پروژه‌ای با طلب فقط ۱۰ میلیون - طبق طراحی
+      // عمدی Stage 1 (_creditArWithOverflowGuard)، این هرگز throw نمی‌کند؛
+      // ۱۰ میلیون به AR و ۴۰ میلیون مازاد به «بستانکاری مشتری» می‌رود.
+      await db.receiveProjectPayment(
+        projectId: projectB,
+        cashAccountId: cashAccount.id!,
+        amount: 50000000,
+        date: '1404/02/05',
+      );
+
+      final projectBAr = await db.projectReceivableBalance(projectB);
+      final projectBCredit = await db.projectCustomerCreditBalance(projectB);
+      expect(projectBAr, 0, reason: 'کل طلب ۱۰ میلیونی باید تسویه شده باشد');
+      expect(projectBCredit, 40000000,
+          reason: 'مازاد ۴۰ میلیون باید Graceful به بستانکاری مشتری برود، نه این‌که خطا بدهد یا AR را منفی کند');
+    });
+
+    test('یک سند دستی خام (نه Workflow با Overflow Guard) که AR پروژه B را بیش از مانده واقعی‌اش بستانکار کند رد می‌شود', () async {
       final cpId = await createCounterparty('مشتری مشترک');
       final projectA = await createProject(cpId);
       final projectB = await createProject(cpId);
@@ -88,24 +110,43 @@ void main() {
       final counterpartyArBefore = await db.receivableBalance(cpId);
       expect(counterpartyArBefore, 100000000);
 
+      // پروژه B هم Finalize می‌شود تا مانده AR واقعی و محدود (۱۰ میلیون) داشته باشد
+      await db.finalizeProject(projectId: projectB, finalAmount: 10000000, date: '1404/02/02');
+
+      final arAccount = await db.getReceivableAccount();
       final cashAccount = (await db.getCashAccounts()).first;
 
-      // تلاش برای دریافت ۵۰ میلیون روی پروژه B (که خودش هیچ طلبی ندارد)
-      // کنترل قدیمی (فقط سطح طرف‌حساب) این را اشتباهاً قبول می‌کرد چون
-      // ۵۰ ≤ ۱۰۰ (مانده کل طرف‌حساب)؛ کنترل جدید سطح پروژه باید رد کند.
+      // برخلاف receiveProjectPayment (که از _creditArWithOverflowGuard عبور
+      // می‌کند و هرگز خطا نمی‌دهد)، یک سند دستی خام مستقیماً سعی می‌کند
+      // ۵۰ میلیون از AR پروژه B را بستانکار کند - در حالی که مانده واقعی
+      // آن فقط ۱۰ میلیون است (مانده کل طرف‌حساب ۱۱۰ میلیون است، پس کنترل
+      // سطح طرف‌حساب به‌تنهایی این را اشتباهاً قبول می‌کرد). کنترل سطح
+      // پروژه در _validateJournalEntry باید این مسیر بدون Overflow Guard
+      // را رد کند - دقیقاً همان‌جایی که محافظت سطح پروژه واقعاً لازم است.
       expect(
-        () => db.receiveProjectPayment(
-          projectId: projectB,
-          cashAccountId: cashAccount.id!,
-          amount: 50000000,
+        () => db.createManualJournal(JournalEntryModel(
           date: '1404/02/05',
-        ),
+          createdAt: '1404/02/05',
+          lines: [
+            JournalLineModel(
+                accountId: cashAccount.id!,
+                debit: 50000000,
+                counterpartyId: cpId,
+                projectId: projectB),
+            JournalLineModel(
+                accountId: arAccount!.id!,
+                credit: 50000000,
+                counterpartyId: cpId,
+                projectId: projectB),
+          ],
+        )),
         throwsA(isA<Exception>()),
-        reason: 'پروژه B هیچ مانده طلبی ندارد؛ این دریافت باید رد شود',
+        reason: 'پروژه B فقط ۱۰ میلیون طلب دارد؛ یک سند دستی نباید بتواند ۵۰ میلیون از AR آن را بستانکار کند',
       );
 
       final projectBAr = await db.projectReceivableBalance(projectB);
-      expect(projectBAr, 0, reason: 'مانده پروژه B نباید منفی شده باشد');
+      expect(projectBAr, 10000000,
+          reason: 'مانده پروژه B باید دقیقاً همان ۱۰ میلیون اولیه بماند - سند رد‌شده نباید هیچ اثری گذاشته باشد');
     });
   });
 

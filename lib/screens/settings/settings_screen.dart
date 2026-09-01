@@ -9,7 +9,6 @@ import '../sms_drafts/sms_drafts_screen.dart';
 import '../sms_drafts/manual_sms_entry_screen.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../accounts/accounts_screen.dart';
 import '../counterparties/counterparties_screen.dart';
 import '../onboarding/fiscal_year_setup_screen.dart';
 import '../lock/pin_setup_screen.dart';
@@ -218,15 +217,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.account_tree_outlined, color: AppColors.brass),
-                    title: const Text('چارت حساب‌ها'),
-                    subtitle: const Text('تعریف، ویرایش و دسته‌بندی حساب‌های حسابداری'),
-                    onTap: () => Navigator.push(
-                        context, MaterialPageRoute(builder: (_) => const AccountsScreen())),
-                  ),
-                ),
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.people_alt_outlined, color: AppColors.brass),

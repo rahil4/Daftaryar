@@ -13,7 +13,8 @@ import 'journal_entry_detail_screen.dart';
 enum _TypeFilter { all, receipt, payment, other }
 
 class JournalListScreen extends StatefulWidget {
-  const JournalListScreen({super.key});
+  final bool embedded;
+  const JournalListScreen({super.key, this.embedded = false});
 
   @override
   State<JournalListScreen> createState() => _JournalListScreenState();
@@ -207,78 +208,90 @@ class _JournalListScreenState extends State<JournalListScreen> {
   Widget build(BuildContext context) {
     final filtered = _filtered;
 
+    final content = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: TextField(
+            decoration: const InputDecoration(
+              hintText: 'جستجو در شرح، حساب یا پروژه...',
+              prefixIcon: Icon(Icons.search, size: 20),
+            ),
+            onChanged: (v) => setState(() => _search = v),
+          ),
+        ),
+        SizedBox(
+          height: 38,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: [
+              _filterChip('همه', _typeFilter == _TypeFilter.all, () {
+                setState(() => _typeFilter = _TypeFilter.all);
+              }),
+              _filterChip('دریافت', _typeFilter == _TypeFilter.receipt, () {
+                setState(() => _typeFilter = _TypeFilter.receipt);
+              }),
+              _filterChip('پرداخت', _typeFilter == _TypeFilter.payment, () {
+                setState(() => _typeFilter = _TypeFilter.payment);
+              }),
+              _filterChip(
+                _projectFilter == null
+                    ? 'پروژه'
+                    : (_projects.where((p) => p.id == _projectFilter).firstOrNull?.title ?? 'پروژه'),
+                _projectFilter != null,
+                _openProjectFilterSheet,
+                icon: Icons.work_outline,
+              ),
+              _filterChip(
+                _fromDate == null ? 'بازه تاریخ' : 'تاریخ: ${formatJalaliLong(_fromDate!)}—${formatJalaliLong(_toDate!)}',
+                _fromDate != null,
+                _openDateFilterSheet,
+                icon: Icons.date_range_outlined,
+              ),
+              if (_hasActiveFilters)
+                _filterChip('پاک کردن فیلترها', false, _resetFilters, icon: Icons.close),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : filtered.isEmpty
+                  ? const Center(
+                      child: Text('سندی با این فیلترها یافت نشد',
+                          style: TextStyle(color: AppColors.textSecondary)))
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                        children: _buildGroupedRows(filtered),
+                      ),
+                    ),
+        ),
+      ],
+    );
+
+    final fab = FloatingActionButton(
+      heroTag: 'journal_fab',
+      onPressed: () => showQuickAddSheet(context, onDone: _load),
+      child: const Icon(Icons.add),
+    );
+
+    if (widget.embedded) {
+      return Stack(
+        children: [
+          content,
+          Positioned(bottom: 16, left: 16, child: fab),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('اسناد حسابداری')),
-      body: BlueprintGridBackground(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: TextField(
-                decoration: const InputDecoration(
-                  hintText: 'جستجو در شرح، حساب یا پروژه...',
-                  prefixIcon: Icon(Icons.search, size: 20),
-                ),
-                onChanged: (v) => setState(() => _search = v),
-              ),
-            ),
-            SizedBox(
-              height: 38,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _filterChip('همه', _typeFilter == _TypeFilter.all, () {
-                    setState(() => _typeFilter = _TypeFilter.all);
-                  }),
-                  _filterChip('دریافت', _typeFilter == _TypeFilter.receipt, () {
-                    setState(() => _typeFilter = _TypeFilter.receipt);
-                  }),
-                  _filterChip('پرداخت', _typeFilter == _TypeFilter.payment, () {
-                    setState(() => _typeFilter = _TypeFilter.payment);
-                  }),
-                  _filterChip(
-                    _projectFilter == null
-                        ? 'پروژه'
-                        : (_projects.where((p) => p.id == _projectFilter).firstOrNull?.title ?? 'پروژه'),
-                    _projectFilter != null,
-                    _openProjectFilterSheet,
-                    icon: Icons.work_outline,
-                  ),
-                  _filterChip(
-                    _fromDate == null ? 'بازه تاریخ' : 'تاریخ: ${formatJalaliLong(_fromDate!)}—${formatJalaliLong(_toDate!)}',
-                    _fromDate != null,
-                    _openDateFilterSheet,
-                    icon: Icons.date_range_outlined,
-                  ),
-                  if (_hasActiveFilters)
-                    _filterChip('پاک کردن فیلترها', false, _resetFilters, icon: Icons.close),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : filtered.isEmpty
-                      ? const Center(
-                          child: Text('سندی با این فیلترها یافت نشد',
-                              style: TextStyle(color: AppColors.textSecondary)))
-                      : RefreshIndicator(
-                          onRefresh: _load,
-                          child: ListView(
-                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-                            children: _buildGroupedRows(filtered),
-                          ),
-                        ),
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => showQuickAddSheet(context, onDone: _load),
-        child: const Icon(Icons.add),
-      ),
+      body: BlueprintGridBackground(child: content),
+      floatingActionButton: fab,
     );
   }
 

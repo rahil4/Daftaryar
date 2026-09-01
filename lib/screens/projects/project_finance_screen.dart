@@ -10,14 +10,14 @@ import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
 import '../../widgets/stat_card.dart';
 import 'project_metrics_debug_screen.dart';
-import 'project_economics_screen.dart';
 
 /// مدیریت کامل جریان مالی پروژه: تاریخچه تغییر مبلغ، نهایی‌سازی، دریافت وجه
 /// (پیش‌دریافت پیش از Finalization / تسویه طلب پس از آن)، تخفیف نهایی، و
 /// اصلاح مبلغ نهایی. همه اعداد مستقیم از Ledger محاسبه می‌شوند.
 class ProjectFinanceScreen extends StatefulWidget {
   final ProjectModel project;
-  const ProjectFinanceScreen({super.key, required this.project});
+  final bool embedded;
+  const ProjectFinanceScreen({super.key, required this.project, this.embedded = false});
 
   @override
   State<ProjectFinanceScreen> createState() => _ProjectFinanceScreenState();
@@ -103,40 +103,27 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
   @override
   Widget build(BuildContext context) {
     final s = _summary;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('وضعیت مالی پروژه'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.insights_outlined),
-            tooltip: 'تحلیل اقتصادی پروژه',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) => ProjectEconomicsScreen(projectId: _project.id!)),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
-            ),
-          ),
-        ],
-      ),
-      body: _loading || s == null
-          ? const Center(child: CircularProgressIndicator())
-          : BlueprintGridBackground(
-              child: RefreshIndicator(
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
+    final content = _loading || s == null
+        ? const Center(child: CircularProgressIndicator())
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (widget.embedded)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: IconButton(
+                      icon: const Icon(Icons.analytics_outlined, size: 20),
+                      tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
+                      ),
+                    ),
+                  ),
+                Row(
                   children: [
-                    Row(
-                      children: [
                         _statusChip(_project.isFinalized ? 'نهایی‌شده' : 'در جریان',
                             _project.isFinalized ? AppColors.brass : AppColors.textSecondary),
                         const SizedBox(width: 8),
@@ -282,7 +269,13 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
                   ],
                 ),
               ),
-            ),
+            ;
+
+    if (widget.embedded) return content;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('وضعیت مالی پروژه')),
+      body: BlueprintGridBackground(child: content),
     );
   }
 

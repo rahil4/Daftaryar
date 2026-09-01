@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
-import '../dashboard/dashboard_screen.dart';
-import '../journal/journal_list_screen.dart';
+import '../accounting/accounting_screen.dart';
+import '../dashboard/management_dashboard_screen.dart';
 import '../projects/projects_screen.dart';
 import '../reports/reports_screen.dart';
-import '../settings/settings_screen.dart';
 
+/// پوستهٔ اصلی ناوبری برنامه - ۴ تب با مرز مفهومی واضح (به‌جای ۵ تب پراکنده
+/// قبلی): داشبورد یکپارچه، حسابداری (دفترکل+چارت حساب‌ها)، پروژه‌ها،
+/// گزارش‌ها. «تنظیمات» دیگر تب مستقل ندارد و از یک آیکون در بالای هرکدام
+/// از تب‌های اصلی در دسترس است - چون به‌مراتب کمتر از بقیه استفاده می‌شود.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -16,13 +19,11 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  // توجه: «چارت حساب‌ها» تب مستقل ندارد و از داخل «تنظیمات» در دسترس است.
   final _screens = const [
-    DashboardScreen(),
-    JournalListScreen(),
+    ManagementDashboardScreen(),
+    AccountingScreen(),
     ProjectsScreen(),
     ReportsScreen(),
-    SettingsScreen(),
   ];
 
   @override
@@ -33,11 +34,10 @@ class _HomeShellState extends State<HomeShell> {
         currentIndex: _index,
         onTap: (i) => setState(() => _index = i),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'خانه'),
-          BottomNavigationBarItem(icon: Icon(Icons.receipt_long_outlined), label: 'اسناد'),
+          BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'داشبورد'),
+          BottomNavigationBarItem(icon: Icon(Icons.menu_book_outlined), label: 'حسابداری'),
           BottomNavigationBarItem(icon: Icon(Icons.work_outline), label: 'پروژه‌ها'),
-          BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), label: 'گزارشات'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings_outlined), label: 'تنظیمات'),
+          BottomNavigationBarItem(icon: Icon(Icons.bar_chart_outlined), label: 'گزارش‌ها'),
         ],
       ),
     );

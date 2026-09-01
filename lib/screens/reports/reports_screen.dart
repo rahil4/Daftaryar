@@ -7,7 +7,8 @@ import '../../models/account.dart';
 import '../../models/financial_reports.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../dashboard/management_dashboard_screen.dart';
+import '../operational/operational_performance_screen.dart';
+import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/section_title.dart';
 import '../../services/pdf_export_service.dart';
@@ -23,7 +24,7 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 3, vsync: this);
+  late final TabController _tab = TabController(length: 4, vsync: this);
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +33,10 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
         title: const Text('گزارش‌ها'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.dashboard_customize_outlined),
-            tooltip: 'داشبورد مدیریتی',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ManagementDashboardScreen()),
-            ),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'تنظیمات',
+            onPressed: () =>
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
           ),
         ],
         bottom: TabBar(
@@ -48,12 +47,18 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
             Tab(text: 'سود و زیان'),
             Tab(text: 'تراز آزمایشی'),
             Tab(text: 'تحلیل و روند'),
+            Tab(text: 'عملکرد عملیاتی'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tab,
-        children: const [_ProfitLossTab(), _TrialBalanceTab(), _AnalysisTab()],
+        children: const [
+          _ProfitLossTab(),
+          _TrialBalanceTab(),
+          _AnalysisTab(),
+          OperationalPerformanceScreen(embedded: true),
+        ],
       ),
     );
   }

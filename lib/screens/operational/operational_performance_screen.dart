@@ -12,7 +12,8 @@ import '../dashboard/widgets/trend_chart_widget.dart';
 /// صفحه مستقل تحلیل عملکرد عملیاتی. فقط مصرف‌کننده ViewModel آماده از
 /// OperationalPerformanceService است؛ هیچ دسترسی مستقیمی به دیتابیس ندارد.
 class OperationalPerformanceScreen extends StatefulWidget {
-  const OperationalPerformanceScreen({super.key});
+  final bool embedded;
+  const OperationalPerformanceScreen({super.key, this.embedded = false});
 
   @override
   State<OperationalPerformanceScreen> createState() => _OperationalPerformanceScreenState();
@@ -48,33 +49,35 @@ class _OperationalPerformanceScreenState extends State<OperationalPerformanceScr
 
   @override
   Widget build(BuildContext context) {
+    final content = RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PeriodSelectorWidget(
+            selected: _preset,
+            onChanged: (p) {
+              setState(() => _preset = p);
+              _load();
+            },
+          ),
+          const SizedBox(height: 16),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_data != null)
+            _buildContent(_data!)
+        ],
+      ),
+    );
+
+    if (widget.embedded) return content;
+
     return Scaffold(
       appBar: AppBar(title: const Text('عملکرد عملیاتی')),
-      body: BlueprintGridBackground(
-        child: RefreshIndicator(
-          onRefresh: _load,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              PeriodSelectorWidget(
-                selected: _preset,
-                onChanged: (p) {
-                  setState(() => _preset = p);
-                  _load();
-                },
-              ),
-              const SizedBox(height: 16),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 60),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_data != null)
-                _buildContent(_data!)
-            ],
-          ),
-        ),
-      ),
+      body: BlueprintGridBackground(child: content),
     );
   }
 

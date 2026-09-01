@@ -8,7 +8,8 @@ import 'account_form_screen.dart';
 import 'ledger_screen.dart';
 
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key});
+  final bool embedded;
+  const AccountsScreen({super.key, this.embedded = false});
 
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
@@ -109,40 +110,52 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final listView = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                for (final type in kAccountTypes)
+                  if (_accounts.any((a) => a.type == type)) ...[
+                    SectionTitle(type),
+                    const Divider(color: AppColors.gridLine, height: 1),
+                    for (final entry in _hierarchicalList(type))
+                      _AccountRow(
+                        account: entry.key,
+                        depth: entry.value,
+                        onTap: () => _openMenu(entry.key),
+                      ),
+                    const SizedBox(height: 22),
+                  ],
+              ],
+            ),
+          );
+
+    final fab = FloatingActionButton(
+      heroTag: 'accounts_fab',
+      onPressed: () async {
+        final result =
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountFormScreen()));
+        if (result == true) _load();
+      },
+      child: const Icon(Icons.add),
+    );
+
+    if (widget.embedded) {
+      return Stack(
+        children: [
+          listView,
+          Positioned(bottom: 16, left: 16, child: fab),
+        ],
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('چارت حساب‌ها')),
-      body: BlueprintGridBackground(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : RefreshIndicator(
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                  children: [
-                    for (final type in kAccountTypes)
-                      if (_accounts.any((a) => a.type == type)) ...[
-                        SectionTitle(type),
-                        const Divider(color: AppColors.gridLine, height: 1),
-                        for (final entry in _hierarchicalList(type))
-                          _AccountRow(
-                            account: entry.key,
-                            depth: entry.value,
-                            onTap: () => _openMenu(entry.key),
-                          ),
-                        const SizedBox(height: 22),
-                      ],
-                  ],
-                ),
-              ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const AccountFormScreen()));
-          if (result == true) _load();
-        },
-        child: const Icon(Icons.add),
-      ),
+      body: BlueprintGridBackground(child: listView),
+      floatingActionButton: fab,
     );
   }
 }

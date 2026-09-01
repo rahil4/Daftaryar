@@ -151,13 +151,50 @@ class AppTheme {
   }
 }
 
-/// پس‌زمینه استاندارد صفحات برنامه
+/// پس‌زمینه استاندارد صفحات برنامه - یک الگوی گرید مهندسی ظریف (شبیه کاغذ
+/// میلی‌متری نقشه‌برداری) که با رنگ برند (برنز) و اپاسیتی بسیار کم رسم
+/// می‌شود؛ هویت بصری «نقشه‌برداری» را به‌طور واقعی (نه فقط در نام کلاس) به
+/// همه صفحات می‌دهد.
 class BlueprintGridBackground extends StatelessWidget {
   final Widget child;
   const BlueprintGridBackground({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Container(color: AppColors.background, child: child);
+    return Container(
+      color: AppColors.background,
+      child: Stack(
+        children: [
+          Positioned.fill(child: CustomPaint(painter: _BlueprintGridPainter())),
+          child,
+        ],
+      ),
+    );
   }
+}
+
+class _BlueprintGridPainter extends CustomPainter {
+  static const double _cell = 22;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final thin = Paint()
+      ..color = AppColors.brass.withValues(alpha: 0.05)
+      ..strokeWidth = 0.6;
+    final thick = Paint()
+      ..color = AppColors.brass.withValues(alpha: 0.09)
+      ..strokeWidth = 0.8;
+
+    var i = 0;
+    for (double x = 0; x <= size.width; x += _cell, i++) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), i % 5 == 0 ? thick : thin);
+    }
+    i = 0;
+    for (double y = 0; y <= size.height; y += _cell, i++) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), i % 5 == 0 ? thick : thin);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

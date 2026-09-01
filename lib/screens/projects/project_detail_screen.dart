@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
+import '../../widgets/project_receipt_context_box.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import 'project_form_screen.dart';
 import 'project_finance_screen.dart';
@@ -27,8 +28,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   late ProjectModel _project;
   CounterpartyModel? _counterparty;
   List<JournalEntryModel> _entries = [];
-  double _received = 0;
-  double _spent = 0;
+  Map<String, dynamic>? _summary;
   bool _loading = true;
 
   @override
@@ -48,12 +48,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     setState(() => _loading = true);
     final client = await _db.getCounterparty(_project.counterpartyId);
     final entries = await _db.getJournalEntries(projectId: _project.id);
-    final financials = await _db.projectFinancials(_project.id!);
+    final summary = await _db.projectFinancialSummary(_project.id!);
     setState(() {
       _counterparty = client;
       _entries = entries;
-      _received = financials['received']!;
-      _spent = financials['spent']!;
+      _summary = summary;
       _loading = false;
     });
   }
@@ -168,8 +167,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     project: _project,
                     counterparty: _counterparty,
                     entries: _entries,
-                    received: _received,
-                    spent: _spent,
+                    summary: _summary!,
                     onLoad: _load,
                     onAddOptions: _showAddOptions,
                   ),
@@ -189,8 +187,7 @@ class _SummaryTab extends StatelessWidget {
   final ProjectModel project;
   final CounterpartyModel? counterparty;
   final List<JournalEntryModel> entries;
-  final double received;
-  final double spent;
+  final Map<String, dynamic> summary;
   final VoidCallback onLoad;
   final VoidCallback onAddOptions;
 
@@ -198,15 +195,29 @@ class _SummaryTab extends StatelessWidget {
     required this.project,
     required this.counterparty,
     required this.entries,
-    required this.received,
-    required this.spent,
+    required this.summary,
     required this.onLoad,
     required this.onAddOptions,
   });
 
   @override
   Widget build(BuildContext context) {
-    final remaining = project.agreedAmount - received;
+    final initialEstimate = summary['initialEstimate'] as double;
+    final currentExpected = summary['currentExpectedAmount'] as double?;
+    final isFinalized = summary['isFinalized'] as bool;
+    final grossFinalAmount = summary['grossFinalAmount'] as double?;
+    final discount = summary['discount'] as double? ?? 0;
+    final netRevenue = summary['netRevenue'] as double?;
+    final totalReceived = summary['totalReceived'] as double? ?? 0;
+    final directProjectCost = summary['directProjectCost'] as double? ?? 0;
+    final remainingInfo = computeProjectRemaining(project, summary);
+    final remaining = remainingInfo.value;
+    // «مبلغ فعلی/نهایی» که در کارت آماری اصلی نشان داده می‌شود: پیش از
+    // Finalization برآورد فعلی (پس از اعمال تاریخچه تغییرات)، پس از آن
+    // درآمد خالص واقعی.
+    final displayAmount = isFinalized ? (netRevenue ?? initialEstimate) : (currentExpected ?? initialEstimate);
+    final hasChanged = !isFinalized && currentExpected != null && currentExpected != initialEstimate;
+
     return RefreshIndicator(
       onRefresh: () async => onLoad(),
       child: ListView(
@@ -250,6 +261,46 @@ class _SummaryTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+          // کارت «روند مبلغ پروژه» - رابطهٔ برآورد اولیه و مبلغ فعلی/نهایی
+          // را صریح نشان می‌دهد، به‌جای یک عدد تنها که معلوم نبود مربوط به
+          // کدام مرحله است.
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('روند مبلغ پروژه', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  const SizedBox(height: 10),
+                  _amountRow('برآورد اولیه (زمان ایجاد پروژه)', formatMoney(initialEstimate)),
+                  if (!isFinalized) ...[
+                    if (hasChanged) ...[
+                      const SizedBox(height: 4),
+                      _amountRow(
+                        'مبلغ فعلی (پس از تغییرات)',
+                        formatMoney(currentExpected!),
+                        badge: _deltaBadge(currentExpected - initialEstimate),
+                        bold: true,
+                      ),
+                    ] else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('هنوز تغییری نسبت به برآورد اولیه ثبت نشده',
+                            style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                      ),
+                  ] else ...[
+                    const SizedBox(height: 4),
+                    _amountRow('مبلغ نهایی ناخالص', formatMoney(grossFinalAmount ?? 0)),
+                    if (discount > 0) _amountRow('تخفیف', '- ${formatMoney(discount)}'),
+                    const Divider(),
+                    _amountRow('درآمد خالص (مبنای محاسبات پس از نهایی‌سازی)', formatMoney(netRevenue ?? 0),
+                        bold: true),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -259,27 +310,29 @@ class _SummaryTab extends StatelessWidget {
             childAspectRatio: 1.6,
             children: [
               StatCard(
-                title: 'مبلغ قرارداد',
-                value: formatMoney(project.agreedAmount),
+                title: isFinalized ? 'درآمد خالص (نهایی)' : 'مبلغ فعلی (برآورد)',
+                value: formatMoney(displayAmount),
                 icon: Icons.description_outlined,
               ),
               StatCard(
-                title: 'دریافتی',
-                value: formatMoney(received),
+                title: 'مجموع دریافتی',
+                value: formatMoney(totalReceived),
                 icon: Icons.south_west_rounded,
                 valueColor: AppColors.positive,
               ),
               StatCard(
-                title: 'هزینه‌های پروژه',
-                value: formatMoney(spent),
+                title: 'هزینه مستقیم پروژه',
+                value: formatMoney(directProjectCost),
                 icon: Icons.north_east_rounded,
                 valueColor: AppColors.negative,
               ),
               StatCard(
-                title: remaining >= 0 ? 'باقی‌مانده طلب' : 'دریافت اضافی',
-                value: formatMoney(remaining.abs()),
+                title: remainingInfo.label,
+                value: remaining == null ? '—' : formatMoney(remaining.abs()),
                 icon: Icons.account_balance_wallet_outlined,
-                valueColor: remaining > 0 ? AppColors.brass : AppColors.positive,
+                valueColor: remaining == null
+                    ? AppColors.textSecondary
+                    : (remaining > 0 ? AppColors.brass : AppColors.positive),
               ),
             ],
           ),
@@ -319,6 +372,41 @@ class _SummaryTab extends StatelessWidget {
                 )),
         ],
       ),
+    );
+  }
+
+  Widget _amountRow(String label, String value, {Widget? badge, bool bold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+          ),
+          if (badge != null) ...[badge, const SizedBox(width: 8)],
+          Text(value,
+              style: TextStyle(
+                  fontSize: bold ? 15 : 13,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  color: AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  /// نشان کوچک اختلاف مبلغ فعلی نسبت به برآورد اولیه - سبز برای افزایش،
+  /// قرمز برای کاهش (بدون قضاوت این‌که کدام برای دفتر بهتر است؛ فقط جهت
+  /// تغییر مبلغ قرارداد را نشان می‌دهد)
+  Widget _deltaBadge(double delta) {
+    final positive = delta >= 0;
+    final color = positive ? AppColors.positive : AppColors.negative;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
+      child: Text('${positive ? '+' : '-'} ${formatMoney(delta.abs())}',
+          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: color)),
     );
   }
 }

@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
+import '../../widgets/project_receipt_context_box.dart';
 import '../../widgets/stat_card.dart';
 import 'project_metrics_debug_screen.dart';
 
@@ -95,7 +96,7 @@ class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
-      builder: (ctx) => _ReceivePaymentSheet(project: _project),
+      builder: (ctx) => _ReceivePaymentSheet(project: _project, summary: _summary),
     );
     if (result == true) _load();
   }
@@ -611,7 +612,8 @@ class _FinalAdjustmentSheetState extends State<_FinalAdjustmentSheet> {
 
 class _ReceivePaymentSheet extends StatefulWidget {
   final ProjectModel project;
-  const _ReceivePaymentSheet({required this.project});
+  final Map<String, dynamic>? summary;
+  const _ReceivePaymentSheet({required this.project, this.summary});
 
   @override
   State<_ReceivePaymentSheet> createState() => _ReceivePaymentSheetState();
@@ -684,6 +686,10 @@ class _ReceivePaymentSheetState extends State<_ReceivePaymentSheet> {
                       : 'این پروژه هنوز نهایی نشده؛ دریافت به‌عنوان پیش‌دریافت ثبت می‌شود (نه درآمد).',
                   style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
                 ),
+                if (widget.summary != null) ...[
+                  const SizedBox(height: 12),
+                  ProjectReceiptContextBox(project: widget.project, summary: widget.summary!),
+                ],
                 const SizedBox(height: 16),
                 PersianAmountField(controller: _amount, label: 'مبلغ (تومان) *'),
                 const SizedBox(height: 12),

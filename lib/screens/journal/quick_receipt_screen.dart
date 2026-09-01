@@ -9,6 +9,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
+import '../../widgets/project_receipt_context_box.dart';
 
 enum _ReceiptMode { cash, creditSale, settleReceivable }
 
@@ -48,6 +49,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   int? _projectId;
   int? _counterpartyId;
   double? _currentReceivable;
+  Map<String, dynamic>? _projectSummary;
   ProjectModel? _selectedProject; // برای تشخیص isFinalized پروژه انتخاب‌شده
   bool _loading = true;
   bool _saving = false;
@@ -103,8 +105,13 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
       } else if (mounted) {
         setState(() => _currentReceivable = null);
       }
+      // مجموع دریافتی تاکنون + مانده - مستقل از این‌که پروژه Finalize شده
+      // یا نه (برخلاف مانده طلب بالا که فقط بعد از Finalization معنا دارد).
+      final summary = await _db.projectFinancialSummary(_projectId!);
+      if (mounted) setState(() => _projectSummary = summary);
       return;
     }
+    if (mounted) setState(() => _projectSummary = null);
     if (_mode == _ReceiptMode.settleReceivable && _counterpartyId != null) {
       final bal = await _db.receivableBalance(_counterpartyId!);
       if (mounted) setState(() => _currentReceivable = bal);
@@ -344,12 +351,9 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                         ),
                       ),
                   ],
-                  if (isProjectLinked && _currentReceivable != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'مانده طلب فعلی این پروژه: ${formatMoney(_currentReceivable!)}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                    ),
+                  if (isProjectLinked && _projectSummary != null && _selectedProject != null) ...[
+                    const SizedBox(height: 10),
+                    ProjectReceiptContextBox(project: _selectedProject!, summary: _projectSummary!),
                   ],
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(

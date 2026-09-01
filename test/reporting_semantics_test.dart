@@ -187,10 +187,13 @@ void main() {
 
   // ==================== مورد ۲۴: Growth با previous صفر یا منفی ====================
   group('مورد ۲۴ — Growth Metrics باید برای صفر/منفی امن باشند', () {
-    test('previous = 0 باید null بدهد، نه Infinity', () {
+    test('previous = 0 باید growthRate=null بدهد (تقسیم بر صفر نامعتبر)،'
+        ' اما growthAmount همچنان قابل‌محاسبه بماند (تفاضل مطلق، نه نسبت)', () {
       final c = FinancialPeriodComparison.compute(metricName: 'x', current: 100, previous: 0);
-      expect(c.growthRate, isNull);
-      expect(c.growthAmount, isNull);
+      expect(c.growthRate, isNull, reason: 'درصد رشد از مبنای صفر تعریف‌نشده است (تقسیم بر صفر)');
+      expect(c.growthAmount, 100.0,
+          reason: 'برخلاف درصد، تفاضل مطلق (current-previous=100-0=100) کاملاً معتبر و معنادار است'
+              ' - این یک عدد دیگر است، نه یک نسبت؛ null کردنش اطلاعات واقعی را بدون دلیل پنهان می‌کرد');
     });
 
     test('رفتن از Contribution منفی به مثبت نباید علامت رشد را معکوس کند', () {

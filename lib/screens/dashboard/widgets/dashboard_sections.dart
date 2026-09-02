@@ -4,6 +4,7 @@ import '../../../models/financial_reports.dart';
 import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/formatters.dart';
+import '../../reports/outstanding_receivables_screen.dart';
 import 'kpi_card.dart';
 
 String _fmt(double? v, {bool pct = false}) {
@@ -50,7 +51,12 @@ class CurrentStateSection extends StatelessWidget {
               childAspectRatio: cols == 2 ? 1.5 : 1.15,
               children: [
                 KpiCard(title: 'موجودی نقد', kpi: KpiValue(value: data.closingCash)),
-                KpiCard(title: 'مطالبات جاری', kpi: KpiValue(value: data.receivableBalance)),
+                KpiCard(
+                  title: 'مطالبات جاری',
+                  kpi: KpiValue(value: data.receivableBalance),
+                  onTap: () => Navigator.push(
+                      context, MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())),
+                ),
                 KpiCard(title: 'پیش‌دریافت', kpi: KpiValue(value: data.advanceBalance)),
                 KpiCard(title: 'بستانکاری مشتریان', kpi: KpiValue(value: data.customerCreditBalance)),
                 _HealthStatusCard(healthy: healthy),

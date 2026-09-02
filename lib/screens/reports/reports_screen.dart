@@ -8,6 +8,7 @@ import '../../models/financial_reports.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../operational/operational_performance_screen.dart';
+import 'outstanding_receivables_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/section_title.dart';
@@ -32,6 +33,12 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
       appBar: AppBar(
         title: const Text('گزارش‌ها'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.receipt_long_outlined),
+            tooltip: 'طلب‌های باز',
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())),
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'تنظیمات',

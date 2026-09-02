@@ -124,7 +124,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                 leading: const Icon(Icons.work_outline, color: AppColors.brass),
                                 title: Text(p.title),
                                 subtitle: Text(
-                                    '${_counterpartyNames[p.counterpartyId] ?? '—'} · ${p.projectType}'),
+                                    '${_counterpartyNames[p.counterpartyId] ?? '—'} · ${p.projectTypes.join('، ')}'),
                                 trailing: _StatusBadge(status: p.status),
                                 onTap: () async {
                                   await Navigator.push(context,

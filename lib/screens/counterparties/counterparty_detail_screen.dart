@@ -332,7 +332,7 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
                             child: ListTile(
                               leading: const Icon(Icons.work_outline, color: AppColors.brass),
                               title: Text(p.title),
-                              subtitle: Text('${p.projectType} · ${p.status}'),
+                              subtitle: Text('${p.projectTypes.join('، ')} · ${p.status}'),
                               trailing: const Icon(Icons.chevron_left),
                               onTap: () async {
                                 await Navigator.push(context,

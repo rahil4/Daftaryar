@@ -17,7 +17,7 @@ void main() {
         id: 1,
         title: 'پروژه تست',
         counterpartyId: 5,
-        projectType: kProjectTypes.first,
+        projectTypes: [kProjectTypes.first],
         status: kProjectStatusFinalized,
         startDate: '1404/01/01',
         agreedAmount: 80000000,
@@ -44,7 +44,7 @@ void main() {
 
     test('toMap/fromMap فیلدهای Finalization را به‌درستی رفت‌وبرگشت می‌دهد', () {
       final project = ProjectModel(
-        title: 'پروژه', counterpartyId: 1, projectType: kProjectTypes.first,
+        title: 'پروژه', counterpartyId: 1, projectTypes: [kProjectTypes.first],
         status: kProjectStatusFinalized, startDate: '1404/01/01', agreedAmount: 50000000,
         createdAt: '1404/01/01', finalAmount: 60000000, finalizedDate: '1404/03/01',
         finalizedNote: 'یادداشت',

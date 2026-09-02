@@ -8,6 +8,21 @@ const List<String> kProjectTypes = [
   'سایر',
 ];
 
+/// انواع پروژه به‌صورت جدول مستقل (نه فیلد ثابت روی خودِ پروژه) ذخیره
+/// می‌شوند - دقیقاً همان الگوی نقش طرف‌حساب - تا هم افزودن نوع جدید نیازی
+/// به تغییر ساختار نداشته باشد، هم یک پروژه بتواند هم‌زمان چند نوع داشته باشد.
+class ProjectTypeModel {
+  final int? id;
+  final String name;
+  ProjectTypeModel({this.id, required this.name});
+
+  Map<String, dynamic> toMap() => {'id': id, 'name': name};
+
+  factory ProjectTypeModel.fromMap(Map<String, dynamic> map) {
+    return ProjectTypeModel(id: map['id'] as int?, name: map['name'] as String);
+  }
+}
+
 const List<String> kProjectStatuses = [
   'در حال انجام',
   'تکمیل شده',
@@ -23,7 +38,11 @@ class ProjectModel {
   final int? id;
   final String title;
   final int counterpartyId;
-  final String projectType;
+
+  /// نام انواع فعلی این پروژه - جداگانه از جدول اتصال بارگذاری می‌شود،
+  /// بخشی از ساختار خام جدول projects نیست (دقیقاً مثل roles در
+  /// CounterpartyModel).
+  final List<String> projectTypes;
   final String status;
   final String startDate; // شمسی yyyy/mm/dd
   final double agreedAmount; // برآورد اولیه (Initial Estimate) - فقط در ایجاد پروژه ثبت می‌شود
@@ -41,7 +60,7 @@ class ProjectModel {
     this.id,
     required this.title,
     required this.counterpartyId,
-    required this.projectType,
+    this.projectTypes = const [],
     required this.status,
     required this.startDate,
     required this.agreedAmount,
@@ -59,7 +78,10 @@ class ProjectModel {
       'id': id,
       'title': title,
       'counterpartyId': counterpartyId,
-      'projectType': projectType,
+      // ستون قدیمی projectType به‌دلیل NOT NULL نگه داشته شده؛ فقط اولین
+      // نوع انتخابی در آن نوشته می‌شود - منبع واقعی خواندن، رابطه
+      // project_type_assignments است، نه این ستون.
+      'projectType': projectTypes.isNotEmpty ? projectTypes.first : '',
       'status': status,
       'startDate': startDate,
       'agreedAmount': agreedAmount,
@@ -71,12 +93,12 @@ class ProjectModel {
     };
   }
 
-  factory ProjectModel.fromMap(Map<String, dynamic> map) {
+  factory ProjectModel.fromMap(Map<String, dynamic> map, {List<String>? projectTypes}) {
     return ProjectModel(
       id: map['id'] as int?,
       title: map['title'] as String,
       counterpartyId: map['counterpartyId'] as int,
-      projectType: map['projectType'] as String,
+      projectTypes: projectTypes ?? const [],
       status: map['status'] as String,
       startDate: map['startDate'] as String,
       agreedAmount: (map['agreedAmount'] as num).toDouble(),
@@ -92,7 +114,7 @@ class ProjectModel {
     int? id,
     String? title,
     int? counterpartyId,
-    String? projectType,
+    List<String>? projectTypes,
     String? status,
     String? startDate,
     double? agreedAmount,
@@ -106,7 +128,7 @@ class ProjectModel {
       id: id ?? this.id,
       title: title ?? this.title,
       counterpartyId: counterpartyId ?? this.counterpartyId,
-      projectType: projectType ?? this.projectType,
+      projectTypes: projectTypes ?? this.projectTypes,
       status: status ?? this.status,
       startDate: startDate ?? this.startDate,
       agreedAmount: agreedAmount ?? this.agreedAmount,

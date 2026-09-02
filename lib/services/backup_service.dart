@@ -73,7 +73,7 @@ class BackupService {
       'exportedAt': DateTime.now().toIso8601String(),
       'counterparties':
           counterparties.map((e) => {...e.toMap(), 'roles': e.roles}).toList(),
-      'projects': projects.map((e) => e.toMap()).toList(),
+      'projects': projects.map((e) => {...e.toMap(), 'projectTypes': e.projectTypes}).toList(),
       'projectPriceEvents': priceEvents,
       'accounts': accounts.map((e) => e.toMap()).toList(),
       'journalEntries': entries
@@ -214,7 +214,16 @@ class BackupService {
 
     final Map<int, int> projectIdMap = {};
     for (final p in (data['projects'] as List? ?? [])) {
-      final project = ProjectModel.fromMap(Map<String, dynamic>.from(p));
+      final map = Map<String, dynamic>.from(p);
+      // پشتیبان‌های این مرحله به بعد لیست کامل projectTypes را دارند؛
+      // پشتیبان‌های قدیمی‌تر فقط ستون تکی projectType را داشتند - در آن
+      // حالت همان یک مقدار به‌عنوان تنها نوع پروژه در نظر گرفته می‌شود تا
+      // هیچ داده‌ای گم نشود.
+      final typesRaw = map['projectTypes'] as List?;
+      final types = typesRaw != null
+          ? typesRaw.map((t) => t.toString()).toList()
+          : [if ((map['projectType'] as String?)?.isNotEmpty ?? false) map['projectType'] as String];
+      final project = ProjectModel.fromMap(map, projectTypes: types);
       final mappedCounterpartyId =
           counterpartyIdMap[project.counterpartyId] ?? project.counterpartyId;
       final newId = await _db.insertProject(

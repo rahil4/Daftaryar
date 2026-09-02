@@ -38,7 +38,7 @@ void main() {
     return db.insertProject(ProjectModel(
       title: 'پروژه تست',
       counterpartyId: counterpartyId,
-      projectType: kProjectTypes.first,
+      projectTypes: [kProjectTypes.first],
       status: kProjectStatuses.first,
       startDate: '1404/01/01',
       agreedAmount: agreedAmount,

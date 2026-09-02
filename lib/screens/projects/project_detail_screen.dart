@@ -241,7 +241,7 @@ class _SummaryTab extends StatelessWidget {
                     children: [
                       const Icon(Icons.category_outlined, size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 6),
-                      Text('${project.projectType} · ${project.status}'),
+                      Text('${project.projectTypes.join('، ')} · ${project.status}'),
                     ],
                   ),
                   const SizedBox(height: 6),

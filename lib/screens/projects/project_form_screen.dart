@@ -30,10 +30,11 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   late final _description = TextEditingController(text: widget.existing?.description ?? '');
 
   String _startDate = '';
-  String _projectType = kProjectTypes.first;
+  late final Set<String> _selectedTypes = {...(widget.existing?.projectTypes ?? const [])};
   String _status = kProjectStatuses.first;
 
   List<CounterpartyModel> _counterparties = [];
+  List<String> _availableTypes = kProjectTypes;
   int? _selectedCounterpartyId;
   bool _hasFinancialHistory = false;
   bool _loading = true;
@@ -43,10 +44,44 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
   void initState() {
     super.initState();
     _startDate = widget.existing?.startDate ?? todayJalaliString();
-    _projectType = widget.existing?.projectType ?? kProjectTypes.first;
+    if (_selectedTypes.isEmpty) _selectedTypes.add(kProjectTypes.first);
     _status = widget.existing?.status ?? kProjectStatuses.first;
     _selectedCounterpartyId = widget.existing?.counterpartyId ?? widget.presetCounterparty?.id;
     _loadCounterparties();
+    _loadTypes();
+  }
+
+  Future<void> _loadTypes() async {
+    final types = await _db.getAllProjectTypes();
+    setState(() => _availableTypes = types.map((t) => t.name).toList());
+  }
+
+  Future<void> _addCustomType() async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نوع پروژه جدید'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'نام نوع'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('افزودن'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty && !_availableTypes.contains(result)) {
+      setState(() {
+        _availableTypes = [..._availableTypes, result];
+        _selectedTypes.add(result);
+      });
+    }
   }
 
   Future<void> _loadCounterparties() async {
@@ -81,12 +116,17 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
           .showSnackBar(const SnackBar(content: Text('لطفاً کارفرما را انتخاب کنید')));
       return;
     }
+    if (_selectedTypes.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('حداقل یک نوع پروژه را انتخاب کنید')));
+      return;
+    }
     setState(() => _saving = true);
     final model = ProjectModel(
       id: widget.existing?.id,
       title: _title.text.trim(),
       counterpartyId: _selectedCounterpartyId!,
-      projectType: _projectType,
+      projectTypes: _selectedTypes.toList(),
       status: _status,
       startDate: _startDate,
       agreedAmount: parsePersianAmount(_amount.text) ?? 0,
@@ -162,13 +202,30 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                       ),
                     ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _projectType,
-                    decoration: const InputDecoration(labelText: 'نوع پروژه'),
-                    items: kProjectTypes
-                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _projectType = v!),
+                  Text('نوع پروژه (می‌توانید بیش از یکی انتخاب کنید) *',
+                      style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ..._availableTypes.map((type) => FilterChip(
+                            label: Text(type),
+                            selected: _selectedTypes.contains(type),
+                            onSelected: (sel) => setState(() {
+                              if (sel) {
+                                _selectedTypes.add(type);
+                              } else {
+                                _selectedTypes.remove(type);
+                              }
+                            }),
+                          )),
+                      ActionChip(
+                        avatar: const Icon(Icons.add, size: 16),
+                        label: const Text('نوع جدید'),
+                        onPressed: _addCustomType,
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   // Finalized/Cancelled عمداً از گزینه‌های این دراپ‌داون حذف

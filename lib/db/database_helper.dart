@@ -27,7 +27,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -82,6 +82,51 @@ class DatabaseHelper {
         WHERE isSystem = 1 AND (systemKey IS NULL OR systemKey IN (${hierarchySafeSystemKeys.map((_) => '?').join(',')}))
       ''', hierarchySafeSystemKeys);
     }
+    if (oldVersion < 4) {
+      // انواع پروژه از یک ستون تکی (projects.projectType) به رابطه
+      // چندبه‌چند تبدیل می‌شود (دقیقاً همان الگوی نقش طرف‌حساب) تا هم
+      // بتوان نوع جدید افزود، هم یک پروژه چند نوع همزمان داشته باشد. ستون
+      // قدیمی projectType به‌دلیل NOT NULL حذف نمی‌شود (فقط دیگر منبع
+      // خواندن نیست) - داده مالی موجود دست‌نخورده می‌ماند.
+      await db.execute('''
+        CREATE TABLE project_types (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE project_type_assignments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          projectId INTEGER NOT NULL,
+          typeId INTEGER NOT NULL,
+          FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE CASCADE,
+          FOREIGN KEY (typeId) REFERENCES project_types (id) ON DELETE CASCADE,
+          UNIQUE (projectId, typeId)
+        )
+      ''');
+      await db.execute(
+          'CREATE INDEX idx_project_type_assignments_projectId ON project_type_assignments (projectId)');
+
+      for (final typeName in kProjectTypes) {
+        await db.insert('project_types', {'name': typeName});
+      }
+      // مهاجرت داده موجود: هر پروژه‌ای که از قبل یک projectType تکی داشته،
+      // همان مقدار به‌عنوان اولین (و تنها) نوعش در رابطه جدید ثبت می‌شود.
+      // اگر مقدار موجود جزو انواع پیش‌فرض نبود (مثلاً برچسب سفارشی قدیمی)،
+      // به‌عنوان یک نوع جدید در project_types ثبت می‌شود، نه این‌که گم شود.
+      final existingProjects = await db.query('projects', columns: ['id', 'projectType']);
+      for (final p in existingProjects) {
+        final typeName = p['projectType'] as String;
+        var typeRows = await db.query('project_types', where: 'name = ?', whereArgs: [typeName]);
+        int typeId;
+        if (typeRows.isEmpty) {
+          typeId = await db.insert('project_types', {'name': typeName});
+        } else {
+          typeId = typeRows.first['id'] as int;
+        }
+        await db.insert('project_type_assignments', {'projectId': p['id'] as int, 'typeId': typeId});
+      }
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -134,6 +179,29 @@ class DatabaseHelper {
         finalizedDate TEXT,
         finalizedNote TEXT,
         FOREIGN KEY (counterpartyId) REFERENCES counterparties (id) ON DELETE CASCADE
+      )
+    ''');
+
+    // انواع پروژه به‌صورت جدول مستقل + رابطه چندبه‌چند (دقیقاً همان الگوی
+    // نقش طرف‌حساب) تا هم بتوان نوع جدید افزود، هم یک پروژه چند نوع همزمان
+    // داشته باشد. ستون قدیمی projects.projectType برای سازگاری با
+    // Constraint فعلی (NOT NULL) نگه داشته می‌شود ولی دیگر منبع خواندن
+    // نیست - فقط اولین نوع انتخابی در آن نوشته می‌شود.
+    await db.execute('''
+      CREATE TABLE project_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE project_type_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        projectId INTEGER NOT NULL,
+        typeId INTEGER NOT NULL,
+        FOREIGN KEY (projectId) REFERENCES projects (id) ON DELETE CASCADE,
+        FOREIGN KEY (typeId) REFERENCES project_types (id) ON DELETE CASCADE,
+        UNIQUE (projectId, typeId)
       )
     ''');
 
@@ -210,6 +278,13 @@ class DatabaseHelper {
 
     for (final roleName in kDefaultCounterpartyRoles) {
       await db.insert('counterparty_roles', {'name': roleName});
+    }
+
+    await db.execute(
+        'CREATE INDEX idx_project_type_assignments_projectId ON project_type_assignments (projectId)');
+
+    for (final typeName in kProjectTypes) {
+      await db.insert('project_types', {'name': typeName});
     }
 
     await db.execute('''
@@ -391,6 +466,47 @@ class DatabaseHelper {
     return maps.map((m) => CounterpartyRoleModel.fromMap(m)).toList();
   }
 
+  Future<List<String>> _typesForProject(DatabaseExecutor db, int projectId) async {
+    final rows = await db.rawQuery('''
+      SELECT t.name as name FROM project_types t
+      JOIN project_type_assignments a ON a.typeId = t.id
+      WHERE a.projectId = ?
+      ORDER BY t.name ASC
+    ''', [projectId]);
+    return rows.map((r) => r['name'] as String).toList();
+  }
+
+  /// مجموعه انواع یک پروژه را با مجموعه داده‌شده جایگزین می‌کند (نه اضافه) -
+  /// دقیقاً همان الگوی setCounterpartyRoles.
+  Future<void> setProjectTypes(int projectId, List<String> typeNames, [DatabaseExecutor? executor]) async {
+    Future<void> body(DatabaseExecutor txn) async {
+      await txn.delete('project_type_assignments', where: 'projectId = ?', whereArgs: [projectId]);
+      for (final typeName in typeNames) {
+        var typeRows = await txn.query('project_types', where: 'name = ?', whereArgs: [typeName]);
+        int typeId;
+        if (typeRows.isEmpty) {
+          typeId = await txn.insert('project_types', {'name': typeName});
+        } else {
+          typeId = typeRows.first['id'] as int;
+        }
+        await txn.insert('project_type_assignments', {'projectId': projectId, 'typeId': typeId});
+      }
+    }
+
+    if (executor != null) {
+      await body(executor);
+      return;
+    }
+    final db = await database;
+    await db.transaction((txn) => body(txn));
+  }
+
+  Future<List<ProjectTypeModel>> getAllProjectTypes() async {
+    final db = await database;
+    final maps = await db.query('project_types', orderBy: 'name ASC');
+    return maps.map((m) => ProjectTypeModel.fromMap(m)).toList();
+  }
+
   /// طرف‌های حساب؛ پیش‌فرض فقط فعال‌ها (برای انتخاب‌گرهای UI)، مگر این‌که
   /// includeInactive=true باشد (برای لیست کامل مدیریتی یا نمایش رکورد قدیمی)
   Future<List<CounterpartyModel>> getCounterparties({
@@ -449,7 +565,11 @@ class DatabaseHelper {
   // ---------------- Projects ----------------
   Future<int> insertProject(ProjectModel p, [DatabaseExecutor? executor]) async {
     final db = executor ?? await database;
-    return db.insert('projects', p.toMap()..remove('id'));
+    final id = await db.insert('projects', p.toMap()..remove('id'));
+    if (p.projectTypes.isNotEmpty) {
+      await setProjectTypes(id, p.projectTypes, executor);
+    }
+    return id;
   }
 
   /// آیا این پروژه هرگونه سابقه مالی دارد؟ (سند حسابداری یا رویداد تغییر
@@ -524,7 +644,9 @@ class DatabaseHelper {
       throw Exception('یک پروژه نمی‌تواند هم‌زمان لغوشده و دارای مبلغ نهایی باشد.');
     }
 
-    return db.update('projects', p.toMap(), where: 'id = ?', whereArgs: [p.id]);
+    final result = await db.update('projects', p.toMap(), where: 'id = ?', whereArgs: [p.id]);
+    await setProjectTypes(p.id!, p.projectTypes);
+    return result;
   }
 
   /// Workflow اختصاصی و صریح برای لغو پروژه - state transition به Cancelled
@@ -584,14 +706,20 @@ class DatabaseHelper {
     }
     final maps = await db.query('projects',
         where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'id DESC');
-    return maps.map((m) => ProjectModel.fromMap(m)).toList();
+    final result = <ProjectModel>[];
+    for (final m in maps) {
+      final types = await _typesForProject(db, m['id'] as int);
+      result.add(ProjectModel.fromMap(m, projectTypes: types));
+    }
+    return result;
   }
 
   Future<ProjectModel?> getProject(int id, [DatabaseExecutor? executor]) async {
     final db = executor ?? await database;
     final maps = await db.query('projects', where: 'id = ?', whereArgs: [id]);
     if (maps.isEmpty) return null;
-    return ProjectModel.fromMap(maps.first);
+    final types = await _typesForProject(db, id);
+    return ProjectModel.fromMap(maps.first, projectTypes: types);
   }
 
   // ---------------- Accounts ----------------

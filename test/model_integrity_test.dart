@@ -55,6 +55,44 @@ void main() {
       expect(restored.finalizedNote, 'یادداشت');
       expect(restored.isFinalized, true);
     });
+
+    test('projectTypes: ستون قدیمی projectType فقط برای سازگاری اولین نوع را نگه'
+        ' می‌دارد، ولی منبع واقعی خواندن جدول اتصال است (نه این ستون)', () {
+      final project = ProjectModel(
+        title: 'پروژه چندنوعی',
+        counterpartyId: 1,
+        projectTypes: const ['تفکیک', 'افراز'],
+        status: kProjectStatuses.first,
+        startDate: '1404/01/01',
+        agreedAmount: 10000000,
+        createdAt: '1404/01/01',
+      );
+      final map = project.toMap();
+      expect(map['projectType'], 'تفکیک',
+          reason: 'ستون NOT NULL قدیمی باید اولین نوع را بگیرد تا Constraint دیتابیس نشکند');
+
+      // بدون پاس‌دادن صریح projectTypes، لیست خالی است - چون این اطلاعات
+      // در ساختار خام جدول projects وجود ندارد و باید جداگانه از جدول
+      // اتصال بارگذاری شود (دقیقاً مثل roles در CounterpartyModel).
+      final restoredWithout = ProjectModel.fromMap(map);
+      expect(restoredWithout.projectTypes, isEmpty);
+
+      final restoredWith = ProjectModel.fromMap(map, projectTypes: const ['تفکیک', 'افراز']);
+      expect(restoredWith.projectTypes, ['تفکیک', 'افراز']);
+    });
+
+    test('پروژه بدون هیچ نوعی، رشته خالی در ستون سازگاری می‌نویسد (نه خطا)', () {
+      final project = ProjectModel(
+        title: 'بدون نوع',
+        counterpartyId: 1,
+        status: kProjectStatuses.first,
+        startDate: '1404/01/01',
+        agreedAmount: 0,
+        createdAt: '1404/01/01',
+      );
+      expect(project.projectTypes, isEmpty);
+      expect(project.toMap()['projectType'], '');
+    });
   });
 
   group('مورد ۳ — حفظ systemKey در AccountModel', () {

@@ -6,7 +6,6 @@ import '../../models/project.dart';
 import '../../services/financial_reporting_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../../widgets/project_receipt_context_box.dart';
 import '../counterparties/counterparty_detail_screen.dart';
 import '../projects/project_detail_screen.dart';
 
@@ -16,8 +15,9 @@ enum _ReceivablesView { byProject, byCounterparty, estimated }
 /// یا مانده تخمینی دارند - مرتب‌شده نزولی بر اساس مبلغ. «مانده طلب» (دو
 /// نمای اول) از FinancialReportingService.getProjectReports() می‌آید و
 /// فقط به پروژه‌های Finalize‌شده تعلق دارد؛ «مانده تخمینی» (نمای سوم) از
-/// همان تابع computeProjectRemaining که در فرم‌های دریافت وجه استفاده
-/// می‌شود می‌آید و مخصوص پروژه‌های Finalize‌نشده است - این دو مفهوم عمداً
+/// «مانده تخمینی» (نمای سوم) از estimatedRemainingForOpenProjects می‌آید
+/// (همان تعریفی که در فرم‌های دریافت وجه دیده می‌شود، فقط به‌شکل دسته‌ای و
+/// بهینه) و مخصوص پروژه‌های Finalize‌نشده است - این دو مفهوم عمداً
 /// در دو نمای جدا نگه داشته شده‌اند تا هرگز با هم قاطی نشوند (یکی مانده
 /// واقعی حساب دریافتنی است، دیگری فقط یک برآورد پیش از قطعی‌شدن مبلغ).
 /// هیچ محاسبهٔ مالی جدیدی در این صفحه انجام نمی‌شود.
@@ -51,15 +51,14 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
     final outstanding = reports.where((p) => p.receivableBalance > 0).toList()
       ..sort((a, b) => b.receivableBalance.compareTo(a.receivableBalance));
 
-    // مانده تخمینی: فقط پروژه‌های Finalize‌نشده - از همان تابع مرکزی
-    // computeProjectRemaining (همان چیزی که در فرم‌های دریافت وجه دیده
-    // می‌شود)، نه یک محاسبهٔ موازی جدید.
+    // مانده تخمینی: فقط پروژه‌های Finalize‌نشده - محاسبهٔ دسته‌ای بهینه
+    // (تعداد ثابتی کوئری، نه یک projectFinancialSummary سنگین به‌ازای هر
+    // پروژه)، با دقیقاً همان تعریفی که در فرم‌های دریافت وجه دیده می‌شود.
     final allProjects = await _db.getProjects();
+    final estimatedMap = await _db.estimatedRemainingForOpenProjects();
     final estimatedList = <_EstimatedOutstanding>[];
     for (final project in allProjects.where((p) => !p.isFinalized)) {
-      final summary = await _db.projectFinancialSummary(project.id!);
-      final remainingInfo = computeProjectRemaining(project, summary);
-      final remaining = remainingInfo.value;
+      final remaining = estimatedMap[project.id];
       if (remaining != null && remaining > 0) {
         estimatedList.add(_EstimatedOutstanding(
           project: project,
@@ -168,7 +167,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                               leading: const Icon(Icons.description_outlined, color: AppColors.brass),
                               title: Text(p.projectName),
                               subtitle: Text(_counterpartyNames[p.counterpartyId] ?? '—'),
-                              trailing: Text(formatMoney(p.receivableBalance),
+                              trailing: Text(formatMoneyCompact(p.receivableBalance),
                                   style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.brass)),
                               onTap: () async {
                                 final project = await _db.getProject(p.projectId);
@@ -185,7 +184,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                               leading: const Icon(Icons.person_outline, color: AppColors.brass),
                               title: Text(c.name),
                               subtitle: Text('${pn(c.projectCount)} پروژه دارای مانده'),
-                              trailing: Text(formatMoney(c.totalReceivable),
+                              trailing: Text(formatMoneyCompact(c.totalReceivable),
                                   style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.brass)),
                               onTap: () async {
                                 final counterparty = await _db.getCounterparty(c.counterpartyId);
@@ -204,7 +203,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                               leading: const Icon(Icons.hourglass_empty, color: AppColors.brass),
                               title: Text(e.project.title),
                               subtitle: Text(e.counterpartyName),
-                              trailing: Text(formatMoney(e.estimatedRemaining),
+                              trailing: Text(formatMoneyCompact(e.estimatedRemaining),
                                   style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.brass)),
                               onTap: () async {
                                 await Navigator.push(context,

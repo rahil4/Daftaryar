@@ -36,6 +36,29 @@ String formatMoney(num amount, {bool withSuffix = true}) {
   return withSuffix ? '$result تومان' : result;
 }
 
+/// نمایش فشرده مبلغ برای کارت‌های تنگ داشبورد - اعداد بزرگ با واحد
+/// «م» (میلیون) یا «میلیارد» خلاصه می‌شوند تا در عرض کارت جا شوند و
+/// خوانا بمانند؛ اعداد کوچک‌تر از یک میلیون کامل نمایش داده می‌شوند.
+/// این فقط یک تابع نمایشی است - هیچ گرد کردنی در محاسبات مالی اعمال
+/// نمی‌شود و مقادیر واقعی همیشه دقیق باقی می‌مانند.
+String formatMoneyCompact(num amount) {
+  final isNegative = amount < 0;
+  final abs = amount.abs();
+  String body;
+  if (abs >= 1000000000) {
+    final v = abs / 1000000000;
+    final text = v >= 100 ? v.round().toString() : v.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+    body = '${toPersianDigits(text)} میلیارد';
+  } else if (abs >= 1000000) {
+    final v = abs / 1000000;
+    final text = v >= 100 ? v.round().toString() : v.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+    body = '${toPersianDigits(text)}م';
+  } else {
+    body = formatMoney(abs, withSuffix: false);
+  }
+  return isNegative ? '−$body' : body;
+}
+
 /// رشته ورودی (با ارقام فارسی/لاتین و جداکننده سه‌رقمی) را به عدد خام تبدیل می‌کند
 double? parsePersianAmount(String text) {
   final latinDigitsOnly = text.split('').map((ch) {

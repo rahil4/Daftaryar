@@ -116,7 +116,10 @@ class DatabaseHelper {
       // به‌عنوان یک نوع جدید در project_types ثبت می‌شود، نه این‌که گم شود.
       final existingProjects = await db.query('projects', columns: ['id', 'projectType']);
       for (final p in existingProjects) {
-        final typeName = p['projectType'] as String;
+        final typeName = (p['projectType'] as String?)?.trim() ?? '';
+        // پروژه بدون نوع (رشته خالی) نباید یک «نوع بی‌نام» در فهرست انواع
+        // بسازد - صرفاً بدون نوع باقی می‌ماند.
+        if (typeName.isEmpty) continue;
         var typeRows = await db.query('project_types', where: 'name = ?', whereArgs: [typeName]);
         int typeId;
         if (typeRows.isEmpty) {
@@ -481,7 +484,11 @@ class DatabaseHelper {
   Future<void> setProjectTypes(int projectId, List<String> typeNames, [DatabaseExecutor? executor]) async {
     Future<void> body(DatabaseExecutor txn) async {
       await txn.delete('project_type_assignments', where: 'projectId = ?', whereArgs: [projectId]);
-      for (final typeName in typeNames) {
+      for (final rawName in typeNames) {
+        final typeName = rawName.trim();
+        // نام خالی/فقط‌فاصله هرگز نباید یک «نوع بی‌نام» در فهرست انواع
+        // بسازد (مثلاً از یک فایل پشتیبان دستکاری‌شده یا بسیار قدیمی).
+        if (typeName.isEmpty) continue;
         var typeRows = await txn.query('project_types', where: 'name = ?', whereArgs: [typeName]);
         int typeId;
         if (typeRows.isEmpty) {
@@ -1849,6 +1856,54 @@ class DatabaseHelper {
   /// مبلغ مورد انتظار فعلی پروژه = برآورد اولیه + مجموع رویدادهای پیش از
   /// Finalization (ADDITION/REDUCTION/ADJUSTMENT). بعد از Finalization دیگر
   /// معنا ندارد؛ در آن حالت finalAmount + FINAL_ADJUSTMENTها ملاک است.
+  /// مانده تخمینی همه پروژه‌های Finalize‌نشده، در تعداد ثابتی کوئری (نه یک
+  /// projectFinancialSummary سنگین به‌ازای هر پروژه). تعریف دقیقاً همان
+  /// چیزی است که computeProjectRemaining در فرم‌های دریافت وجه استفاده
+  /// می‌کند: (برآورد اولیه + رویدادهای پیش از نهایی‌سازی) - مجموع دریافتی.
+  /// هیچ قاعده مالی جدیدی اینجا تعریف نمی‌شود؛ فقط همان محاسبه به‌شکل
+  /// دسته‌ای انجام می‌شود.
+  Future<Map<int, double>> estimatedRemainingForOpenProjects() async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return {};
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+
+    final projectRows = await db.query('projects',
+        columns: ['id', 'agreedAmount'], where: 'finalAmount IS NULL');
+    if (projectRows.isEmpty) return {};
+
+    // مجموع رویدادهای تغییر قیمتِ پیش از نهایی‌سازی، برای همه پروژه‌ها یکجا
+    final eventRows = await db.rawQuery('''
+      SELECT projectId, COALESCE(SUM(amount),0) as total
+      FROM project_price_events
+      WHERE type IN (?, ?, ?)
+      GROUP BY projectId
+    ''', [kPriceEventAddition, kPriceEventReduction, kPriceEventAdjustment]);
+    final preFinalSums = {
+      for (final r in eventRows) r['projectId'] as int: (r['total'] as num).toDouble()
+    };
+
+    // مجموع دریافتی نقدی هر پروژه، برای همه پروژه‌ها یکجا
+    final receivedRows = await db.rawQuery('''
+      SELECT projectId, COALESCE(SUM(debit),0) as total
+      FROM journal_lines
+      WHERE projectId IS NOT NULL AND accountId IN ($placeholders)
+      GROUP BY projectId
+    ''', cashIds);
+    final receivedByProject = {
+      for (final r in receivedRows) r['projectId'] as int: (r['total'] as num).toDouble()
+    };
+
+    final result = <int, double>{};
+    for (final row in projectRows) {
+      final id = row['id'] as int;
+      final expected = (row['agreedAmount'] as num).toDouble() + (preFinalSums[id] ?? 0);
+      result[id] = expected - (receivedByProject[id] ?? 0);
+    }
+    return result;
+  }
+
   Future<double> currentExpectedAmount(int projectId) async {
     final project = await getProject(projectId);
     if (project == null) return 0;

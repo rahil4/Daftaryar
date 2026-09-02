@@ -23,7 +23,7 @@ class KpiCard extends StatelessWidget {
 
   String _formatValue(double? v) {
     if (v == null) return '—';
-    return isPercentage ? '${v.toStringAsFixed(1)}٪' : formatMoney(v);
+    return isPercentage ? '${v.toStringAsFixed(1)}٪' : formatMoneyCompact(v);
   }
 
   @override

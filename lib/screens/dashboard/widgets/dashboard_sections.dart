@@ -9,7 +9,7 @@ import 'kpi_card.dart';
 
 String _fmt(double? v, {bool pct = false}) {
   if (v == null) return '—';
-  return pct ? '${v.toStringAsFixed(1)}٪' : formatMoney(v);
+  return pct ? '${v.toStringAsFixed(1)}٪' : formatMoney(v, withSuffix: false);
 }
 
 Widget _sectionTitle(String title) {

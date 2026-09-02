@@ -382,7 +382,7 @@ class _QuickActionsRow extends StatelessWidget {
       children: [
         Expanded(
           child: _QuickActionButton(
-            label: 'دریافت سریع',
+            label: 'دریافت',
             icon: Icons.south_west_rounded,
             color: AppColors.positive,
             onTap: () async {
@@ -395,7 +395,7 @@ class _QuickActionsRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: _QuickActionButton(
-            label: 'پرداخت سریع',
+            label: 'پرداخت',
             icon: Icons.north_east_rounded,
             color: AppColors.negative,
             onTap: () async {

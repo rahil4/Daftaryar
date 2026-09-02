@@ -50,6 +50,33 @@ class ManagementDashboardService {
         .map((row) => BankBalanceEntry(name: row['name'] as String, balance: row['balance'] as double))
         .toList();
 
+    // ---- داده‌های خلاصه داشبورد ساده‌شده ----
+    // پروژه‌های در جریان + جمع مانده تخمینی: هر دو وضعیت فعلی‌اند (مستقل
+    // از بازه انتخابی) و از همان محاسبه دسته‌ای موجود می‌آیند - بدون یک
+    // کوئری جداگانه به‌ازای هر پروژه.
+    final estimatedMap = await _db.estimatedRemainingForOpenProjects();
+    final expectedMap = await _db.expectedAmountForOpenProjects();
+    final openProjectsCount = expectedMap.length;
+    final openProjectsTotal = expectedMap.values.fold<double>(0, (s, v) => s + v);
+    final estimatedRemainingTotal =
+        estimatedMap.values.where((v) => v > 0).fold<double>(0, (s, v) => s + v);
+
+    final recentRows = await _db.recentCashEntries(limit: 3);
+    final recentEntries = recentRows.map((r) {
+      final inflow = (r['inflow'] as num).toDouble();
+      final outflow = (r['outflow'] as num).toDouble();
+      final isInflow = inflow >= outflow;
+      return RecentEntryView(
+        entryId: r['id'] as int,
+        description: (r['description'] as String?)?.trim().isNotEmpty == true
+            ? r['description'] as String
+            : 'سند ${r['id']}',
+        date: r['date'] as String,
+        amount: isInflow ? inflow : outflow,
+        isInflow: isInflow,
+      );
+    }).toList();
+
     KpiValue kpi(double current, double? previous) {
       final growth =
           (previous != null && previous != 0) ? ((current - previous) / previous) * 100 : null;
@@ -168,6 +195,10 @@ class ManagementDashboardService {
       closingCash: period.closingCash,
       cashReconciles: period.cashReconciles,
       bankBalances: bankBalances,
+      openProjectsCount: openProjectsCount,
+      openProjectsTotal: openProjectsTotal,
+      estimatedRemainingTotal: estimatedRemainingTotal,
+      recentEntries: recentEntries,
       receivableBalance: totalReceivable,
       customerCreditBalance: totalCredit,
       advanceBalance: totalAdvance,

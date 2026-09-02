@@ -4,7 +4,6 @@ import '../../../models/financial_reports.dart';
 import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/formatters.dart';
-import '../../reports/outstanding_receivables_screen.dart';
 import 'kpi_card.dart';
 
 String _fmt(double? v, {bool pct = false}) {
@@ -17,103 +16,6 @@ Widget _sectionTitle(String title) {
     padding: const EdgeInsets.only(top: 20, bottom: 8),
     child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
   );
-}
-
-/// بخش A — وضعیت مالی فعلی: پنج مانده «الان» (مستقل از بازه انتخابی)، باید
-/// همیشه نمایش داده شود حتی اگر بازه انتخابی هیچ فعالیتی نداشته باشد؛ هیچ
-/// محاسبه مالی جدیدی اینجا انجام نمی‌شود، فقط diagnostics.hasIssues موجود
-/// برای کارت پنجم خوانده می‌شود.
-class CurrentStateSection extends StatelessWidget {
-  final ManagementDashboardData data;
-  const CurrentStateSection({super.key, required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final healthy = !data.diagnostics.hasIssues;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionTitle('وضعیت مالی فعلی'),
-        const Padding(
-          padding: EdgeInsets.only(bottom: 10),
-          child:
-              Text('مستقل از بازه انتخابی', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-        ),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final cols = constraints.maxWidth > 640 ? 5 : 2;
-            return GridView.count(
-              crossAxisCount: cols,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 8,
-              childAspectRatio: cols == 2 ? 1.5 : 1.15,
-              children: [
-                KpiCard(title: 'موجودی نقد', kpi: KpiValue(value: data.closingCash)),
-                KpiCard(
-                  title: 'مطالبات جاری',
-                  kpi: KpiValue(value: data.receivableBalance),
-                  onTap: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())),
-                ),
-                KpiCard(title: 'پیش‌دریافت', kpi: KpiValue(value: data.advanceBalance)),
-                KpiCard(title: 'بستانکاری مشتریان', kpi: KpiValue(value: data.customerCreditBalance)),
-                _HealthStatusCard(healthy: healthy),
-              ],
-            );
-          },
-        ),
-        if (data.bankBalances.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          const Text('ریز موجودی حساب‌ها', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                children: [for (final b in data.bankBalances) _row(b.name, _fmt(b.balance))],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// کارت وضعیت سلامت داده - فقط از diagnostics.hasIssues موجود می‌خواند،
-/// هیچ قانون تشخیصی جدیدی نمی‌سازد
-class _HealthStatusCard extends StatelessWidget {
-  final bool healthy;
-  const _HealthStatusCard({required this.healthy});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = healthy ? AppColors.positive : AppColors.negative;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('سلامت داده‌ها', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(healthy ? Icons.check_circle_outline : Icons.error_outline, color: color, size: 18),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(healthy ? 'خوب' : 'نیاز به بررسی',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: color)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// بخش B — عملکرد دوره انتخاب‌شده: شش KPI دوره‌ای؛ دو مورد اول (نتیجه

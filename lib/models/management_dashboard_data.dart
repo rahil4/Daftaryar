@@ -35,6 +35,24 @@ class BankBalanceEntry {
   const BankBalanceEntry({required this.name, required this.balance});
 }
 
+/// یک سند اخیر برای نمایش خلاصه در داشبورد - فقط داده نمایشی، هیچ محاسبه
+/// مالی‌ای در آن انجام نمی‌شود. amount مبلغ سند و isInflow جهت آن نسبت به
+/// حساب‌های نقدی/بانکی است (ورودی یا خروجی وجه).
+class RecentEntryView {
+  final int entryId;
+  final String description;
+  final String date;
+  final double amount;
+  final bool isInflow;
+  const RecentEntryView({
+    required this.entryId,
+    required this.description,
+    required this.date,
+    required this.amount,
+    required this.isInflow,
+  });
+}
+
 /// View Model کامل داشبورد مدیریتی - فقط برای نمایش، هرگز در دیتابیس
 /// ذخیره نمی‌شود و خودش هیچ محاسبه Ledger‌ای انجام نمی‌دهد؛ همه مقادیرش از
 /// FinancialReportingService/FinancialMetricsService پر می‌شوند.
@@ -84,6 +102,19 @@ class ManagementDashboardData {
   final double closingCash;
   final bool cashReconciles;
   final List<BankBalanceEntry> bankBalances;
+
+  // ---- داده‌های خلاصه داشبورد ساده‌شده (فقط نمایشی) ----
+  /// تعداد و جمع مبلغ مورد انتظار پروژه‌های Finalize‌نشده (کار در دست انجام)
+  final int openProjectsCount;
+  final double openProjectsTotal;
+
+  /// جمع کل مانده تخمینی همه پروژه‌های Finalize‌نشده - وضعیت فعلی، مستقل
+  /// از بازه انتخابی؛ از همان محاسبه دسته‌ای
+  /// DatabaseHelper.estimatedRemainingForOpenProjects می‌آید.
+  final double estimatedRemainingTotal;
+
+  /// چند سند آخر ثبت‌شده، صرفاً برای یک نگاه سریع در داشبورد
+  final List<RecentEntryView> recentEntries;
 
   // Receivables
   final double receivableBalance; // Closing Balance - مانده مطالبات در پایان بازه (مستقل، نه یک Ratio)
@@ -177,6 +208,10 @@ class ManagementDashboardData {
     required this.closingCash,
     required this.cashReconciles,
     required this.bankBalances,
+    required this.openProjectsCount,
+    required this.openProjectsTotal,
+    required this.estimatedRemainingTotal,
+    required this.recentEntries,
     required this.receivableBalance,
     required this.customerCreditBalance,
     required this.advanceBalance,

@@ -1904,6 +1904,54 @@ class DatabaseHelper {
     return result;
   }
 
+  /// چند سند آخر، به‌شکل خلاصه و سبک (یک کوئری، بدون بارگذاری کامل همه
+  /// سطرهای همه اسناد) - فقط برای نمایش در داشبورد. جهت (ورودی/خروجی وجه)
+  /// بر مبنای بدهکار/بستانکار بودن حساب‌های نقدی/بانکی در همان سند تعیین
+  /// می‌شود؛ اسنادی که اصلاً به حساب نقدی/بانکی نخورده‌اند (مثل سند
+  /// نهایی‌سازی) در این فهرست نمی‌آیند چون «تراکنش وجه» نیستند.
+  Future<List<Map<String, dynamic>>> recentCashEntries({int limit = 3}) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return [];
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+
+    return db.rawQuery('''
+      SELECT je.id as id, je.date as date, je.description as description,
+             COALESCE(SUM(l.debit),0) as inflow, COALESCE(SUM(l.credit),0) as outflow
+      FROM journal_entries je
+      JOIN journal_lines l ON l.entryId = je.id AND l.accountId IN ($placeholders)
+      GROUP BY je.id
+      ORDER BY je.date DESC, je.id DESC
+      LIMIT ?
+    ''', [...cashIds, limit]);
+  }
+
+  /// مبلغ مورد انتظار فعلی همه پروژه‌های Finalize‌نشده، در تعداد ثابتی
+  /// کوئری. دقیقاً همان تعریف currentExpectedAmount (برآورد اولیه +
+  /// رویدادهای تغییر قیمت پیش از نهایی‌سازی)، فقط به‌شکل دسته‌ای.
+  Future<Map<int, double>> expectedAmountForOpenProjects() async {
+    final db = await database;
+    final projectRows =
+        await db.query('projects', columns: ['id', 'agreedAmount'], where: 'finalAmount IS NULL');
+    if (projectRows.isEmpty) return {};
+
+    final eventRows = await db.rawQuery('''
+      SELECT projectId, COALESCE(SUM(amount),0) as total
+      FROM project_price_events
+      WHERE type IN (?, ?, ?)
+      GROUP BY projectId
+    ''', [kPriceEventAddition, kPriceEventReduction, kPriceEventAdjustment]);
+    final preFinalSums = {
+      for (final r in eventRows) r['projectId'] as int: (r['total'] as num).toDouble()
+    };
+
+    return {
+      for (final row in projectRows)
+        row['id'] as int: (row['agreedAmount'] as num).toDouble() + (preFinalSums[row['id'] as int] ?? 0)
+    };
+  }
+
   Future<double> currentExpectedAmount(int projectId) async {
     final project = await getProject(projectId);
     if (project == null) return 0;

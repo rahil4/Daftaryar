@@ -8,10 +8,11 @@ import '../../utils/dashboard_period.dart';
 import '../../utils/formatters.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
+import '../journal/journal_entry_detail_screen.dart';
+import '../reports/outstanding_receivables_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
-import 'widgets/kpi_card.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/trend_chart_widget.dart';
 import '../operational/operational_performance_screen.dart';
@@ -174,202 +175,266 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
   }
 
   Widget _buildContent(ManagementDashboardData data) {
-    // نکته حیاتی (مورد ۱۸): نبود فعالیت در بازه انتخابی به‌معنای نبود
-    // وضعیت مالی برای کل دفتر نیست - وضعیت مالی فعلی (بخش A) همیشه نمایش
-    // داده می‌شود، صرف‌نظر از این‌که بازه انتخابی فعالیتی داشته یا نه.
-    final hasAnyActivity = data.allProjects.isNotEmpty ||
-        data.netRevenue.value != 0 ||
-        data.customerReceipts != 0 ||
-        data.otherCashInflows != 0;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ---------- بخش A: وضعیت مالی فعلی (همیشه نمایان) ----------
-        CurrentStateSection(data: data),
+        // ---------- موجودی حساب‌ها (وضعیت فعلی، مستقل از بازه) ----------
+        _label('موجودی حساب‌ها · الان'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+            child: Column(
+              children: [
+                for (final b in data.bankBalances)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(b.name, style: const TextStyle(fontSize: 12.5)),
+                        Text(formatMoney(b.balance, withSuffix: false),
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                if (data.bankBalances.isNotEmpty) const Divider(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('جمع کل',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.brass)),
+                    Text(formatMoney(data.closingCash, withSuffix: false),
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.brass)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
 
-        // ---------- هشدارهای مدیریتی: بدون قایم‌شدن پشت سوییچ ----------
-        if (data.alerts.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          AlertsSection(data: data),
+        // ---------- انتخاب‌گر بازه ----------
+        PeriodSelectorWidget(
+          selected: _preset,
+          onChanged: (p) {
+            setState(() => _preset = p);
+            _load();
+          },
+        ),
+        const SizedBox(height: 12),
+
+        // ---------- دریافتی / پرداختی این بازه ----------
+        Row(
+          children: [
+            Expanded(
+                child: _SimpleStat(
+                    label: 'دریافتی',
+                    value: formatMoneyCompact(data.customerReceipts + data.otherCashInflows),
+                    color: AppColors.positive)),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _SimpleStat(
+                    label: 'پرداختی',
+                    value: formatMoneyCompact(data.projectPayments +
+                        data.projectOverheadPayments +
+                        data.officePayments +
+                        data.otherCashOutflows),
+                    color: AppColors.negative)),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // ---------- هزینه‌های این بازه (تفکیک پروژه/دفتر) ----------
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('هزینه‌های این بازه',
+                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                const SizedBox(height: 6),
+                _kv('پروژه‌ها', formatMoney(data.projectPayments, withSuffix: false)),
+                _kv('دفتر', formatMoney(data.officePayments, withSuffix: false)),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // ---------- نمودار روند ----------
+        TrendChartWidget(
+            title: 'روند این بازه', points: data.revenueTrend, color: AppColors.brass),
+        const SizedBox(height: 16),
+
+        // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------
+        Row(
+          children: [
+            Expanded(
+                child: _SimpleStat(
+                    label: 'مطالبات ›',
+                    value: formatMoneyCompact(data.receivableBalance),
+                    color: AppColors.brass,
+                    bordered: true,
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())))),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _SimpleStat(
+                    label: 'مانده تخمینی ›',
+                    value: formatMoneyCompact(data.estimatedRemainingTotal),
+                    color: AppColors.brass,
+                    bordered: true,
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())))),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // ---------- پروژه در جریان + پیش‌دریافت ----------
+        Row(
+          children: [
+            Expanded(
+                child: _SimpleStat(
+                    label: 'پروژه در جریان',
+                    value:
+                        '${pn(data.openProjectsCount)} · ${formatMoneyCompact(data.openProjectsTotal)}')),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _SimpleStat(
+                    label: 'پیش‌دریافت', value: formatMoneyCompact(data.advanceBalance))),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // ---------- آخرین تراکنش‌ها ----------
+        if (data.recentEntries.isNotEmpty) ...[
+          _label('آخرین تراکنش‌ها'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Column(
+                children: [
+                  for (final e in data.recentEntries)
+                    InkWell(
+                      onTap: () async {
+                        await Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.entryId)));
+                        _load();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(e.description,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12.5)),
+                                  const SizedBox(height: 2),
+                                  Text(formatJalaliLong(e.date),
+                                      style: const TextStyle(
+                                          fontSize: 10, color: AppColors.textSecondary)),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              '${e.isInflow ? '+' : '-'}${formatMoneyCompact(e.amount)}',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: e.isInflow ? AppColors.positive : AppColors.negative),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ],
 
-        if (!hasAnyActivity)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 36),
-            child: Center(
-              child: Text('در این بازه فعالیت مالی ثبت نشده است.',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-          )
-        else ...[
-          // ---------- بخش B: عملکرد دوره انتخاب‌شده ----------
+        // ---------- هشدارها (فقط اگر وجود داشته باشند) ----------
+        if (data.alerts.isNotEmpty) ...[
           const SizedBox(height: 8),
-          PeriodPerformanceSection(data: data),
-
-          // ---------- بخش C: وصول مطالبات دوره ----------
-          const SizedBox(height: 8),
-          ReceivableCollectionSection(data: data),
-
-          // ---------- بخش D + روند: دو ستونه در صفحه‌های عریض ----------
-          const SizedBox(height: 20),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final trend = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _sectionHeading('روند عملکرد'),
-                  TrendChartWidget(
-                      title: 'روند نتیجه عملیاتی', points: data.operatingResultTrend, color: AppColors.info),
-                ],
-              );
-              final cashFlow = CashPositionSection(data: data);
-              if (constraints.maxWidth > 700) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: trend),
-                    const SizedBox(width: 16),
-                    Expanded(child: cashFlow),
-                  ],
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [trend, const SizedBox(height: 20), cashFlow],
-              );
-            },
-          ),
-
-          // ---------- جزئیات ثانویه: پشت یک سوییچ کوچک، بدون تکرار KPIهای بالا ----------
-          const SizedBox(height: 20),
-          _DashboardDetailTabs(data: data),
+          AlertsSection(data: data),
         ],
         const SizedBox(height: 24),
       ],
     );
   }
 
-  Widget _sectionHeading(String title) {
+  Widget _label(String text) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(text, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
     );
   }
-}
 
-enum _DetailGroup { profitability, performance, settlement }
-
-/// جزئیات تحلیلی تکمیلی (نه اطلاعات اصلی مدیریتی که همه در بالا مستقیم
-/// نمایش داده می‌شوند) - این سوییچ عمداً کوچک‌تر از قبل شده چون سودآوری،
-/// نقدینگی، مطالبات و هشدارها دیگر پشت آن قایم نیستند؛ فقط نمودارهای روند
-/// اضافه، قیمت‌گذاری، عملکرد تک‌تک پروژه/مشتری، و تشخیص کامل داده اینجا
-/// باقی مانده‌اند - بدون تکرار KPIهایی که بالای صفحه از قبل دیده شده‌اند.
-class _DashboardDetailTabs extends StatefulWidget {
-  final ManagementDashboardData data;
-  const _DashboardDetailTabs({required this.data});
-
-  @override
-  State<_DashboardDetailTabs> createState() => _DashboardDetailTabsState();
-}
-
-class _DashboardDetailTabsState extends State<_DashboardDetailTabs> {
-  _DetailGroup _group = _DetailGroup.profitability;
-
-  @override
-  Widget build(BuildContext context) {
-    final data = widget.data;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _GroupSwitcher(selected: _group, onChanged: (g) => setState(() => _group = g)),
-        const SizedBox(height: 16),
-        switch (_group) {
-          _DetailGroup.profitability => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 200,
-                  child: KpiCard(title: 'حاشیه عملیاتی', kpi: data.operatingMargin, isPercentage: true),
-                ),
-                const SizedBox(height: 14),
-                TrendChartWidget(
-                    title: 'روند خالص تغییر نقدینگی', points: data.cashFlowTrend, color: AppColors.teal),
-                const SizedBox(height: 10),
-                TrendChartWidget(
-                    title: 'روند حاشیه سود', points: data.contributionMarginTrend, color: AppColors.brass),
-                PricingSection(data: data),
-              ],
-            ),
-          _DetailGroup.performance => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ProjectPerformanceSection(data: data),
-                CustomerPerformanceSection(data: data),
-              ],
-            ),
-          _DetailGroup.settlement => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SettlementSection(data: data),
-                DiagnosticsSection(data: data),
-              ],
-            ),
-        },
-      ],
-    );
-  }
-}
-
-/// سوییچ سه‌تایی به‌شکل Chip قابل‌کلیک، بدون وابستگی به TabController (طبق
-/// همان الگوی امن AccountingScreen - بدون تودرتویی اسکرول)
-class _GroupSwitcher extends StatelessWidget {
-  final _DetailGroup selected;
-  final ValueChanged<_DetailGroup> onChanged;
-  const _GroupSwitcher({required this.selected, required this.onChanged});
-
-  static const _labels = {
-    _DetailGroup.profitability: 'سودآوری تفصیلی',
-    _DetailGroup.performance: 'عملکرد پروژه/مشتری',
-    _DetailGroup.settlement: 'تسویه و تشخیص',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 34,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: _DetailGroup.values.map((g) {
-          final active = g == selected;
-          return Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(17),
-              onTap: () => onChanged(g),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: active ? AppColors.brass : AppColors.surface,
-                  borderRadius: BorderRadius.circular(17),
-                  border: Border.all(color: active ? AppColors.brass : AppColors.gridLine),
-                ),
-                child: Text(
-                  _labels[g]!,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: active ? const Color(0xFF15100A) : AppColors.textSecondary,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
+  Widget _kv(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 12)),
+          Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }
 }
+
+/// کارت آماری ساده و فشرده داشبورد - جایگزین KpiCard در چیدمان ساده‌شده،
+/// بدون درصد رشد و بدون تأکید بصری اضافه.
+class _SimpleStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color? color;
+  final bool bordered;
+  final VoidCallback? onTap;
+  const _SimpleStat(
+      {required this.label, required this.value, this.color, this.bordered = false, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final body = Padding(
+      padding: const EdgeInsets.all(11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: Text(value,
+                style: TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800, color: color ?? AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+
+    return Card(
+      shape: bordered
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: AppColors.brass, width: 0.8))
+          : null,
+      child: onTap == null
+          ? body
+          : InkWell(borderRadius: BorderRadius.circular(12), onTap: onTap, child: body),
+    );
+  }
+}
+
 
 /// ردیف دو دکمه اقدام سریع (دریافت/پرداخت)
 class _QuickActionsRow extends StatelessWidget {

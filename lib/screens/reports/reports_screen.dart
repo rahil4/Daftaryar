@@ -5,6 +5,11 @@ import 'package:shamsi_date/shamsi_date.dart';
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
 import '../../models/financial_reports.dart';
+import '../../models/management_dashboard_data.dart';
+import '../../services/management_dashboard_service.dart';
+import '../../utils/dashboard_period.dart';
+import '../dashboard/widgets/dashboard_sections.dart';
+import '../dashboard/widgets/period_selector_widget.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../operational/operational_performance_screen.dart';
@@ -25,7 +30,7 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 4, vsync: this);
+  late final TabController _tab = TabController(length: 5, vsync: this);
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +60,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
             Tab(text: 'تراز آزمایشی'),
             Tab(text: 'تحلیل و روند'),
             Tab(text: 'عملکرد عملیاتی'),
+            Tab(text: 'تحلیل مدیریتی'),
           ],
         ),
       ),
@@ -65,6 +71,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           _TrialBalanceTab(),
           _AnalysisTab(),
           OperationalPerformanceScreen(embedded: true),
+          _ManagementAnalysisTab(),
         ],
       ),
     );
@@ -956,6 +963,93 @@ class _KpiRow extends StatelessWidget {
           if (hint != null) ...[
             const SizedBox(height: 4),
             Text(hint!, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// تب «تحلیل مدیریتی» - بخش‌هایی که پیش‌تر در داشبورد بودند و برای استفاده
+/// روزمره لازم نیستند: KPIهای تفصیلی دوره، حرکت و نرخ‌های وصول مطالبات،
+/// جریان نقدی تفصیلی، عملکرد پروژه/مشتری، قیمت‌گذاری، تسویه و تشخیص داده.
+/// همه از همان ManagementDashboardService موجود می‌آیند - هیچ محاسبه مالی
+/// جدیدی اینجا انجام نمی‌شود.
+class _ManagementAnalysisTab extends StatefulWidget {
+  const _ManagementAnalysisTab();
+
+  @override
+  State<_ManagementAnalysisTab> createState() => _ManagementAnalysisTabState();
+}
+
+class _ManagementAnalysisTabState extends State<_ManagementAnalysisTab> {
+  final _service = ManagementDashboardService();
+  DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
+  ManagementDashboardData? _data;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final data = await _service.buildDashboard(preset: _preset);
+      setState(() {
+        _data = data;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString().replaceAll('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _data;
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          PeriodSelectorWidget(
+            selected: _preset,
+            onChanged: (p) {
+              setState(() => _preset = p);
+              _load();
+            },
+          ),
+          const SizedBox(height: 16),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 60),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text('خطا در بارگذاری: $_error', style: const TextStyle(color: AppColors.negative)),
+            )
+          else if (data != null) ...[
+            PeriodPerformanceSection(data: data),
+            ReceivableCollectionSection(data: data),
+            CashPositionSection(data: data),
+            ProjectPerformanceSection(data: data),
+            CustomerPerformanceSection(data: data),
+            PricingSection(data: data),
+            SettlementSection(data: data),
+            DiagnosticsSection(data: data),
+            const SizedBox(height: 24),
           ],
         ],
       ),

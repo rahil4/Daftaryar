@@ -9,7 +9,7 @@ import '../../utils/formatters.dart';
 import '../counterparties/counterparty_detail_screen.dart';
 import '../projects/project_detail_screen.dart';
 
-enum _ReceivablesView { byProject, byCounterparty, estimated }
+enum _ReceivablesView { byProject, byCounterparty, estimated, pendingProjects }
 
 /// لیست کامل (نه فقط چند مورد اول) پروژه‌ها و طرف‌حساب‌هایی که مانده طلب
 /// یا مانده تخمینی دارند - مرتب‌شده نزولی بر اساس مبلغ. «مانده طلب» (دو
@@ -22,7 +22,10 @@ enum _ReceivablesView { byProject, byCounterparty, estimated }
 /// واقعی حساب دریافتنی است، دیگری فقط یک برآورد پیش از قطعی‌شدن مبلغ).
 /// هیچ محاسبهٔ مالی جدیدی در این صفحه انجام نمی‌شود.
 class OutstandingReceivablesScreen extends StatefulWidget {
-  const OutstandingReceivablesScreen({super.key});
+  /// اگر true باشد، صفحه مستقیماً روی نمای «پروژه‌های معلق» باز می‌شود
+  /// (برای کلیک روی کارت پیش‌دریافت داشبورد).
+  final bool openPendingProjects;
+  const OutstandingReceivablesScreen({super.key, this.openPendingProjects = false});
 
   @override
   State<OutstandingReceivablesScreen> createState() => _OutstandingReceivablesScreenState();
@@ -31,10 +34,12 @@ class OutstandingReceivablesScreen extends StatefulWidget {
 class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScreen> {
   final _reporting = FinancialReportingService();
   final _db = DatabaseHelper.instance;
-  _ReceivablesView _view = _ReceivablesView.byProject;
+  late _ReceivablesView _view =
+      widget.openPendingProjects ? _ReceivablesView.pendingProjects : _ReceivablesView.byProject;
   bool _loading = true;
   List<ProjectFinancialReport> _outstandingProjects = [];
   List<_EstimatedOutstanding> _estimatedProjects = [];
+  List<_PendingProject> _pendingProjects = [];
   Map<int, String> _counterpartyNames = {};
 
   @override
@@ -69,9 +74,34 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
     }
     estimatedList.sort((a, b) => b.estimatedRemaining.compareTo(a.estimatedRemaining));
 
+    // پروژه‌های معلق: همه پروژه‌های Finalize‌نشده (حتی بدون پیش‌دریافت،
+    // چون درآمدشان هم معلق است). مرتب‌سازی طبق اولویت مدیریتی: ابتدا
+    // بیشترین پیش‌دریافت (تعهد مالی سنگین‌تر)، سپس در تساوی، قدیمی‌ترین
+    // پروژه اول (کاری که مدت بیشتری معلق مانده فوری‌تر است). پروژه‌های
+    // بدون هیچ پیش‌دریافتی به انتهای فهرست می‌روند - همچنان دیده می‌شوند
+    // ولی فوریت مالی کمتری دارند.
+    final advanceMap = await _db.advanceBalanceForOpenProjects();
+    final pending = allProjects
+        .where((p) => !p.isFinalized)
+        .map((p) => _PendingProject(
+              project: p,
+              advance: advanceMap[p.id] ?? 0,
+              counterpartyName: counterpartyNames[p.counterpartyId] ?? '—',
+            ))
+        .toList()
+      ..sort((a, b) {
+        final aHas = a.advance > 0;
+        final bHas = b.advance > 0;
+        if (aHas != bHas) return aHas ? -1 : 1; // بدون پیش‌دریافت، انتهای فهرست
+        final byAdvance = b.advance.compareTo(a.advance);
+        if (byAdvance != 0) return byAdvance;
+        return a.project.startDate.compareTo(b.project.startDate); // قدیمی‌تر جلوتر
+      });
+
     setState(() {
       _outstandingProjects = outstanding;
       _estimatedProjects = estimatedList;
+      _pendingProjects = pending;
       _counterpartyNames = counterpartyNames;
       _loading = false;
     });
@@ -101,10 +131,23 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
   @override
   Widget build(BuildContext context) {
     final isEstimatedView = _view == _ReceivablesView.estimated;
-    final grandTotal = isEstimatedView
-        ? _estimatedProjects.fold<double>(0, (s, p) => s + p.estimatedRemaining)
-        : _outstandingProjects.fold<double>(0, (s, p) => s + p.receivableBalance);
-    final isEmpty = isEstimatedView ? _estimatedProjects.isEmpty : _outstandingProjects.isEmpty;
+    final isPendingView = _view == _ReceivablesView.pendingProjects;
+    final double grandTotal;
+    final bool isEmpty;
+    final String totalLabel;
+    if (isPendingView) {
+      grandTotal = _pendingProjects.fold<double>(0, (s, p) => s + p.advance);
+      isEmpty = _pendingProjects.isEmpty;
+      totalLabel = 'جمع کل پیش‌دریافت‌ها';
+    } else if (isEstimatedView) {
+      grandTotal = _estimatedProjects.fold<double>(0, (s, p) => s + p.estimatedRemaining);
+      isEmpty = _estimatedProjects.isEmpty;
+      totalLabel = 'جمع کل مانده تخمینی';
+    } else {
+      grandTotal = _outstandingProjects.fold<double>(0, (s, p) => s + p.receivableBalance);
+      isEmpty = _outstandingProjects.isEmpty;
+      totalLabel = 'جمع کل طلب‌های باز';
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -136,7 +179,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(isEstimatedView ? 'جمع کل مانده تخمینی' : 'جمع کل طلب‌های باز',
+                          Text(totalLabel,
                               style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
                           Text(formatMoney(grandTotal),
                               style: const TextStyle(
@@ -151,13 +194,25 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                         style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
                       ),
                     ],
+                    if (isPendingView) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        'پیش‌دریافت یک تعهد است، نه درآمد. با نهایی‌سازی پروژه پس از تحویل کار،'
+                        ' درآمدش شناسایی می‌شود.',
+                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     if (isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 40),
                         child: Center(
                           child: Text(
-                              isEstimatedView ? 'هیچ مانده تخمینی‌ای وجود ندارد.' : 'هیچ طلب بازی وجود ندارد.',
+                              isPendingView
+                                  ? 'همه پروژه‌ها نهایی شده‌اند.'
+                                  : (isEstimatedView
+                                      ? 'هیچ مانده تخمینی‌ای وجود ندارد.'
+                                      : 'هیچ طلب بازی وجود ندارد.'),
                               style: const TextStyle(color: AppColors.textSecondary)),
                         ),
                       )
@@ -197,7 +252,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                               },
                             ),
                           ))
-                    else
+                    else if (_view == _ReceivablesView.estimated)
                       ..._estimatedProjects.map((e) => Card(
                             child: ListTile(
                               leading: const Icon(Icons.hourglass_empty, color: AppColors.brass),
@@ -211,7 +266,35 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
                                 _load();
                               },
                             ),
-                          )),
+                          ))
+                    else
+                      ..._pendingProjects.map((p) {
+                        final hasAdvance = p.advance > 0;
+                        return Card(
+                          child: ListTile(
+                            leading: Icon(
+                              hasAdvance ? Icons.account_balance_wallet_outlined : Icons.pending_outlined,
+                              color: hasAdvance ? AppColors.brass : AppColors.textSecondary,
+                            ),
+                            title: Text(p.project.title),
+                            subtitle: Text(
+                                '${p.counterpartyName} · از ${formatJalaliLong(p.project.startDate)}'),
+                            trailing: Text(
+                              hasAdvance ? formatMoneyCompact(p.advance) : 'بدون دریافت',
+                              style: TextStyle(
+                                fontSize: hasAdvance ? 14 : 11,
+                                fontWeight: hasAdvance ? FontWeight.w800 : FontWeight.normal,
+                                color: hasAdvance ? AppColors.brass : AppColors.textSecondary,
+                              ),
+                            ),
+                            onTap: () async {
+                              await Navigator.push(context,
+                                  MaterialPageRoute(builder: (_) => ProjectDetailScreen(project: p.project)));
+                              _load();
+                            },
+                          ),
+                        );
+                      }),
                   ],
                 ),
               ),
@@ -240,6 +323,13 @@ class _EstimatedOutstanding {
       {required this.project, required this.estimatedRemaining, required this.counterpartyName});
 }
 
+class _PendingProject {
+  final ProjectModel project;
+  final double advance;
+  final String counterpartyName;
+  _PendingProject({required this.project, required this.advance, required this.counterpartyName});
+}
+
 /// سوییچ سه‌تایی به‌شکل Chip قابل‌کلیک با اسکرول افقی (نه Row+Expanded) تا
 /// با برچسب‌های طولانی‌تر هم هرگز سرریز نشود.
 class _ViewSwitcher extends StatelessWidget {
@@ -251,6 +341,7 @@ class _ViewSwitcher extends StatelessWidget {
     _ReceivablesView.byProject: 'بر اساس پروژه',
     _ReceivablesView.byCounterparty: 'بر اساس طرف‌حساب',
     _ReceivablesView.estimated: 'مانده تخمینی',
+    _ReceivablesView.pendingProjects: 'پروژه‌های معلق',
   };
 
   @override

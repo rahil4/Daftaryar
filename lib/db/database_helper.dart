@@ -1952,6 +1952,24 @@ class DatabaseHelper {
     };
   }
 
+  /// مانده پیش‌دریافت همه پروژه‌های Finalize‌نشده، در یک کوئری (نه یک
+  /// فراخوانی به‌ازای هر پروژه). دقیقاً همان تعریف projectAdvanceBalance:
+  /// حساب پیش‌دریافت بستانکارطبیعی است، پس مانده = بستانکار - بدهکار.
+  Future<Map<int, double>> advanceBalanceForOpenProjects() async {
+    final db = await database;
+    final advanceAccount = await getCustomerAdvanceAccount();
+    if (advanceAccount == null) return {};
+    final rows = await db.rawQuery('''
+      SELECT l.projectId as projectId,
+             COALESCE(SUM(l.credit),0) - COALESCE(SUM(l.debit),0) as total
+      FROM journal_lines l
+      JOIN projects p ON p.id = l.projectId
+      WHERE l.accountId = ? AND l.projectId IS NOT NULL AND p.finalAmount IS NULL
+      GROUP BY l.projectId
+    ''', [advanceAccount.id]);
+    return {for (final r in rows) r['projectId'] as int: (r['total'] as num).toDouble()};
+  }
+
   Future<double> currentExpectedAmount(int projectId) async {
     final project = await getProject(projectId);
     if (project == null) return 0;
@@ -2345,11 +2363,40 @@ class DatabaseHelper {
   // موازی یا مانده جدیدی نمی‌سازند - فقط برای مصرف توسط FinancialMetricsService.
 
   /// درآمد ناخالص دفتر (حساب درآمد پروژه‌ها) در بازه دلخواه
+  /// درآمد ناخالص دفتر در بازه دلخواه - مجموع همه حساب‌های نوع «درآمد»،
+  /// نه فقط حساب کنترلی «درآمد پروژه‌ها».
+  ///
+  /// دلیل: دریافت نقدی بدون پروژه (مثلاً کار کوچکی که برایش پروژه تعریف
+  /// نشده) به هر حساب درآمدی که کاربر انتخاب کند ثبت می‌شود - «درآمد
+  /// نقشه‌برداری»، «سایر درآمدها» و... . اگر فقط حساب کنترلی خوانده شود،
+  /// آن درآمدها در نمودار درآمد، سود ناخالص، نتیجه عملیاتی و حاشیه سود
+  /// اصلاً دیده نمی‌شوند، در حالی که پولشان در موجودی و دریافتی‌ها هست -
+  /// یک ناسازگاری واقعی بین جریان نقدی و گزارش سودآوری.
+  ///
+  /// حساب «تخفیف خدمات» اینجا وارد نمی‌شود چون نوعش هزینه است (نه درآمد)
+  /// و جداگانه در officeDiscountTotal کسر می‌شود؛ پس خطر دوباره‌شماری
+  /// وجود ندارد.
   Future<double> officeGrossRevenue({String? fromDate, String? toDate}) async {
-    final account = await getProjectRevenueAccount();
-    if (account == null) return 0;
-    final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
-    return bal['balance']!;
+    final db = await database;
+    String where = "a.type = ?";
+    List<Object?> args = [kAccountIncome];
+    if (fromDate != null) {
+      where += ' AND je.date >= ?';
+      args.add(fromDate);
+    }
+    if (toDate != null) {
+      where += ' AND je.date <= ?';
+      args.add(toDate);
+    }
+    // حساب‌های درآمد بستانکارطبیعی‌اند: مانده = بستانکار - بدهکار
+    final result = await db.rawQuery('''
+      SELECT COALESCE(SUM(l.credit),0) - COALESCE(SUM(l.debit),0) as total
+      FROM journal_lines l
+      JOIN accounts a ON a.id = l.accountId
+      JOIN journal_entries je ON je.id = l.entryId
+      WHERE $where
+    ''', args);
+    return (result.first['total'] as num).toDouble();
   }
 
   /// مجموع تخفیف در بازه دلخواه

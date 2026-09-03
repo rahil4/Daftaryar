@@ -263,13 +263,26 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
           children: [
             Expanded(
                 child: _SimpleStat(
-                    label: 'پروژه در جریان',
+                    label: 'پروژه در جریان ›',
                     value:
-                        '${pn(data.openProjectsCount)} · ${formatMoneyCompact(data.openProjectsTotal)}')),
+                        '${pn(data.openProjectsCount)} · ${formatMoneyCompact(data.openProjectsTotal)}',
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const OutstandingReceivablesScreen(openPendingProjects: true))))),
             const SizedBox(width: 8),
             Expanded(
                 child: _SimpleStat(
-                    label: 'پیش‌دریافت', value: formatMoneyCompact(data.advanceBalance))),
+                    label: 'پیش‌دریافت ›',
+                    value: formatMoneyCompact(data.advanceBalance),
+                    bordered: true,
+                    color: AppColors.brass,
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const OutstandingReceivablesScreen(openPendingProjects: true))))),
           ],
         ),
         const SizedBox(height: 18),

@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
 import 'package:daftaryar/db/database_helper.dart';
+import 'package:daftaryar/models/account.dart';
 import 'package:daftaryar/models/counterparty.dart';
 import 'package:daftaryar/models/journal_entry.dart';
 import 'package:daftaryar/models/project.dart';
@@ -332,6 +333,50 @@ void main() {
           reason: '40 وصولی / (Opening=0 + NewReceivables=100) * 100 = 40٪');
     });
   });
+
+  // ==================== درآمد خارج از حساب کنترلی پروژه ====================
+  group('درآمد دفتر باید همه حساب‌های نوع درآمد را شامل شود', () {
+    test('دریافت نقدی بدون پروژه که به یک حساب درآمد غیرکنترلی ثبت شده،'
+        ' باید در درآمد ناخالص دفتر دیده شود (نه فقط حساب «درآمد پروژه‌ها»)', () async {
+      final cpId = await createCounterparty('رضا');
+      final cash = (await db.getCashAccounts()).first;
+
+      // یک حساب درآمد غیرکنترلی (مثل «درآمد نقشه‌برداری» پیش‌فرض) پیدا می‌کنیم
+      final incomeAccounts = await db.getAccounts(type: kAccountIncome);
+      final nonControlIncome = incomeAccounts.firstWhere((a) => a.systemKey == null);
+
+      // سناریوی واقعی: کاری انجام شده، ۱۰ میلیون نقد گرفته شده، بدون تعریف پروژه
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/06/10',
+        description: 'دریافت نقدی بدون پروژه',
+        createdAt: '1404/06/10',
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 10000000, counterpartyId: cpId),
+          JournalLineModel(accountId: nonControlIncome.id!, credit: 10000000, counterpartyId: cpId),
+        ],
+      ));
+
+      final gross = await db.officeGrossRevenue();
+      expect(gross, 10000000,
+          reason: 'پیش از این اصلاح، این درآمد کاملاً غایب بود چون فقط حساب کنترلی'
+              ' «درآمد پروژه‌ها» خوانده می‌شد - در حالی که پولش در موجودی و دریافتی‌ها بود');
+    });
+
+    test('تخفیف (که نوعش هزینه است) در درآمد ناخالص دوباره‌شماری نمی‌شود', () async {
+      final cpId = await createCounterparty('محمد');
+      final projectId = await createProject(cpId, agreedAmount: 100000000);
+      await db.finalizeProject(projectId: projectId, finalAmount: 100000000, date: '1404/06/01');
+      await db.recordProjectDiscount(projectId: projectId, amount: 5000000, date: '1404/06/02');
+
+      final gross = await db.officeGrossRevenue();
+      final discount = await db.officeDiscountTotal();
+      expect(gross, 100000000, reason: 'تخفیف نباید از درآمد ناخالص کسر شده باشد');
+      expect(discount, 5000000);
+      // درآمد خالص = ناخالص - تخفیف، دقیقاً یک‌بار
+      expect(gross - discount, 95000000);
+    });
+  });
+
 }
 
 /// کمکی برای ساخت یک سند هزینه مستقیم پروژه در تست‌ها (سیستمی، Debit

@@ -160,6 +160,32 @@ class DashboardPeriodResolver {
   /// مثل «۱۵ مرداد تا ۱۰ شهریور»، هیچ روزی خارج از بازه انتخابی وارد Trend
   /// نمی‌شود. برای Periodهای کامل ماه/سال (که fromDate/toDate خودشان دقیقاً
   /// اول/آخر ماه‌اند)، رفتار قبلی بدون تغییر باقی می‌ماند.
+  /// N ماه کامل منتهی به ماهِ تاریخ مرجع (شامل خودِ آن ماه) - مخصوص نمودار
+  /// روند. برخلاف monthlyBuckets که بازه انتخابی را تکه می‌کند، این تابع
+  /// همیشه چند ماه برمی‌گرداند؛ چون یک «روند» ذاتاً به چند نقطه نیاز دارد
+  /// و اگر بازه انتخابی کوتاه باشد (مثل «امروز» یا «این ماه»)، تقسیم آن
+  /// فقط یک نقطه تولید می‌کند که هیچ روندی نشان نمی‌دهد.
+  static List<DashboardPeriodRange> lastNMonths(int count, {Jalali? reference}) {
+    final ref = reference ?? Jalali.now();
+    final buckets = <DashboardPeriodRange>[];
+    for (var i = count - 1; i >= 0; i--) {
+      var year = ref.year;
+      var month = ref.month - i;
+      while (month <= 0) {
+        month += 12;
+        year -= 1;
+      }
+      final first = Jalali(year, month, 1);
+      final last = Jalali(year, month, first.monthLength);
+      buckets.add(DashboardPeriodRange(
+        fromDate: jalaliToString(first),
+        toDate: jalaliToString(last),
+        label: '${_monthNames[month - 1]} $year',
+      ));
+    }
+    return buckets;
+  }
+
   static List<DashboardPeriodRange> monthlyBuckets(String fromDate, String toDate) {
     final start = parseJalaliString(fromDate)!;
     final end = parseJalaliString(toDate)!;

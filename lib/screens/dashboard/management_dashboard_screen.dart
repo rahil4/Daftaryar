@@ -118,18 +118,6 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                 _PendingSmsBanner(count: _pendingSmsDrafts, onTap: _load),
               ],
               const SizedBox(height: 16),
-              PeriodSelectorWidget(
-                selected: _preset,
-                onChanged: (p) {
-                  setState(() => _preset = p);
-                  _load();
-                },
-              ),
-              if (_data != null) ...[
-                const SizedBox(height: 10),
-                _periodNotice(_data!.periodLabel),
-              ],
-              const SizedBox(height: 16),
               if (_loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 60),
@@ -148,28 +136,6 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  /// نوار فشردهٔ «بازه گزارش» - فقط periodLabel موجود را نمایش می‌دهد، هیچ
-  /// تاریخی خودش نمی‌سازد.
-  Widget _periodNotice(String label) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.gridLine),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.event_note_outlined, size: 14, color: AppColors.brass),
-          const SizedBox(width: 6),
-          Text('بازه گزارش: $label',
-              style: const TextStyle(fontSize: 12, color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
-        ],
       ),
     );
   }
@@ -265,7 +231,7 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
 
         // ---------- نمودار روند ----------
         TrendChartWidget(
-            title: 'روند این بازه', points: data.revenueTrend, color: AppColors.brass),
+            title: 'روند درآمد ماهانه', points: data.revenueTrend, color: AppColors.brass),
         const SizedBox(height: 16),
 
         // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------

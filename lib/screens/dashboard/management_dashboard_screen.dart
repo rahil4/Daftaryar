@@ -229,9 +229,14 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
         ),
         const SizedBox(height: 16),
 
-        // ---------- نمودار روند ----------
+        // ---------- نمودارهای روند ----------
         TrendChartWidget(
             title: 'روند درآمد ماهانه', points: data.revenueTrend, color: AppColors.brass),
+        const SizedBox(height: 10),
+        TrendChartWidget(
+            title: 'روند دریافت نقدی ماهانه',
+            points: data.receiptsTrend,
+            color: AppColors.positive),
         const SizedBox(height: 16),
 
         // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------

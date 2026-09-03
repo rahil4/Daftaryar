@@ -179,6 +179,10 @@ class ManagementDashboardData {
 
   // Trend Charts
   final List<TrendPoint> revenueTrend;
+
+  /// روند مجموع دریافتی‌های نقدی (از مشتریان + سایر) - جریان نقد ورودی،
+  /// نه درآمد شناسایی‌شده؛ این دو عمداً جدا نگه داشته می‌شوند.
+  final List<TrendPoint> receiptsTrend;
   final List<TrendPoint> operatingResultTrend;
   final List<TrendPoint> cashFlowTrend;
   final List<TrendPoint> contributionMarginTrend;
@@ -240,6 +244,7 @@ class ManagementDashboardData {
     required this.totalNegativeAdjustments,
     required this.netAdjustments,
     required this.revenueTrend,
+    required this.receiptsTrend,
     required this.operatingResultTrend,
     required this.cashFlowTrend,
     required this.contributionMarginTrend,

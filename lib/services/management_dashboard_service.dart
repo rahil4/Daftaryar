@@ -147,6 +147,7 @@ class ManagementDashboardService {
 
     // ---------- روند ماهانه (Period-Based، نه Lifetime) ----------
     List<TrendPoint> revenueTrend = [];
+    List<TrendPoint> receiptsTrend = [];
     List<TrendPoint> operatingResultTrend = [];
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
@@ -163,6 +164,7 @@ class ManagementDashboardService {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);
         revenueTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netRevenue));
+        receiptsTrend.add(TrendPoint(label: bucket.label, value: bucketReport.totalInflows));
         operatingResultTrend.add(TrendPoint(label: bucket.label, value: bucketReport.operatingResult));
         cashFlowTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netCashChange));
         final margin = bucketReport.netRevenue != 0
@@ -244,6 +246,7 @@ class ManagementDashboardService {
       totalNegativeAdjustments: totalNegativeAdj,
       netAdjustments: totalPositiveAdj - totalNegativeAdj,
       revenueTrend: revenueTrend,
+      receiptsTrend: receiptsTrend,
       operatingResultTrend: operatingResultTrend,
       cashFlowTrend: cashFlowTrend,
       contributionMarginTrend: marginTrend,

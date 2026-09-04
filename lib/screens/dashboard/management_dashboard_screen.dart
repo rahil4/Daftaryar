@@ -14,7 +14,7 @@ import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
-import 'widgets/trend_chart_widget.dart';
+import 'widgets/multi_trend_chart_widget.dart';
 import '../operational/operational_performance_screen.dart';
 
 /// تب یکپارچه «داشبورد مدیریتی» - ادغام اقدامات سریع/پیش‌نویس پیامکی با
@@ -229,14 +229,14 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
         ),
         const SizedBox(height: 16),
 
-        // ---------- نمودارهای روند ----------
-        TrendChartWidget(
-            title: 'روند درآمد ماهانه', points: data.revenueTrend, color: AppColors.brass),
-        const SizedBox(height: 10),
-        TrendChartWidget(
-            title: 'روند دریافت نقدی ماهانه',
-            points: data.receiptsTrend,
-            color: AppColors.positive),
+        // ---------- نمودار مقایسه‌ای درآمد و دریافت ----------
+        MultiTrendChartWidget(
+          title: 'درآمد و دریافت نقدی',
+          series: [
+            ChartSeries(label: 'درآمد', points: data.revenueTrend, color: AppColors.brass),
+            ChartSeries(label: 'دریافت نقدی', points: data.receiptsTrend, color: AppColors.positive),
+          ],
+        ),
         const SizedBox(height: 16),
 
         // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------

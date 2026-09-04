@@ -49,12 +49,18 @@ class TrendChartWidget extends StatelessWidget {
                       bottomTitles: AxisTitles(
                         sideTitles: SideTitles(
                           showTitles: true,
+                          // نام ماه‌های فارسی چند برابر معادل لاتین عرض
+                          // می‌گیرند؛ بدون interval، برچسب‌ها روی عرض
+                          // موبایل در هم می‌روند.
+                          interval: points.length <= 4 ? 1 : (points.length / 4).ceilToDouble(),
+                          reservedSize: 28,
                           getTitlesWidget: (value, meta) {
                             final idx = value.toInt();
                             if (idx < 0 || idx >= points.length) return const SizedBox.shrink();
                             return Padding(
-                              padding: const EdgeInsets.only(top: 4),
+                              padding: const EdgeInsets.only(top: 6),
                               child: Text(points[idx].label.split(' ').first,
+                                  maxLines: 1,
                                   style: const TextStyle(fontSize: 9, color: AppColors.textSecondary)),
                             );
                           },

@@ -203,4 +203,62 @@ class DashboardPeriodResolver {
     }
     return buckets;
   }
+
+  /// فهرست بازه‌های تک‌روزه بین دو تاریخ (شامل هر دو سر بازه) - برای نمودار
+  /// روند در بازه‌های کوتاه (هفته/ماه جاری) که تفکیک ماهانه فقط یک Bucket
+  /// (و در نتیجه یک نقطه بی‌فایده) تولید می‌کرد.
+  static List<DashboardPeriodRange> dailyBuckets(String fromDate, String toDate) {
+    final start = parseJalaliString(fromDate)!;
+    final end = parseJalaliString(toDate)!;
+    final buckets = <DashboardPeriodRange>[];
+    var cursor = start;
+    while (cursor.compareTo(end) <= 0) {
+      buckets.add(DashboardPeriodRange(
+        fromDate: jalaliToString(cursor),
+        toDate: jalaliToString(cursor),
+        label: '${pn(cursor.day)} ${_monthNames[cursor.month - 1]}',
+      ));
+      cursor = cursor.addDays(1);
+    }
+    return buckets;
+  }
+
+  /// N روز اخیر منتهی به تاریخ مرجع (شامل خودِ آن روز) - فقط برای بازه‌های
+  /// تک‌روزه انتخابی (مثل «امروز») که حتی تفکیک روزانه هم یک نقطه تنها
+  /// می‌دهد؛ یک روند معنادار به‌جایش لازم است.
+  static List<DashboardPeriodRange> lastNDays(int count, {Jalali? reference}) {
+    final ref = reference ?? Jalali.now();
+    final buckets = <DashboardPeriodRange>[];
+    for (var i = count - 1; i >= 0; i--) {
+      final day = ref.addDays(-i);
+      buckets.add(DashboardPeriodRange(
+        fromDate: jalaliToString(day),
+        toDate: jalaliToString(day),
+        label: '${pn(day.day)} ${_monthNames[day.month - 1]}',
+      ));
+    }
+    return buckets;
+  }
+
+  /// انتخاب خودکار Bucketهای نمودار روند بر مبنای طول واقعی بازه انتخابی -
+  /// به‌جای همیشه پرش به یک بازه ثابت (۶ ماه اخیر) که ربطی به انتخاب کاربر
+  /// نداشت. بازه‌های کوتاه (هفته/ماه جاری/سفارشی کوتاه) اکنون با جزئیات
+  /// روزانه *همان بازه انتخابی* نمایش داده می‌شوند - نه یک بازه متفاوت.
+  static List<DashboardPeriodRange> trendBuckets(String fromDate, String toDate) {
+    final start = parseJalaliString(fromDate)!;
+    final end = parseJalaliString(toDate)!;
+    final spanDays = end.julianDayNumber - start.julianDayNumber + 1;
+    if (spanDays <= 1) {
+      // بازه تک‌روزه (مثل «امروز») - تفکیک روزانه همین بازه هم فقط یک نقطه
+      // می‌دهد؛ ۱۴ روز اخیر به‌عنوان روند معنادار جایگزین آن است.
+      return lastNDays(14, reference: end);
+    }
+    if (spanDays <= 62) {
+      // هفته/ماه جاری/فصل کوتاه/بازه سفارشی کوتاه - جزئیات روزانه همان
+      // بازه انتخابی.
+      return dailyBuckets(fromDate, toDate);
+    }
+    // بازه‌های بلندتر (فصل/سال) - تفکیک ماهانه، مثل قبل.
+    return monthlyBuckets(fromDate, toDate);
+  }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/formatters.dart';
 
 /// یک سری داده برای نمودار چندخطی
 class ChartSeries {
@@ -129,6 +130,29 @@ class MultiTrendChartWidget extends StatelessWidget {
                       ),
                       borderData: FlBorderData(show: false),
                       lineBarsData: barsData,
+                      // نمایش جزئیات با لمس: تاریخ Bucket + مقدار دقیق هر
+                      // سری - قبلاً نمودار فقط شکل خط را نشان می‌داد، بدون
+                      // هیچ عدد قابل‌خواندنی.
+                      lineTouchData: LineTouchData(
+                        touchTooltipData: LineTouchTooltipData(
+                          getTooltipItems: (touchedSpots) {
+                            return touchedSpots.asMap().entries.map((entry) {
+                              final spot = entry.value;
+                              final idx = spot.x.toInt();
+                              final label = idx >= 0 && idx < labels.length ? labels[idx] : '';
+                              final s = series[spot.barIndex];
+                              final text = entry.key == 0 && label.isNotEmpty
+                                  ? '$label\n${s.label}: ${formatMoney(spot.y, withSuffix: false)}'
+                                  : '${s.label}: ${formatMoney(spot.y, withSuffix: false)}';
+                              return LineTooltipItem(
+                                text,
+                                TextStyle(
+                                    color: s.color, fontWeight: FontWeight.bold, fontSize: 11),
+                              );
+                            }).toList();
+                          },
+                        ),
+                      ),
                     ),
                   ),
                 ),

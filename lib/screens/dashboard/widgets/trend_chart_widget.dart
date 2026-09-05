@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
+import '../../../utils/formatters.dart';
 
 /// نمودار روند ماهانه ساده - نقاط null (غیرقابل‌محاسبه) به‌جای صفر، از
 /// نمودار حذف می‌شوند تا خط را به‌اشتباه به سمت صفر نکشند.
@@ -81,6 +82,21 @@ class TrendChartWidget extends StatelessWidget {
                         dotData: const FlDotData(show: true),
                       ),
                     ],
+                    // نمایش جزئیات با لمس: تاریخ + مقدار دقیق همان نقطه.
+                    lineTouchData: LineTouchData(
+                      touchTooltipData: LineTouchTooltipData(
+                        getTooltipItems: (touchedSpots) {
+                          return touchedSpots.map((spot) {
+                            final idx = spot.x.toInt();
+                            final label = idx >= 0 && idx < points.length ? points[idx].label : '';
+                            return LineTooltipItem(
+                              '$label\n${formatMoney(spot.y, withSuffix: false)}',
+                              TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
+                            );
+                          }).toList();
+                        },
+                      ),
+                    ),
                   ),
                 ),
                   ),

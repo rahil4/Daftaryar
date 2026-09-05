@@ -152,14 +152,11 @@ class ManagementDashboardService {
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
     if (includeTrend) {
-      // یک «روند» ذاتاً به چند نقطه نیاز دارد. تقسیم بازه‌های کوتاه (مثل
-      // «امروز» یا «این ماه») فقط یک Bucket تولید می‌کند که نموداری با یک
-      // نقطهٔ تنها می‌سازد - عملاً بی‌فایده. در آن حالت به‌جایش ۶ ماه اخیر
-      // نمایش داده می‌شود تا نمودار واقعاً یک روند نشان دهد.
-      var buckets = DashboardPeriodResolver.monthlyBuckets(range.fromDate, range.toDate);
-      if (buckets.length < 2) {
-        buckets = DashboardPeriodResolver.lastNMonths(6);
-      }
+      // Bucketهای نمودار روند باید همان بازه‌ای را نشان دهند که کاربر
+      // انتخاب کرده - نه همیشه یک بازه ثابت متفاوت (۶ ماه اخیر) که ربطی به
+      // انتخاب نداشت. trendBuckets بر مبنای طول واقعی بازه، جزئیات روزانه
+      // (بازه‌های کوتاه) یا ماهانه (بازه‌های بلند) را خودکار انتخاب می‌کند.
+      final buckets = DashboardPeriodResolver.trendBuckets(range.fromDate, range.toDate);
       for (final bucket in buckets) {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);

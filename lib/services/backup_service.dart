@@ -53,7 +53,16 @@ class BackupService {
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final projects = await _db.getProjects();
     final accounts = await _db.getAccounts();
-    final entries = await _db.getJournalEntries();
+    // getJournalEntries برای نمایش (جدیدترین اول) با 'date DESC, id DESC'
+    // مرتب می‌شود. اگر همین ترتیب مستقیم در فایل پشتیبان صادر شود، در
+    // بازیابی اتمیک (replaceExisting) اسناد به ترتیب معکوس دوباره درج
+    // می‌شوند - و کنترل Overpayment سطح طرف‌حساب/پروژه که مانده لحظه‌ای
+    // حساب را می‌سنجد، اسناد چندگانه هم‌تاریخ (بسیار رایج) را به‌اشتباه رد
+    // می‌کند، چون سند «دریافت» پیش از سند «شناسایی درآمد» که طلب را ساخته
+    // بازپخش می‌شود. ترتیب صدور باید همان ترتیب واقعی درج (id صعودی) باشد
+    // تا بازیابی، دقیقاً به همان توالی که رخ داده، بازپخش شود.
+    final entries = await _db.getJournalEntries()
+      ..sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
     final allSettings = await _db.getAllSettings();
     // امنیت (اولویت ۳ این مرحله): تنظیمات حساس/امنیتی (pin_hash و هر
     // Setting دیگری که ماهیت قفل دستگاه را کنترل می‌کند) هرگز نباید در

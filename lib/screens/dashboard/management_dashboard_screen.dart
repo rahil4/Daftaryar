@@ -16,7 +16,6 @@ import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/multi_trend_chart_widget.dart';
-import '../operational/operational_performance_screen.dart';
 
 /// تب یکپارچه «داشبورد مدیریتی» - ادغام اقدامات سریع/پیش‌نویس پیامکی با
 /// داشبورد مدیریتی (ManagementDashboardService). این صفحه فقط مصرف‌کننده
@@ -102,14 +101,6 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
             icon: const Icon(Icons.refresh),
             tooltip: 'به‌روزرسانی',
             onPressed: _loading ? null : _load,
-          ),
-          IconButton(
-            icon: const Icon(Icons.query_stats_outlined),
-            tooltip: 'عملکرد عملیاتی',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const OperationalPerformanceScreen()),
-            ),
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),

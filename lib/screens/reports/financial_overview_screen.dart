@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../db/database_helper.dart';
+import '../../models/account.dart';
 import '../../models/management_dashboard_data.dart';
 import '../../models/operational_performance.dart';
 import '../../services/management_dashboard_service.dart';
@@ -11,6 +13,13 @@ import '../../widgets/section_title.dart';
 import '../dashboard/widgets/dashboard_sections.dart';
 import '../dashboard/widgets/period_selector_widget.dart';
 import '../dashboard/widgets/trend_chart_widget.dart';
+
+/// یک ردیف حساب سرمایه (والد یا زیرحساب مثل «برداشت مالک») + مانده فعلی‌اش.
+class _EquityAccountRow {
+  final AccountModel account;
+  final double balance;
+  const _EquityAccountRow({required this.account, required this.balance});
+}
 
 /// صفحه یکپارچه «وضعیت مالی» - جایگزین سه تب پیشین گزارش‌ها (تحلیل و روند،
 /// عملکرد عملیاتی، تحلیل مدیریتی) که هرکدام سرویس محاسباتی و انتخاب‌گر بازه
@@ -32,11 +41,13 @@ class FinancialOverviewScreen extends StatefulWidget {
 }
 
 class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
+  final _db = DatabaseHelper.instance;
   final _managementService = ManagementDashboardService();
   final _operationalService = OperationalPerformanceService();
   DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
   ManagementDashboardData? _management;
   OperationalPerformanceData? _operational;
+  List<_EquityAccountRow> _equityRows = [];
   bool _loading = true;
   String? _error;
 
@@ -44,6 +55,19 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  /// مانده حساب سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») - وضعیت فعلی/کل
+  /// عمر داده (مثل مانده مطالبات)، نه محدود به بازه انتخابی؛ چون این‌ها
+  /// اقلام ترازنامه‌اند (Balance Sheet)، نه جریان یک دوره.
+  Future<List<_EquityAccountRow>> _loadEquityRows() async {
+    final accounts = await _db.getAccounts(type: kAccountEquity);
+    final rows = <_EquityAccountRow>[];
+    for (final acc in accounts) {
+      final bal = await _db.accountBalance(acc.id!);
+      rows.add(_EquityAccountRow(account: acc, balance: bal['balance']!));
+    }
+    return rows;
   }
 
   Future<void> _load() async {
@@ -55,9 +79,11 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
       final period = await _operationalService.resolvePeriod(_preset);
       final management = await _managementService.buildDashboard(preset: _preset);
       final operational = await _operationalService.buildOperationalPerformance(period: period);
+      final equityRows = await _loadEquityRows();
       setState(() {
         _management = management;
         _operational = operational;
+        _equityRows = equityRows;
         _loading = false;
       });
     } catch (e) {
@@ -133,6 +159,7 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
       PeriodPerformanceSection(data: m),
       CashPositionSection(data: m),
       ReceivableCollectionSection(data: m),
+      if (_equityRows.isNotEmpty) _EquitySection(rows: _equityRows),
 
       const SizedBox(height: 8),
       const SectionTitle('روند'),
@@ -191,6 +218,65 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
 }
 
 String _pctText(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}٪';
+
+/// بخش سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») - مانده فعلی/کل عمر هر
+/// حساب، مستقیم از دفتر کل (DatabaseHelper.accountBalance)، نه یک فرمول
+/// جدید. اگر کاربر زیرحسابی زیر «سرمایه» نساخته باشد، فقط همان یک حساب
+/// پیش‌فرض نمایش داده می‌شود.
+class _EquitySection extends StatelessWidget {
+  final List<_EquityAccountRow> rows;
+  const _EquitySection({required this.rows});
+
+  Widget _row(String label, double value, {bool indented = false, bool bold = false}) {
+    return Padding(
+      padding: EdgeInsets.only(right: indented ? 16 : 0, top: 4, bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: indented ? 12.5 : 13,
+                  color: indented ? AppColors.textSecondary : AppColors.textPrimary,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.normal)),
+          Text(formatMoney(value, withSuffix: false),
+              style: TextStyle(
+                  fontSize: indented ? 12.5 : 13,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                  color: value < 0 ? AppColors.negative : AppColors.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parents = rows.where((r) => r.account.parentId == null).toList();
+    final total = rows.fold<double>(0, (s, r) => s + r.balance);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionTitle('سرمایه'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Column(
+              children: [
+                for (final parent in parents) ...[
+                  _row(parent.account.name, parent.balance),
+                  for (final child in rows.where((r) => r.account.parentId == parent.account.id))
+                    _row(child.account.name, child.balance, indented: true),
+                ],
+                const Divider(),
+                _row('جمع سرمایه', total, bold: true),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// بخش قابل‌جمع‌شدن برای جزئیاتی که روزمره لازم نیستند ولی نباید گم شوند.
 class _DetailAccordion extends StatelessWidget {

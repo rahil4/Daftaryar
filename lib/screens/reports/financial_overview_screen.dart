@@ -57,14 +57,15 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
     _load();
   }
 
-  /// مانده حساب سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») - وضعیت فعلی/کل
-  /// عمر داده (مثل مانده مطالبات)، نه محدود به بازه انتخابی؛ چون این‌ها
-  /// اقلام ترازنامه‌اند (Balance Sheet)، نه جریان یک دوره.
-  Future<List<_EquityAccountRow>> _loadEquityRows() async {
+  /// حرکت حساب سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») **در بازه انتخابی**
+  /// - همان accountBalance موجود، فقط با fromDate/toDate همان بازه‌ای که
+  /// PeriodSelectorWidget انتخاب کرده (دقیقاً مثل ReceivableCollectionSection
+  /// که «وصول مطالبات دوره» را نشان می‌دهد، نه مانده کل‌عمر).
+  Future<List<_EquityAccountRow>> _loadEquityRows(DashboardPeriodRange period) async {
     final accounts = await _db.getAccounts(type: kAccountEquity);
     final rows = <_EquityAccountRow>[];
     for (final acc in accounts) {
-      final bal = await _db.accountBalance(acc.id!);
+      final bal = await _db.accountBalance(acc.id!, fromDate: period.fromDate, toDate: period.toDate);
       rows.add(_EquityAccountRow(account: acc, balance: bal['balance']!));
     }
     return rows;
@@ -79,7 +80,7 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
       final period = await _operationalService.resolvePeriod(_preset);
       final management = await _managementService.buildDashboard(preset: _preset);
       final operational = await _operationalService.buildOperationalPerformance(period: period);
-      final equityRows = await _loadEquityRows();
+      final equityRows = await _loadEquityRows(period);
       setState(() {
         _management = management;
         _operational = operational;
@@ -219,10 +220,11 @@ class _FinancialOverviewScreenState extends State<FinancialOverviewScreen> {
 
 String _pctText(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}٪';
 
-/// بخش سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») - مانده فعلی/کل عمر هر
-/// حساب، مستقیم از دفتر کل (DatabaseHelper.accountBalance)، نه یک فرمول
-/// جدید. اگر کاربر زیرحسابی زیر «سرمایه» نساخته باشد، فقط همان یک حساب
-/// پیش‌فرض نمایش داده می‌شود.
+/// بخش سرمایه و زیرحساب‌هایش (مثل «برداشت مالک») - حرکت هر حساب **در بازه
+/// انتخابی** (نه مانده کل‌عمر)، مستقیم از دفتر کل
+/// (DatabaseHelper.accountBalance با fromDate/toDate همان بازه)، بدون هیچ
+/// فرمول جدید. اگر کاربر زیرحسابی زیر «سرمایه» نساخته باشد، فقط همان یک
+/// حساب پیش‌فرض نمایش داده می‌شود.
 class _EquitySection extends StatelessWidget {
   final List<_EquityAccountRow> rows;
   const _EquitySection({required this.rows});
@@ -256,7 +258,14 @@ class _EquitySection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionTitle('سرمایه'),
+        const SectionTitle('سرمایه (بازه انتخابی)'),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text(
+            'حرکت هر حساب فقط در همین بازه - نه مانده کل‌عمر.',
+            style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+          ),
+        ),
         Card(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -268,7 +277,7 @@ class _EquitySection extends StatelessWidget {
                     _row(child.account.name, child.balance, indented: true),
                 ],
                 const Divider(),
-                _row('جمع سرمایه', total, bold: true),
+                _row('خالص تغییر سرمایه', total, bold: true),
               ],
             ),
           ),

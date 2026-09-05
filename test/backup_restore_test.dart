@@ -564,9 +564,8 @@ void main() {
       final projectB = await createProject(cpId, agreedAmount: 50000000);
       final cash = (await db.getCashAccounts()).first;
 
-      // پروژه A: نهایی‌شده + تخفیف + دریافت جزئی
+      // پروژه A: نهایی‌شده + دریافت جزئی
       await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: '1404/02/01');
-      await db.recordProjectDiscount(projectId: projectA, amount: 5000000, date: '1404/02/02');
       await db.receiveProjectPayment(
           projectId: projectA, cashAccountId: cash.id!, amount: 40000000, date: '1404/02/05');
       // پروژه B: نهایی‌نشده + پیش‌دریافت

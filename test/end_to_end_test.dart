@@ -25,10 +25,16 @@ import 'package:daftaryar/models/project_price_event.dart';
 import 'package:daftaryar/services/data_health_service.dart';
 import 'package:daftaryar/services/management_dashboard_service.dart';
 import 'package:daftaryar/utils/dashboard_period.dart';
+import 'package:daftaryar/utils/formatters.dart';
 
 void main() {
   final db = DatabaseHelper.instance;
   final dashboard = ManagementDashboardService();
+
+  // تاریخ‌ها باید پویا باشند: تست‌هایی که Preset مثل thisYear را می‌سنجند،
+  // با تاریخ ثابت (مثلاً ۱۴۰۴) در سال‌های بعد می‌شکنند چون اسناد خارج از
+  // بازه محاسبه‌شده می‌افتند. این یک باگ در خودِ تست است، نه در برنامه.
+  final today = todayJalaliString();
 
   setUpAll(() {
     sqfliteFfiInit();
@@ -42,8 +48,8 @@ void main() {
   Future<int> createCounterparty(String name) async {
     return db.insertCounterparty(CounterpartyModel(
       name: name,
-      createdAt: '1404/01/01',
-      updatedAt: '1404/01/01',
+      createdAt: today,
+      updatedAt: today,
       roles: const ['مشتری'],
     ));
   }
@@ -54,9 +60,9 @@ void main() {
       counterpartyId: cpId,
       projectTypes: [kProjectTypes.first],
       status: kProjectStatuses.first,
-      startDate: '1404/01/01',
+      startDate: today,
       agreedAmount: amount,
-      createdAt: '1404/01/01',
+      createdAt: today,
     ));
   }
 
@@ -78,7 +84,7 @@ void main() {
 
       // ---------- مرحله ۲: پیش‌دریافت ۳۰ میلیونی ----------
       await db.receiveProjectPayment(
-          projectId: projectId, cashAccountId: cash.id!, amount: 30000000, date: '1404/02/01');
+          projectId: projectId, cashAccountId: cash.id!, amount: 30000000, date: today);
 
       summary = await db.projectFinancialSummary(projectId);
       expect(summary['totalReceived'], 30000000);
@@ -92,7 +98,7 @@ void main() {
         projectId: projectId,
         type: kPriceEventAddition,
         amount: 20000000,
-        date: '1404/02/15',
+        date: today,
         reason: 'کار اضافه',
       );
       expect(await db.currentExpectedAmount(projectId), 120000000,
@@ -100,7 +106,7 @@ void main() {
 
       // ---------- مرحله ۴: نهایی‌سازی (لحظه شناسایی درآمد) ----------
       await db.finalizeProject(
-          projectId: projectId, finalAmount: 120000000, date: '1404/03/01');
+          projectId: projectId, finalAmount: 120000000, date: today);
 
       summary = await db.projectFinancialSummary(projectId);
       expect(summary['isFinalized'], true);
@@ -114,7 +120,7 @@ void main() {
 
       // ---------- مرحله ۵: تخفیف ۱۰ میلیونی ----------
       await db.recordProjectDiscount(
-          projectId: projectId, amount: 10000000, date: '1404/03/05');
+          projectId: projectId, amount: 10000000, date: today);
 
       summary = await db.projectFinancialSummary(projectId);
       expect(summary['discount'], 10000000);
@@ -123,7 +129,7 @@ void main() {
 
       // ---------- مرحله ۶: تسویه کامل ----------
       await db.receiveProjectPayment(
-          projectId: projectId, cashAccountId: cash.id!, amount: 80000000, date: '1404/03/10');
+          projectId: projectId, cashAccountId: cash.id!, amount: 80000000, date: today);
 
       summary = await db.projectFinancialSummary(projectId);
       expect(summary['totalReceived'], 110000000, reason: '۳۰ + ۸۰');
@@ -152,14 +158,14 @@ void main() {
 
       // پروژه A: نهایی‌شده با طلب باقی‌مانده
       final projectA = await createProject(cpId, amount: 100000000, title: 'پروژه A');
-      await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: '1404/02/01');
+      await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: today);
       await db.receiveProjectPayment(
-          projectId: projectA, cashAccountId: cash.id!, amount: 60000000, date: '1404/02/10');
+          projectId: projectA, cashAccountId: cash.id!, amount: 60000000, date: today);
 
       // پروژه B: نهایی‌نشده با پیش‌دریافت
       final projectB = await createProject(cpId, amount: 50000000, title: 'پروژه B');
       await db.receiveProjectPayment(
-          projectId: projectB, cashAccountId: cash.id!, amount: 20000000, date: '1404/02/15');
+          projectId: projectB, cashAccountId: cash.id!, amount: 20000000, date: today);
 
       // مقادیر مرجع از سطح پروژه
       final arA = await db.projectReceivableBalance(projectA);
@@ -189,9 +195,9 @@ void main() {
       final nonControlIncome = incomeAccounts.firstWhere((a) => a.systemKey == null);
 
       await db.createManualJournal(JournalEntryModel(
-        date: '1404/02/20',
+        date: today,
         description: 'کار کوچک بدون پروژه',
-        createdAt: '1404/02/20',
+        createdAt: today,
         lines: [
           JournalLineModel(accountId: cash.id!, debit: 10000000, counterpartyId: cpId),
           JournalLineModel(accountId: nonControlIncome.id!, credit: 10000000, counterpartyId: cpId),

@@ -39,7 +39,11 @@ class TrendChartWidget extends StatelessWidget {
             else
               SizedBox(
                 height: 140,
-                child: LineChart(
+                child: Padding(
+                  // لیبل ماه اول و آخر روی لبه نمودار قرار می‌گیرند و بدون
+                  // این حاشیه از کارت بیرون زده و بریده می‌شوند.
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: LineChart(
                   LineChartData(
                     gridData: const FlGridData(show: false),
                     titlesData: FlTitlesData(
@@ -79,7 +83,8 @@ class TrendChartWidget extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
+                  ),
+                ),
           ],
         ),
       ),

@@ -617,4 +617,41 @@ void main() {
               ' (بدون این اصلاح، otherKey مستقیم null بود چون بانک ملی خودش systemKey ندارد)');
     });
   });
+
+  group('حساب‌های کنترلی — systemKey (رگرسیون باگ بحرانی صفر شدن همه مانده‌ها)', () {
+    test('همه حساب‌های کنترلی باید systemKey داشته باشند، وگرنه محاسبات'
+        ' مطالبات/پیش‌دریافت/بستانکاری بی‌سروصدا صفر برمی‌گردند', () async {
+      // این تست از یک باگ واقعی محافظت می‌کند: ستون systemKey بعداً به
+      // جدول accounts اضافه شد ولی Migration آن را برای حساب‌های موجود پر
+      // نمی‌کرد. چون _projectControlAccountBalance وقتی حساب را پیدا نکند
+      // به‌جای خطا، صفر برمی‌گرداند، این نقص هیچ نشانه‌ای نشان نمی‌داد -
+      // فقط همه اعداد داشبورد صفر بودند در حالی که اسناد واقعی وجود داشتند.
+      expect(await db.getReceivableAccount(), isNotNull, reason: 'حساب دریافتنی باید یافت شود');
+      expect(await db.getPayableAccount(), isNotNull);
+      expect(await db.getCustomerAdvanceAccount(), isNotNull);
+      expect(await db.getCustomerCreditAccount(), isNotNull);
+      expect(await db.getProjectRevenueAccount(), isNotNull);
+      expect(await db.getProjectOverheadAccount(), isNotNull);
+      expect(await db.getServiceDiscountAccount(), isNotNull);
+      expect((await db.getCashAccounts()), isNotEmpty, reason: 'صندوق/بانک باید یافت شوند');
+    });
+
+    test('پیش‌دریافت یک پروژه نهایی‌نشده واقعاً محاسبه می‌شود (نه صفر)', () async {
+      final cpId = await createCounterparty('مشتری پیش‌دریافت');
+      final projectId = await createProject(cpId, agreedAmount: 100000000);
+      final cash = (await db.getCashAccounts()).first;
+
+      await db.receiveProjectPayment(
+          projectId: projectId, cashAccountId: cash.id!, amount: 30000000, date: '1404/06/01');
+
+      final advance = await db.projectAdvanceBalance(projectId);
+      expect(advance, 30000000,
+          reason: 'پروژه نهایی‌نشده: دریافت باید به پیش‌دریافت برود و در مانده دیده شود');
+
+      // و باید در محاسبه دسته‌ای داشبورد هم دیده شود
+      final batch = await db.advanceBalanceForOpenProjects();
+      expect(batch[projectId], 30000000,
+          reason: 'محاسبه دسته‌ای داشبورد باید همان عدد را بدهد');
+    });
+  });
 }

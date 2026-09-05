@@ -92,41 +92,44 @@ class MultiTrendChartWidget extends StatelessWidget {
             else
               SizedBox(
                 height: 150,
-                child: LineChart(
-                  LineChartData(
-                    gridData: const FlGridData(show: false),
-                    titlesData: FlTitlesData(
-                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          // نام ماه‌های فارسی («اردیبهشت») چند برابر معادل
-                          // لاتین عرض می‌گیرند. بدون تعیین interval،
-                          // fl_chart برای هر نقطه یک برچسب می‌گذارد و روی
-                          // عرض موبایل همه در هم می‌روند. با این محاسبه،
-                          // حداکثر ۴ برچسب نمایش داده می‌شود.
-                          interval: labels.length <= 4 ? 1 : (labels.length / 4).ceilToDouble(),
-                          reservedSize: 28,
-                          getTitlesWidget: (value, meta) {
-                            final idx = value.toInt();
-                            if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                labels[idx].split(' ').first,
-                                maxLines: 1,
-                                overflow: TextOverflow.visible,
-                                style: const TextStyle(fontSize: 9, color: AppColors.textSecondary),
-                              ),
-                            );
-                          },
+                child: Padding(
+                  // لیبل ماه اول و آخر دقیقاً روی لبه نمودار قرار می‌گیرند
+                  // و بدون این حاشیه، از کارت بیرون زده و بریده می‌شوند.
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: LineChart(
+                    LineChartData(
+                      gridData: const FlGridData(show: false),
+                      titlesData: FlTitlesData(
+                        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            // نام ماه‌های فارسی («اردیبهشت») چند برابر معادل
+                            // لاتین عرض می‌گیرند. بدون تعیین interval،
+                            // fl_chart برای هر نقطه یک برچسب می‌گذارد و روی
+                            // عرض موبایل همه در هم می‌روند.
+                            interval: labels.length <= 4 ? 1 : (labels.length / 4).ceilToDouble(),
+                            reservedSize: 28,
+                            getTitlesWidget: (value, meta) {
+                              final idx = value.toInt();
+                              if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  labels[idx].split(' ').first,
+                                  maxLines: 1,
+                                  style: const TextStyle(fontSize: 9, color: AppColors.textSecondary),
+                                ),
+                              );
+                            },
+                          ),
                         ),
                       ),
+                      borderData: FlBorderData(show: false),
+                      lineBarsData: barsData,
                     ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: barsData,
                   ),
                 ),
               ),

@@ -27,7 +27,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -128,6 +128,46 @@ class DatabaseHelper {
           typeId = typeRows.first['id'] as int;
         }
         await db.insert('project_type_assignments', {'projectId': p['id'] as int, 'typeId': typeId});
+      }
+    }
+    if (oldVersion < 5) {
+      // رفع باگ بحرانی: ستون systemKey بعداً به جدول accounts اضافه شد، ولی
+      // هیچ Migration ای آن را برای حساب‌های موجود پر نکرده بود - فقط یک
+      // ایندکس یکتایی ساخته شده بود. نتیجه: در دیتابیس‌هایی که پیش از
+      // معرفی این ستون ساخته شده‌اند، همه حساب‌های کنترلی systemKey=NULL
+      // دارند، پس _accountBySystemKey هیچ‌چیز پیدا نمی‌کند و
+      // _projectControlAccountBalance بی‌سروصدا صفر برمی‌گرداند - یعنی
+      // مطالبات، پیش‌دریافت، بستانکاری مشتری و همه شاخص‌های وابسته همیشه
+      // صفر نمایش داده می‌شوند، در حالی که اسناد واقعی در دفتر وجود دارند.
+      //
+      // نگاشت بر مبنای «کد حساب» انجام می‌شود نه نام، چون کاربر ممکن است
+      // نام را تغییر داده باشد ولی کد استاندارد دست‌نخورده می‌ماند. اگر
+      // حسابی با آن کد وجود نداشته باشد یا از قبل systemKey داشته باشد،
+      // دست‌نخورده رها می‌شود (شرط systemKey IS NULL).
+      const codeToSystemKey = {
+        '1000': kSystemKeyCash,
+        '1010': kSystemKeyBank,
+        '1100': kSystemKeyReceivable,
+        '2000': kSystemKeyPayable,
+        '2010': kSystemKeyCustomerAdvance,
+        '2020': kSystemKeyCustomerCredit,
+        '4020': kSystemKeyProjectRevenue,
+        '5050': kSystemKeyDirectProjectCost,
+        '5060': kSystemKeyProjectOverhead,
+        '5070': kSystemKeyServiceDiscount,
+      };
+      for (final entry in codeToSystemKey.entries) {
+        // اگر همان systemKey از قبل به حساب دیگری داده شده، دوباره ندهیم
+        // (قید یکتایی می‌شکند و کل Migration شکست می‌خورد).
+        final existing =
+            await db.query('accounts', where: 'systemKey = ?', whereArgs: [entry.value], limit: 1);
+        if (existing.isNotEmpty) continue;
+        await db.update(
+          'accounts',
+          {'systemKey': entry.value},
+          where: 'code = ? AND systemKey IS NULL',
+          whereArgs: [entry.key],
+        );
       }
     }
   }

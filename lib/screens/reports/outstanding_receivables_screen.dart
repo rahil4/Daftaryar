@@ -37,6 +37,7 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
   late _ReceivablesView _view =
       widget.openPendingProjects ? _ReceivablesView.pendingProjects : _ReceivablesView.byProject;
   bool _loading = true;
+  String? _error;
   List<ProjectFinancialReport> _outstandingProjects = [];
   List<_EstimatedOutstanding> _estimatedProjects = [];
   List<_PendingProject> _pendingProjects = [];
@@ -49,7 +50,23 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await _loadData();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString().replaceAll('Exception: ', '');
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadData() async {
     final reports = await _reporting.getProjectReports();
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final counterpartyNames = {for (final c in counterparties) c.id!: c.name};
@@ -163,6 +180,24 @@ class _OutstandingReceivablesScreenState extends State<OutstandingReceivablesScr
       body: BlueprintGridBackground(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline, color: AppColors.negative, size: 36),
+                          const SizedBox(height: 12),
+                          Text(_error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: AppColors.negative, fontSize: 13)),
+                          const SizedBox(height: 16),
+                          OutlinedButton(onPressed: _load, child: const Text('تلاش دوباره')),
+                        ],
+                      ),
+                    ),
+                  )
             : RefreshIndicator(
                 onRefresh: _load,
                 child: ListView(

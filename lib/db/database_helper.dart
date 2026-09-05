@@ -10,6 +10,32 @@ import '../models/journal_entry.dart';
 import '../models/sms_draft.dart';
 import '../utils/formatters.dart';
 
+/// خطای نبود حساب کنترلی سیستمی.
+///
+/// این وضعیت هرگز عادی نیست: حساب‌های کنترلی (دریافتنی، پرداختنی،
+/// پیش‌دریافت، بستانکاری مشتری، درآمد پروژه‌ها، سربار، تخفیف، صندوق/بانک)
+/// در نصب اولیه ساخته می‌شوند و نباید حذف شوند. نبودشان یعنی دیتابیس
+/// آسیب دیده یا یک Migration ناقص اجرا شده.
+///
+/// چرا Exception و نه بازگشت صفر: پیش از این، توابع مانده وقتی حساب
+/// کنترلی را پیدا نمی‌کردند بی‌سروصدا `0` برمی‌گرداندند. چون صفر یک عدد
+/// مالی کاملاً معتبر است، این خرابی هیچ نشانه‌ای نشان نمی‌داد - همه
+/// مانده‌های مطالبات و پیش‌دریافت صفر دیده می‌شدند در حالی که اسناد واقعی
+/// در دفتر بودند. یک باگ واقعی از همین جنس هفته‌ها پنهان ماند. صفر باید
+/// فقط معنای «واقعاً صفر» بدهد، نه «چیزی پیدا نکردم».
+class MissingControlAccountException implements Exception {
+  final String systemKey;
+  final String accountLabel;
+  MissingControlAccountException(this.systemKey, this.accountLabel);
+
+  @override
+  String toString() =>
+      'حساب کنترلی «$accountLabel» در دفتر حساب‌ها یافت نشد. '
+      'این حساب برای محاسبات مالی ضروری است و نباید حذف شود. '
+      'لطفاً از آخرین پشتیبان بازیابی کنید یا با پشتیبانی تماس بگیرید. '
+      '(شناسه فنی: $systemKey)';
+}
+
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -1195,8 +1221,7 @@ class DatabaseHelper {
   /// به هیچ پروژه‌ای نسبت داده نمی‌شود.
   Future<Map<String, double>> projectFinancials(int projectId) async {
     final db = await database;
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) return {'received': 0, 'spent': 0};
+    final cashAccounts = await _requireCashAccounts();
 
     final placeholders = List.filled(cashAccounts.length, '?').join(',');
     final cashIds = cashAccounts.map((a) => a.id).toList();
@@ -1223,6 +1248,41 @@ class DatabaseHelper {
   /// متد از داخل یک تراکنش دیتابیس دیگر (مثل finalizeProject) صدا زده
   /// می‌شود، باید از همان Transaction استفاده کند، نه یک اتصال مستقل جدید -
   /// در غیر این صورت SQLite/sqflite در تراکنش تودرتو قفل می‌کند.
+  /// برچسب فارسی حساب‌های کنترلی برای پیام خطای قابل‌فهم کاربر
+  static const Map<String, String> _controlAccountLabels = {
+    kSystemKeyReceivable: 'حساب‌های دریافتنی',
+    kSystemKeyPayable: 'حساب‌های پرداختنی',
+    kSystemKeyCustomerAdvance: 'پیش‌دریافت مشتری',
+    kSystemKeyCustomerCredit: 'بستانکاری مشتری',
+    kSystemKeyProjectRevenue: 'درآمد پروژه‌ها',
+    kSystemKeyProjectOverhead: 'سربار عمومی پروژه‌ها',
+    kSystemKeyServiceDiscount: 'تخفیف خدمات',
+    kSystemKeyDirectProjectCost: 'هزینه مستقیم پروژه',
+    kSystemKeyCash: 'صندوق',
+    kSystemKeyBank: 'بانک',
+  };
+
+  /// حساب کنترلی را برمی‌گرداند و اگر نبود، خطای صریح می‌دهد - نه صفر
+  /// خاموش. هر محاسبه مالی که به یک حساب کنترلی نیاز دارد باید از این
+  /// مسیر برود؛ رجوع به توضیح MissingControlAccountException.
+  Future<AccountModel> _requireControlAccount(String systemKey, [DatabaseExecutor? executor]) async {
+    final account = await _accountBySystemKey(systemKey, executor);
+    if (account == null) {
+      throw MissingControlAccountException(systemKey, _controlAccountLabels[systemKey] ?? systemKey);
+    }
+    return account;
+  }
+
+  /// حساب‌های نقدی/بانکی را برمی‌گرداند و اگر هیچ‌کدام نبود، خطای صریح
+  /// می‌دهد - نه فهرست خالی که باعث صفر شدن خاموش همه محاسبات نقدی شود.
+  Future<List<AccountModel>> _requireCashAccounts() async {
+    final accounts = await getCashAccounts();
+    if (accounts.isEmpty) {
+      throw MissingControlAccountException(kSystemKeyCash, 'صندوق/بانک');
+    }
+    return accounts;
+  }
+
   Future<AccountModel?> getReceivableAccount([DatabaseExecutor? executor]) async {
     final db = executor ?? await database;
     final maps =
@@ -1300,9 +1360,8 @@ class DatabaseHelper {
   /// مانده یک حساب کنترلی (AR/Advance/...) برای یک پروژه مشخص - مستقیم از
   /// Ledger، با فیلتر projectId (نه counterpartyId) چون هدف مانده مختص همین
   /// پروژه است، نه کل طرف حساب.
-  Future<double> _projectControlAccountBalance(int projectId, AccountModel? account,
+  Future<double> _projectControlAccountBalance(int projectId, AccountModel account,
       {required bool debitNormal, DatabaseExecutor? executor}) async {
-    if (account == null) return 0;
     final db = executor ?? await database;
     final result = await db.rawQuery('''
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
@@ -1315,33 +1374,33 @@ class DatabaseHelper {
 
   /// مانده مطالبات (AR) مختص یک پروژه خاص (نه کل طرف حساب)
   Future<double> projectReceivableBalance(int projectId, [DatabaseExecutor? executor]) async {
-    return _projectControlAccountBalance(projectId, await getReceivableAccount(executor),
+    return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyReceivable, executor),
         debitNormal: true, executor: executor);
   }
 
   /// مانده پیش‌دریافت (Customer Advance) مختص یک پروژه خاص
   Future<double> projectAdvanceBalance(int projectId, [DatabaseExecutor? executor]) async {
-    return _projectControlAccountBalance(projectId, await getCustomerAdvanceAccount(executor),
+    return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyCustomerAdvance, executor),
         debitNormal: false, executor: executor);
   }
 
   /// مانده بستانکاری مشتری (مازاد دریافتی ناشی از Overpayment) مختص یک پروژه
   Future<double> projectCustomerCreditBalance(int projectId, [DatabaseExecutor? executor]) async {
-    return _projectControlAccountBalance(projectId, await getCustomerCreditAccount(executor),
+    return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyCustomerCredit, executor),
         debitNormal: false, executor: executor);
   }
 
   /// مانده بدهی (AP) مختص یک پروژه خاص (نه کل طرف حساب) - برای کنترل
   /// Overpayment سطح پروژه در پرداخت بدهی مرتبط با یک پروژه مشخص
   Future<double> projectPayableBalance(int projectId, [DatabaseExecutor? executor]) async {
-    return _projectControlAccountBalance(projectId, await getPayableAccount(executor),
+    return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyPayable, executor),
         debitNormal: false, executor: executor);
   }
 
   /// مانده واقعی حساب «درآمد پروژه‌ها» مختص یک پروژه - برای Reconciliation
   /// (مقایسه با مقدار محاسبه‌شده از finalAmount + FINAL_ADJUSTMENTها)
   Future<double> projectRevenueLedgerBalance(int projectId) async {
-    return _projectControlAccountBalance(projectId, await getProjectRevenueAccount(),
+    return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyProjectRevenue),
         debitNormal: false);
   }
 
@@ -1375,8 +1434,7 @@ class DatabaseHelper {
   /// می‌شود (بدون هیچ مقدار ذخیره‌شده جداگانه)؛ طبق ماهیت بدهکار حساب دارایی:
   /// جمع بدهکارها منهای جمع بستانکارهای همان حساب برای همان طرف حساب.
   Future<double> receivableBalance(int counterpartyId, [DatabaseExecutor? executor]) async {
-    final arAccount = await getReceivableAccount(executor);
-    if (arAccount == null) return 0;
+    final arAccount = await _requireControlAccount(kSystemKeyReceivable, executor);
     final db = executor ?? await database;
     final result = await db.rawQuery('''
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
@@ -1390,8 +1448,7 @@ class DatabaseHelper {
   /// مانده بدهی (AP) یک طرف حساب خاص - طبق ماهیت بستانکار حساب بدهی:
   /// جمع بستانکارها منهای جمع بدهکارهای همان حساب برای همان طرف حساب.
   Future<double> payableBalance(int counterpartyId, [DatabaseExecutor? executor]) async {
-    final apAccount = await getPayableAccount(executor);
-    if (apAccount == null) return 0;
+    final apAccount = await _requireControlAccount(kSystemKeyPayable, executor);
     final db = executor ?? await database;
     final result = await db.rawQuery('''
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
@@ -1406,8 +1463,7 @@ class DatabaseHelper {
   /// سطری که مستقیم با این طرف حساب مرتبط باشد، صرف‌نظر از این‌که به پروژه
   /// خاصی تگ خورده باشد یا نه.
   Future<double> counterpartyAdvanceBalance(int counterpartyId) async {
-    final account = await getCustomerAdvanceAccount();
-    if (account == null) return 0;
+    final account = await _requireControlAccount(kSystemKeyCustomerAdvance);
     final db = await database;
     final result = await db.rawQuery('''
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
@@ -1422,8 +1478,7 @@ class DatabaseHelper {
   /// سطری که مستقیم با این طرف حساب مرتبط باشد، حتی اگر به پروژه خاصی
   /// تگ نخورده باشد (بر خلاف نسخه سطح-پروژه که فقط projectId فیلتر می‌کند).
   Future<double> counterpartyCustomerCreditBalance(int counterpartyId) async {
-    final account = await getCustomerCreditAccount();
-    if (account == null) return 0;
+    final account = await _requireControlAccount(kSystemKeyCustomerCredit);
     final db = await database;
     final result = await db.rawQuery('''
       SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
@@ -1443,8 +1498,7 @@ class DatabaseHelper {
   /// «فروش نقدی» که واقعاً پول به صندوق/بانک می‌آورند در Received می‌آیند.
   Future<Map<String, double>> counterpartyFinancials(int counterpartyId) async {
     final db = await database;
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) return {'received': 0, 'spent': 0};
+    final cashAccounts = await _requireCashAccounts();
 
     final placeholders = List.filled(cashAccounts.length, '?').join(',');
     final cashIds = cashAccounts.map((a) => a.id).toList();
@@ -1904,8 +1958,7 @@ class DatabaseHelper {
   /// دسته‌ای انجام می‌شود.
   Future<Map<int, double>> estimatedRemainingForOpenProjects() async {
     final db = await database;
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) return {};
+    final cashAccounts = await _requireCashAccounts();
     final placeholders = List.filled(cashAccounts.length, '?').join(',');
     final cashIds = cashAccounts.map((a) => a.id).toList();
 
@@ -1951,8 +2004,7 @@ class DatabaseHelper {
   /// نهایی‌سازی) در این فهرست نمی‌آیند چون «تراکنش وجه» نیستند.
   Future<List<Map<String, dynamic>>> recentCashEntries({int limit = 3}) async {
     final db = await database;
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) return [];
+    final cashAccounts = await _requireCashAccounts();
     final placeholders = List.filled(cashAccounts.length, '?').join(',');
     final cashIds = cashAccounts.map((a) => a.id).toList();
 
@@ -1997,8 +2049,7 @@ class DatabaseHelper {
   /// حساب پیش‌دریافت بستانکارطبیعی است، پس مانده = بستانکار - بدهکار.
   Future<Map<int, double>> advanceBalanceForOpenProjects() async {
     final db = await database;
-    final advanceAccount = await getCustomerAdvanceAccount();
-    if (advanceAccount == null) return {};
+    final advanceAccount = await _requireControlAccount(kSystemKeyCustomerAdvance);
     final rows = await db.rawQuery('''
       SELECT l.projectId as projectId,
              COALESCE(SUM(l.credit),0) - COALESCE(SUM(l.debit),0) as total
@@ -2012,7 +2063,10 @@ class DatabaseHelper {
 
   Future<double> currentExpectedAmount(int projectId) async {
     final project = await getProject(projectId);
-    if (project == null) return 0;
+    if (project == null) {
+      // صفر برنگردانیم: صفر یک مبلغ معتبر است و این خرابی را پنهان می‌کند.
+      throw Exception('پروژه با شناسه $projectId یافت نشد.');
+    }
     final events = await getProjectPriceEvents(projectId);
     final preFinalSum = events
         .where((e) => e.type == kPriceEventAddition ||
@@ -2441,16 +2495,14 @@ class DatabaseHelper {
 
   /// مجموع تخفیف در بازه دلخواه
   Future<double> officeDiscountTotal({String? fromDate, String? toDate}) async {
-    final account = await getServiceDiscountAccount();
-    if (account == null) return 0;
+    final account = await _requireControlAccount(kSystemKeyServiceDiscount);
     final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
     return bal['balance']!;
   }
 
   /// مجموع سربار عمومی پروژه‌ها در بازه دلخواه
   Future<double> officeOverheadTotal({String? fromDate, String? toDate}) async {
-    final account = await getProjectOverheadAccount();
-    if (account == null) return 0;
+    final account = await _requireControlAccount(kSystemKeyProjectOverhead);
     final bal = await accountBalance(account.id!, fromDate: fromDate, toDate: toDate);
     return bal['balance']!;
   }
@@ -2524,8 +2576,7 @@ class DatabaseHelper {
   /// برای Opening Cash یک بازه
   Future<double> cashBalanceBefore(String date) async {
     final db = await database;
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) return 0;
+    final cashAccounts = await _requireCashAccounts();
     final ids = cashAccounts.map((a) => a.id).toList();
     final placeholders = List.filled(ids.length, '?').join(',');
     final result = await db.rawQuery('''
@@ -2542,17 +2593,7 @@ class DatabaseHelper {
   /// اسناد دقیقاً دوسطری قابل طبقه‌بندی دقیق‌اند (که تمام مسیرهای خودکار
   /// برنامه چنین‌اند)؛ سندهای دستی چندسطری در «سایر» قرار می‌گیرند.
   Future<Map<String, double>> classifyCashFlow({String? fromDate, String? toDate}) async {
-    final cashAccounts = await getCashAccounts();
-    if (cashAccounts.isEmpty) {
-      return {
-        'customerReceipts': 0,
-        'otherCashInflows': 0,
-        'projectPayments': 0,
-        'projectOverheadPayments': 0,
-        'officePayments': 0,
-        'otherCashOutflows': 0,
-      };
-    }
+    final cashAccounts = await _requireCashAccounts();
     final db = await database;
     final cashIds = cashAccounts.map((a) => a.id).toList();
     final placeholders = List.filled(cashIds.length, '?').join(',');

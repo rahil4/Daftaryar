@@ -566,6 +566,14 @@ void main() {
 
       // پروژه A: نهایی‌شده + دریافت جزئی
       await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: '1404/02/01');
+
+      // تأیید میانی: نهایی‌سازی واقعاً طلب ساخته باشد. بدون این بررسی، اگر
+      // مرحله بعد شکست بخورد معلوم نیست تقصیر نهایی‌سازی بوده یا دریافت.
+      final arAfterFinalize = await db.projectReceivableBalance(projectA);
+      expect(arAfterFinalize, 100000000,
+          reason: 'نهایی‌سازی باید طلب ۱۰۰ میلیونی بسازد؛ اگر صفر است یعنی سند'
+              ' نهایی‌سازی ثبت نشده یا به پروژه دیگری خورده است');
+
       await db.receiveProjectPayment(
           projectId: projectA, cashAccountId: cash.id!, amount: 40000000, date: '1404/02/05');
       // پروژه B: نهایی‌نشده + پیش‌دریافت

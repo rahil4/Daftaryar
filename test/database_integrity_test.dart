@@ -694,4 +694,26 @@ void main() {
       expect(result.issues.any((i) => i.title.contains('متوازن')), true);
     });
   });
+
+  group('قرارداد پایداری (STABILITY.md)', () {
+    test('نسخه دیتابیس بدون گفت‌وگوی صریح بالا نمی‌رود', () async {
+      // این تست عمداً به یک عدد ثابت گره خورده است. اگر کسی (چه انسان، چه
+      // دستیار هوش مصنوعی) نسخه دیتابیس را بالا ببرد، این تست می‌شکند و
+      // مجبور می‌شود آگاهانه تصمیم بگیرد - نه اینکه یک Migration ساختاری
+      // در میان بقیه تغییرات ناخواسته رد شود.
+      //
+      // پروژه در «حالت تثبیت» است؛ رجوع کنید به STABILITY.md.
+      // اگر واقعاً یک Migration لازم است: STABILITY.md را بخوانید، مراحل
+      // چهارگانه را انجام دهید، و سپس این عدد را به‌روز کنید.
+      const expectedSchemaVersion = 5;
+
+      final raw = await db.database;
+      final actual = await raw.getVersion();
+      expect(actual, expectedSchemaVersion,
+          reason: 'نسخه Schema تغییر کرده است. اگر این تغییر عمدی است، '
+              'STABILITY.md را بخوانید و سپس expectedSchemaVersion را به‌روز کنید. '
+              'هر Migration جدید یک ریسک ساختاری است - باگ systemKey دقیقاً از '
+              'یک Migration ناقص آمد و هفته‌ها بی‌صدا داده مالی را خراب نشان داد.');
+    });
+  });
 }

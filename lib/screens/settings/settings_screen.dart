@@ -12,6 +12,7 @@ import '../../utils/formatters.dart';
 import '../counterparties/counterparties_screen.dart';
 import '../onboarding/fiscal_year_setup_screen.dart';
 import '../lock/pin_setup_screen.dart';
+import 'backup_verify_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -361,6 +362,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: const Text('تهیه فایل پشتیبان'),
                     subtitle: const Text('خروجی JSON از تمام اطلاعات، برای ذخیره یا اشتراک‌گذاری'),
                     onTap: _export,
+                  ),
+                ),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.verified_outlined, color: AppColors.brass),
+                    title: const Text('تأیید سلامت پشتیبان'),
+                    subtitle: const Text('اثر انگشت داده‌ها برای مقایسه پیش و پس از بازیابی'),
+                    onTap: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => const BackupVerifyScreen())),
                   ),
                 ),
                 Card(

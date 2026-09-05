@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/management_dashboard_data.dart';
+import '../../services/data_health_service.dart';
 import '../../services/management_dashboard_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/dashboard_period.dart';
@@ -36,11 +37,13 @@ class ManagementDashboardScreen extends StatefulWidget {
 class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
   final _service = ManagementDashboardService();
   final _db = DatabaseHelper.instance;
+  final _healthService = DataHealthService();
   DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
   ManagementDashboardData? _data;
   bool _loading = true;
   String? _error;
   int _pendingSmsDrafts = 0;
+  HealthCheckResult? _health;
 
   @override
   void initState() {
@@ -54,17 +57,27 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
       _error = null;
     });
     final pendingDrafts = await _db.countPendingSmsDrafts();
+    // بررسی سلامت ساختاری - در try جدا، چون خودِ بررسی هرگز نباید باعث
+    // شکست بارگذاری داشبورد شود.
+    HealthCheckResult? health;
+    try {
+      health = await _healthService.run();
+    } catch (_) {
+      health = null;
+    }
     try {
       final data = await _service.buildDashboard(preset: _preset);
       setState(() {
         _data = data;
         _pendingSmsDrafts = pendingDrafts;
+        _health = health;
         _loading = false;
       });
     } catch (e) {
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
         _pendingSmsDrafts = pendingDrafts;
+        _health = health;
         _loading = false;
       });
     }
@@ -112,6 +125,13 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // بنر سلامت داده در بالاترین نقطه: اگر یکپارچگی ساختاری
+              // مشکل دارد، کاربر نباید پیش از دیدن این هشدار تراکنش جدید
+              // ثبت کند یا به اعداد داشبورد تکیه کند.
+              if (_health != null && !_health!.isHealthy) ...[
+                _HealthBanner(result: _health!),
+                const SizedBox(height: 12),
+              ],
               _QuickActionsRow(onDone: _load),
               if (_pendingSmsDrafts > 0) ...[
                 const SizedBox(height: 10),
@@ -523,6 +543,72 @@ class _PendingSmsBanner extends StatelessWidget {
             const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// بنر هشدار سلامت داده - فقط وقتی مشکلی وجود دارد نمایش داده می‌شود.
+/// عمداً در بالاترین نقطه داشبورد قرار می‌گیرد (نه در تب گزارش‌ها) چون
+/// مشکل یکپارچگی ساختاری یعنی همه اعداد صفحه غیرقابل‌اتکا هستند.
+class _HealthBanner extends StatelessWidget {
+  final HealthCheckResult result;
+  const _HealthBanner({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = result.hasCritical ? AppColors.negative : AppColors.brass;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(result.hasCritical ? Icons.error_outline : Icons.warning_amber_outlined,
+                  color: color, size: 18),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  result.hasCritical ? 'مشکل در یکپارچگی داده‌ها' : 'هشدار سلامت داده',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...result.issues.take(3).map((i) => Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('• ${i.title}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 10, top: 1),
+                      child: Text(i.detail,
+                          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    ),
+                  ],
+                ),
+              )),
+          if (result.issues.length > 3)
+            Text('و ${pn(result.issues.length - 3)} مورد دیگر',
+                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          if (result.hasCritical) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'تا رفع این مشکل، اعداد این صفحه ممکن است نادرست باشند.',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.negative),
+            ),
+          ],
+        ],
       ),
     );
   }

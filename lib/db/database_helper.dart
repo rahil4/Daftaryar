@@ -1864,6 +1864,41 @@ class DatabaseHelper {
     return maps.map((m) => SmsDraftModel.fromMap(m)).toList();
   }
 
+  /// «اثر انگشت داده» - خلاصه‌ای عددی از کل محتوای مالی دفتر.
+  ///
+  /// هدف: تأیید درستی بازیابی پشتیبان. کاربر پیش از بازیابی این خلاصه را
+  /// می‌بیند، پس از بازیابی دوباره نگاه می‌کند؛ اگر همه اعداد یکسان بودند،
+  /// بازیابی کامل و درست بوده. بدون این، «به‌نظر درست می‌آید» تنها معیار
+  /// بود - که برای داده مالی کافی نیست.
+  ///
+  /// عمداً شامل جمع مبالغ است، نه فقط تعداد رکوردها: اگر یک سند با مبلغ
+  /// اشتباه بازیابی شود، تعداد یکسان می‌ماند ولی جمع تغییر می‌کند.
+  Future<Map<String, num>> dataFingerprint() async {
+    final db = await database;
+
+    Future<int> count(String table) async {
+      final r = await db.rawQuery('SELECT COUNT(*) as c FROM $table');
+      return (r.first['c'] as num).toInt();
+    }
+
+    final totals = await ledgerTotals();
+    final amountSum = await db.rawQuery(
+        'SELECT COALESCE(SUM(agreedAmount),0) as a, COALESCE(SUM(finalAmount),0) as f FROM projects');
+
+    return {
+      'طرف‌حساب‌ها': await count('counterparties'),
+      'پروژه‌ها': await count('projects'),
+      'حساب‌ها': await count('accounts'),
+      'اسناد': await count('journal_entries'),
+      'سطرهای سند': await count('journal_lines'),
+      'رویدادهای قیمت': await count('project_price_events'),
+      'جمع بدهکار': totals['debit']!.round(),
+      'جمع بستانکار': totals['credit']!.round(),
+      'جمع برآورد پروژه‌ها': (amountSum.first['a'] as num).round(),
+      'جمع مبالغ نهایی': (amountSum.first['f'] as num).round(),
+    };
+  }
+
   Future<int> countPendingSmsDrafts() async {
     final db = await database;
     final result = await db.rawQuery(
@@ -3023,6 +3058,45 @@ class DatabaseHelper {
       'newCredit': closing - opening, // چون usedCredit قابل تشخیص نیست، فقط خالص تغییر گزارش می‌شود
       'closing': closing,
     };
+  }
+
+  // ---------------- بررسی یکپارچگی ساختاری (DataHealthService) ----------------
+  // این سه تابع سبک‌اند (هر کدام یک کوئری تجمیعی) تا بتوانند در هر بار باز
+  // شدن برنامه بدون تأثیر محسوس بر سرعت اجرا شوند.
+
+  /// مجموع کل بدهکار و بستانکار دفترکل - برای بررسی اصل توازن دوطرفه
+  Future<Map<String, double>> ledgerTotals() async {
+    final db = await database;
+    final r = await db.rawQuery(
+        'SELECT COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c FROM journal_lines');
+    return {
+      'debit': (r.first['d'] as num).toDouble(),
+      'credit': (r.first['c'] as num).toDouble(),
+    };
+  }
+
+  /// تعداد سطرهای سند که به حسابی ارجاع می‌دهند که دیگر وجود ندارد
+  Future<int> countOrphanJournalAccountRefs() async {
+    final db = await database;
+    final r = await db.rawQuery('''
+      SELECT COUNT(*) as cnt FROM journal_lines l
+      LEFT JOIN accounts a ON a.id = l.accountId
+      WHERE a.id IS NULL
+    ''');
+    return (r.first['cnt'] as num).toInt();
+  }
+
+  /// تعداد اسنادی که مجموع بدهکار و بستانکارشان برابر نیست
+  Future<int> countUnbalancedEntries() async {
+    final db = await database;
+    final r = await db.rawQuery('''
+      SELECT COUNT(*) as cnt FROM (
+        SELECT entryId, COALESCE(SUM(debit),0) - COALESCE(SUM(credit),0) as diff
+        FROM journal_lines GROUP BY entryId
+        HAVING ABS(diff) > 1
+      )
+    ''');
+    return (r.first['cnt'] as num).toInt();
   }
 
   Future<void> wipeAll([DatabaseExecutor? executor]) async {

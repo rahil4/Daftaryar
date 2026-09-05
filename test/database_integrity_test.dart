@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:daftaryar/db/database_helper.dart';
+import 'package:daftaryar/services/data_health_service.dart';
 import 'package:daftaryar/models/account.dart';
 import 'package:daftaryar/models/counterparty.dart';
 import 'package:daftaryar/models/journal_entry.dart';
@@ -652,6 +653,45 @@ void main() {
       final batch = await db.advanceBalanceForOpenProjects();
       expect(batch[projectId], 30000000,
           reason: 'محاسبه دسته‌ای داشبورد باید همان عدد را بدهد');
+    });
+  });
+
+  group('DataHealthService — بررسی سلامت ساختاری', () {
+    test('دیتابیس سالم (پس از نصب اولیه) هیچ مشکلی گزارش نمی‌کند', () async {
+      final result = await DataHealthService(db).run();
+      expect(result.isHealthy, true,
+          reason: 'نصب تازه باید همه حساب‌های کنترلی و دفتر متوازن داشته باشد. مشکلات: '
+              '${result.issues.map((i) => i.title).join(" | ")}');
+    });
+
+    test('حذف یک حساب کنترلی، بلافاصله به‌عنوان مشکل بحرانی گزارش می‌شود', () async {
+      // این دقیقاً همان دسته خرابی است که باگ systemKey را هفته‌ها پنهان
+      // نگه داشت: از دید محاسبات مالی «همه مانده‌ها صفرند» معتبر به‌نظر
+      // می‌رسید، ولی از دید یکپارچگی ساختاری یک خرابی آشکار است.
+      final ar = await db.getReceivableAccount();
+      final raw = await db.database;
+      await raw.update('accounts', {'systemKey': null}, where: 'id = ?', whereArgs: [ar!.id]);
+
+      final result = await DataHealthService(db).run();
+      expect(result.isHealthy, false);
+      expect(result.hasCritical, true);
+      expect(result.issues.any((i) => i.title.contains('دریافتنی')), true,
+          reason: 'باید دقیقاً همان حساب گمشده نام برده شود');
+    });
+
+    test('دفتر نامتوازن به‌عنوان مشکل بحرانی گزارش می‌شود', () async {
+      // یک سطر تک‌طرفه مستقیم در دیتابیس (دور زدن اعتبارسنجی) - شبیه‌سازی
+      // داده آسیب‌دیده
+      final raw = await db.database;
+      final cash = (await db.getCashAccounts()).first;
+      final entryId = await raw.insert('journal_entries',
+          {'date': '1404/01/01', 'createdAt': '1404/01/01', 'source': 'manual'});
+      await raw.insert('journal_lines',
+          {'entryId': entryId, 'accountId': cash.id, 'debit': 5000000, 'credit': 0});
+
+      final result = await DataHealthService(db).run();
+      expect(result.hasCritical, true);
+      expect(result.issues.any((i) => i.title.contains('متوازن')), true);
     });
   });
 }

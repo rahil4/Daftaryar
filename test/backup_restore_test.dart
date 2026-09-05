@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:daftaryar/db/database_helper.dart';
+import 'package:daftaryar/services/data_health_service.dart';
 import 'package:daftaryar/models/account.dart';
 import 'package:daftaryar/models/counterparty.dart';
 import 'package:daftaryar/models/project.dart';
@@ -546,6 +547,64 @@ void main() {
       final restoredLine = restoredEntries.first.lines.first;
       expect(restoredLine.projectId, restoredProjects.first.id,
           reason: 'رابطه JournalLine→Project باید صحیح نگاشت شده باشد');
+
+      await tempFile.delete();
+    });
+  });
+
+  group('چرخه کامل پشتیبان‌گیری — اثر انگشت داده پیش و پس از بازیابی', () {
+    test('پس از Restore کامل، اثر انگشت داده دقیقاً با پیش از آن یکسان است', () async {
+      // این تست همان کاری را می‌کند که کاربر باید دستی انجام دهد: داده
+      // واقعی بساز، اثر انگشت بگیر، پشتیبان بگیر، همه‌چیز را پاک کن،
+      // بازیابی کن، و اثر انگشت را دوباره مقایسه کن. برخلاف تست‌های
+      // موجود که فقط چند فیلد را چک می‌کردند، این تست کل محتوای مالی را
+      // با هم می‌سنجد - شامل جمع مبالغ، نه فقط تعداد رکوردها.
+      final cpId = await createCounterparty('مشتری چرخه کامل');
+      final projectA = await createProject(cpId, agreedAmount: 100000000);
+      final projectB = await createProject(cpId, agreedAmount: 50000000);
+      final cash = (await db.getCashAccounts()).first;
+
+      // پروژه A: نهایی‌شده + تخفیف + دریافت جزئی
+      await db.finalizeProject(projectId: projectA, finalAmount: 100000000, date: '1404/02/01');
+      await db.recordProjectDiscount(projectId: projectA, amount: 5000000, date: '1404/02/02');
+      await db.receiveProjectPayment(
+          projectId: projectA, cashAccountId: cash.id!, amount: 40000000, date: '1404/02/05');
+      // پروژه B: نهایی‌نشده + پیش‌دریافت
+      await db.receiveProjectPayment(
+          projectId: projectB, cashAccountId: cash.id!, amount: 15000000, date: '1404/02/10');
+
+      final before = await db.dataFingerprint();
+      expect(before['اسناد']! > 0, true, reason: 'باید داده واقعی ساخته شده باشد');
+
+      final exported = await backup.collectBackupData();
+      final tempFile = File('${Directory.systemTemp.path}/full_cycle_fingerprint.json');
+      await tempFile.writeAsString(jsonEncode(exported));
+
+      // بازیابی کامل (replaceExisting) - معادل نصب دوباره برنامه
+      await backup.importBackupFile(tempFile, replaceExisting: true);
+
+      final after = await db.dataFingerprint();
+      expect(after, before,
+          reason: 'اثر انگشت داده پس از بازیابی باید دقیقاً یکسان باشد.\n'
+              'پیش: $before\nپس: $after');
+
+      await tempFile.delete();
+    });
+
+    test('پس از بازیابی، بررسی سلامت ساختاری هم باید پاک باشد', () async {
+      final cpId = await createCounterparty('مشتری سلامت پس از بازیابی');
+      final projectId = await createProject(cpId, agreedAmount: 30000000);
+      await db.finalizeProject(projectId: projectId, finalAmount: 30000000, date: '1404/03/01');
+
+      final exported = await backup.collectBackupData();
+      final tempFile = File('${Directory.systemTemp.path}/health_after_restore.json');
+      await tempFile.writeAsString(jsonEncode(exported));
+      await backup.importBackupFile(tempFile, replaceExisting: true);
+
+      final health = await DataHealthService(db).run();
+      expect(health.isHealthy, true,
+          reason: 'بازیابی نباید یکپارچگی ساختاری را بشکند. مشکلات: '
+              '${health.issues.map((i) => i.title).join(" | ")}');
 
       await tempFile.delete();
     });

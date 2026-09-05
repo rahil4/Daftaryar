@@ -559,6 +559,12 @@ void main() {
       // بازیابی کن، و اثر انگشت را دوباره مقایسه کن. برخلاف تست‌های
       // موجود که فقط چند فیلد را چک می‌کردند، این تست کل محتوای مالی را
       // با هم می‌سنجد - شامل جمع مبالغ، نه فقط تعداد رکوردها.
+      // پاک‌سازی صریح در خودِ تست: تست پیش از این
+      // (importBackupFile با replaceExisting: true) حساب‌ها را حذف و
+      // بازسازی می‌کند. اتکا به setUp کافی نیست چون هر مرجعی که پیش از
+      // آن گرفته شده باشد به شناسه‌های قدیمی اشاره می‌کند.
+      await db.wipeAll();
+
       final cpId = await createCounterparty('مشتری چرخه کامل');
       final projectA = await createProject(cpId, agreedAmount: 100000000);
       final projectB = await createProject(cpId, agreedAmount: 50000000);
@@ -573,6 +579,14 @@ void main() {
       expect(arAfterFinalize, 100000000,
           reason: 'نهایی‌سازی باید طلب ۱۰۰ میلیونی بسازد؛ اگر صفر است یعنی سند'
               ' نهایی‌سازی ثبت نشده یا به پروژه دیگری خورده است');
+
+      // تأیید سطح طرف‌حساب: کنترل Overpayment دقیقاً این مانده را می‌سنجد،
+      // نه مانده سطح پروژه. اگر این صفر باشد ولی بالایی درست، یعنی سند به
+      // counterpartyId دیگری تگ شده است.
+      final cpArAfterFinalize = await db.receivableBalance(cpId);
+      expect(cpArAfterFinalize, 100000000,
+          reason: 'مانده طلب سطح طرف‌حساب باید با سطح پروژه یکی باشد - کنترل'
+              ' Overpayment روی همین عدد تصمیم می‌گیرد');
 
       await db.receiveProjectPayment(
           projectId: projectA, cashAccountId: cash.id!, amount: 40000000, date: '1404/02/05');

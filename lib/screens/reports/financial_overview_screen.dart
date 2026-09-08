@@ -266,22 +266,15 @@ class _EquitySection extends StatelessWidget {
             style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
           ),
         ),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Column(
-              children: [
-                for (final parent in parents) ...[
-                  _row(parent.account.name, parent.balance),
-                  for (final child in rows.where((r) => r.account.parentId == parent.account.id))
-                    _row(child.account.name, child.balance, indented: true),
-                ],
-                const Divider(),
-                _row('خالص تغییر سرمایه', total, bold: true),
-              ],
-            ),
-          ),
-        ),
+        const Divider(color: AppColors.gridLine, height: 1),
+        const SizedBox(height: 6),
+        for (final parent in parents) ...[
+          _row(parent.account.name, parent.balance),
+          for (final child in rows.where((r) => r.account.parentId == parent.account.id))
+            _row(child.account.name, child.balance, indented: true),
+        ],
+        const Divider(color: AppColors.gridLine, height: 1),
+        _row('خالص تغییر سرمایه', total, bold: true),
       ],
     );
   }

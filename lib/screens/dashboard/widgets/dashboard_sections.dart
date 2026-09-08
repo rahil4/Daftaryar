@@ -18,6 +18,29 @@ Widget _sectionTitle(String title) {
   );
 }
 
+/// یک زیرعنوان کوچک برای گروه‌بندی داخل یک بخش بزرگ‌تر (بدون کارت جدا).
+Widget _subLabel(String text) {
+  return Padding(
+    padding: const EdgeInsets.only(top: 16, bottom: 6),
+    child: Text(text,
+        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textSecondary)),
+  );
+}
+
+/// بلوک اطلاعات «تخت» (بدون کارت حاشیه‌دار) - فقط خط جداکننده + ردیف‌ها.
+/// برای بخش‌هایی که خودشان از قبل داخل یک ظرف بزرگ‌تر (تب، آکاردئون) قرار
+/// دارند؛ یک کارت جداگانه دور هر بلوک فقط تراکم بصری اضافه می‌کند، نه وضوح.
+Widget _flatBlock(List<Widget> rows) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Divider(color: AppColors.gridLine, height: 1),
+      const SizedBox(height: 6),
+      ...rows,
+    ],
+  );
+}
+
 /// بخش B — عملکرد دوره انتخاب‌شده: شش KPI دوره‌ای؛ دو مورد اول (نتیجه
 /// عملیاتی، سود ناخالص) تأکید بصری قوی‌تر دارند چون KPI اصلی مدیریتی‌اند.
 class PeriodPerformanceSection extends StatelessWidget {
@@ -73,25 +96,18 @@ class ReceivableCollectionSection extends StatelessWidget {
       children: [
         _sectionTitle('وصول مطالبات دوره'),
         const Padding(
-          padding: EdgeInsets.only(bottom: 10),
+          padding: EdgeInsets.only(bottom: 4),
           child: Text('حرکت مطالبات', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
         ),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('مطالبات ابتدای دوره', _fmt(m['opening'])),
-                _row('مطالبات ایجادشده', _fmt(m['newReceivables'])),
-                _row('وصول‌شده', '- ${_fmt(m['collections'])}'),
-                _row('تعدیلات', '- ${_fmt(m['adjustments'])}'),
-                if ((m['other'] ?? 0) != 0) _row('سایر', _fmt(m['other'])),
-                const Divider(),
-                _row('مطالبات پایان دوره', _fmt(m['closing']), bold: true),
-              ],
-            ),
-          ),
-        ),
+        _flatBlock([
+          _row('مطالبات ابتدای دوره', _fmt(m['opening'])),
+          _row('مطالبات ایجادشده', _fmt(m['newReceivables'])),
+          _row('وصول‌شده', '- ${_fmt(m['collections'])}'),
+          _row('تعدیلات', '- ${_fmt(m['adjustments'])}'),
+          if ((m['other'] ?? 0) != 0) _row('سایر', _fmt(m['other'])),
+          const Divider(color: AppColors.gridLine, height: 1),
+          _row('مطالبات پایان دوره', _fmt(m['closing']), bold: true),
+        ]),
         const SizedBox(height: 10),
         GridView.count(
           crossAxisCount: 2,
@@ -148,27 +164,20 @@ class CashPositionSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('جریان نقدی دوره'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('موجودی ابتدای دوره', _fmt(data.openingCash)),
-                _row('دریافتی از مشتریان', _fmt(data.customerReceipts)),
-                _row('سایر دریافتی‌ها', _fmt(data.otherCashInflows)),
-                _row('پرداختی پروژه‌ها', '- ${_fmt(data.projectPayments)}'),
-                _row('پرداختی سربار', '- ${_fmt(data.projectOverheadPayments)}'),
-                _row('پرداختی دفتر', '- ${_fmt(data.officePayments)}'),
-                _row('سایر پرداختی‌ها', '- ${_fmt(data.otherCashOutflows)}'),
-                const Divider(),
-                _row('خالص تغییر نقدینگی', _fmt(netChange), bold: true),
-                _row('موجودی پایان دوره', _fmt(data.closingCash), bold: true),
-                const SizedBox(height: 8),
-                _reconciliationChip(data.cashReconciles),
-              ],
-            ),
-          ),
-        ),
+        _flatBlock([
+          _row('موجودی ابتدای دوره', _fmt(data.openingCash)),
+          _row('دریافتی از مشتریان', _fmt(data.customerReceipts)),
+          _row('سایر دریافتی‌ها', _fmt(data.otherCashInflows)),
+          _row('پرداختی پروژه‌ها', '- ${_fmt(data.projectPayments)}'),
+          _row('پرداختی سربار', '- ${_fmt(data.projectOverheadPayments)}'),
+          _row('پرداختی دفتر', '- ${_fmt(data.officePayments)}'),
+          _row('سایر پرداختی‌ها', '- ${_fmt(data.otherCashOutflows)}'),
+          const Divider(color: AppColors.gridLine, height: 1),
+          _row('خالص تغییر نقدینگی', _fmt(netChange), bold: true),
+          _row('موجودی پایان دوره', _fmt(data.closingCash), bold: true),
+          const SizedBox(height: 8),
+          _reconciliationChip(data.cashReconciles),
+        ]),
       ],
     );
   }
@@ -302,45 +311,20 @@ class PricingSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('تحلیل قیمت‌گذاری'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('مجموع برآورد اولیه', _fmt(data.totalInitialEstimates)),
-                _row('مجموع مبلغ نهایی', _fmt(data.totalFinalAmounts)),
-                _row('مجموع افزایش‌ها', _fmt(data.totalAdditions)),
-                _row('مجموع کاهش‌ها', _fmt(data.totalReductions)),
-                _row('میانگین نرخ افزایش قیمت', _fmt(data.averagePriceIncreaseRate, pct: true)),
-              ],
-            ),
-          ),
-        ),
-        _sectionTitle('تخفیف'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('مجموع تخفیف', _fmt(data.totalDiscount)),
-                _row('نسبت تخفیف به درآمد ناخالص', _fmt(data.discountToGrossRevenueRatio, pct: true)),
-              ],
-            ),
-          ),
-        ),
-        _sectionTitle('اصلاحات پس از نهایی‌سازی'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('اصلاحات مثبت', _fmt(data.totalPositiveAdjustments)),
-                _row('اصلاحات منفی', '- ${_fmt(data.totalNegativeAdjustments)}'),
-                _row('خالص اصلاحات', _fmt(data.netAdjustments), bold: true),
-              ],
-            ),
-          ),
-        ),
+        _flatBlock([
+          _row('مجموع برآورد اولیه', _fmt(data.totalInitialEstimates)),
+          _row('مجموع مبلغ نهایی', _fmt(data.totalFinalAmounts)),
+          _row('مجموع افزایش‌ها', _fmt(data.totalAdditions)),
+          _row('مجموع کاهش‌ها', _fmt(data.totalReductions)),
+          _row('میانگین نرخ افزایش قیمت', _fmt(data.averagePriceIncreaseRate, pct: true)),
+        ]),
+        _subLabel('تخفیف'),
+        _row('مجموع تخفیف', _fmt(data.totalDiscount)),
+        _row('نسبت تخفیف به درآمد ناخالص', _fmt(data.discountToGrossRevenueRatio, pct: true)),
+        _subLabel('اصلاحات پس از نهایی‌سازی'),
+        _row('اصلاحات مثبت', _fmt(data.totalPositiveAdjustments)),
+        _row('اصلاحات منفی', '- ${_fmt(data.totalNegativeAdjustments)}'),
+        _row('خالص اصلاحات', _fmt(data.netAdjustments), bold: true),
       ],
     );
   }
@@ -387,24 +371,17 @@ class DiagnosticsSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle('تشخیص سلامت داده مالی'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              children: [
-                _row('ناسازگاری تطبیق درآمد', pn(d.revenueLedgerMismatchCount)),
-                _row('مانده منفی طلب', pn(d.negativeARCount)),
-                _row('مانده منفی پیش‌دریافت', pn(d.negativeAdvanceCount)),
-                _row('مانده منفی بستانکاری مشتری', pn(d.negativeCustomerCreditCount)),
-                _row('خطای تطبیق نقدی', pn(d.cashReconciliationErrors)),
-                const SizedBox(height: 8),
-                if (!d.hasIssues)
-                  const Text('هیچ ناسازگاری‌ای یافت نشد.',
-                      style: TextStyle(color: AppColors.positive, fontWeight: FontWeight.w700)),
-              ],
-            ),
-          ),
-        ),
+        _flatBlock([
+          _row('ناسازگاری تطبیق درآمد', pn(d.revenueLedgerMismatchCount)),
+          _row('مانده منفی طلب', pn(d.negativeARCount)),
+          _row('مانده منفی پیش‌دریافت', pn(d.negativeAdvanceCount)),
+          _row('مانده منفی بستانکاری مشتری', pn(d.negativeCustomerCreditCount)),
+          _row('خطای تطبیق نقدی', pn(d.cashReconciliationErrors)),
+          const SizedBox(height: 8),
+          if (!d.hasIssues)
+            const Text('هیچ ناسازگاری‌ای یافت نشد.',
+                style: TextStyle(color: AppColors.positive, fontWeight: FontWeight.w700)),
+        ]),
       ],
     );
   }

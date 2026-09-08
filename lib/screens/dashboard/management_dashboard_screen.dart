@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/management_dashboard_data.dart';
+import '../../services/backup_service.dart';
 import '../../services/data_health_service.dart';
 import '../../services/management_dashboard_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/dashboard_period.dart';
 import '../../utils/formatters.dart';
+import '../counterparties/counterparty_form_screen.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
+import '../projects/project_form_screen.dart';
 import '../reports/outstanding_receivables_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/multi_trend_chart_widget.dart';
+
+/// اگر بیش از این تعداد روز از آخرین پشتیبان‌گیری موفق گذشته باشد (یا
+/// اصلاً پشتیبانی گرفته نشده باشد)، بنر یادآور در داشبورد نمایش داده
+/// می‌شود.
+const int kBackupReminderThresholdDays = 14;
 
 /// تب یکپارچه «داشبورد مدیریتی» - ادغام اقدامات سریع/پیش‌نویس پیامکی با
 /// داشبورد مدیریتی (ManagementDashboardService). این صفحه فقط مصرف‌کننده
@@ -43,6 +52,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
   String? _error;
   int _pendingSmsDrafts = 0;
   HealthCheckResult? _health;
+  int? _daysSinceLastBackup; // null یعنی هرگز پشتیبان گرفته نشده
+  bool _isNewUser = false; // بدون هیچ طرف‌حساب/پروژه‌ای - نمایش راهنمای شروع کار
 
   @override
   void initState() {
@@ -64,12 +75,21 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
     } catch (_) {
       health = null;
     }
+    final lastBackupDate = await _db.getSetting(kLastBackupDateSettingKey);
+    final daysSinceBackup = _daysSince(lastBackupDate);
+    // راهنمای شروع کار فقط تا وقتی هیچ طرف‌حساب/پروژه‌ای تعریف نشده معنا
+    // دارد؛ به محض اولین مورد از هرکدام، خودش برای همیشه کنار می‌رود.
+    final counterparties = await _db.getCounterparties();
+    final projects = await _db.getProjects();
+    final isNewUser = counterparties.isEmpty && projects.isEmpty;
     try {
       final data = await _service.buildDashboard(preset: _preset);
       setState(() {
         _data = data;
         _pendingSmsDrafts = pendingDrafts;
         _health = health;
+        _daysSinceLastBackup = daysSinceBackup;
+        _isNewUser = isNewUser;
         _loading = false;
       });
     } catch (e) {
@@ -77,9 +97,21 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
         _error = e.toString().replaceAll('Exception: ', '');
         _pendingSmsDrafts = pendingDrafts;
         _health = health;
+        _daysSinceLastBackup = daysSinceBackup;
+        _isNewUser = isNewUser;
         _loading = false;
       });
     }
+  }
+
+  /// تعداد روز گذشته از تاریخ ثبت‌شده تا امروز؛ null اگر تاریخی ثبت نشده
+  /// (هرگز پشتیبان گرفته نشده) یا قابل‌تجزیه نباشد - در آن حالت یادآور
+  /// همیشه (به‌عنوان «هرگز») نمایش داده می‌شود.
+  int? _daysSince(String? dateStr) {
+    if (dateStr == null) return null;
+    final date = parseJalaliString(dateStr);
+    if (date == null) return null;
+    return Jalali.now().julianDayNumber - date.julianDayNumber;
   }
 
   @override
@@ -123,10 +155,18 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                 _HealthBanner(result: _health!),
                 const SizedBox(height: 12),
               ],
+              // راهنمای شروع کار: پیش از هر چیز دیگر، چون بدون طرف‌حساب/
+              // پروژه، بقیه داشبورد فقط اعداد صفر بی‌معنا نشان می‌دهد.
+              if (_isNewUser) _OnboardingCard(onDone: _load),
               _QuickActionsRow(onDone: _load),
               if (_pendingSmsDrafts > 0) ...[
                 const SizedBox(height: 10),
                 _PendingSmsBanner(count: _pendingSmsDrafts, onTap: _load),
+              ],
+              if (_daysSinceLastBackup == null ||
+                  _daysSinceLastBackup! >= kBackupReminderThresholdDays) ...[
+                const SizedBox(height: 10),
+                _BackupReminderBanner(daysSince: _daysSinceLastBackup, onTap: _load),
               ],
               const SizedBox(height: 16),
               if (_loading)
@@ -530,6 +570,166 @@ class _PendingSmsBanner extends StatelessWidget {
             Text(
               '${pn(count)} پیش‌نویس پیامکی در انتظار تأیید',
               style: const TextStyle(fontSize: 13, color: AppColors.brass, fontWeight: FontWeight.w700),
+            ),
+            const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// بنر یادآور پشتیبان‌گیری - وقتی هرگز پشتیبان گرفته نشده یا مدتی طولانی
+/// (kBackupReminderThresholdDays) از آخرین پشتیبان موفق گذشته باشد. طبق
+/// همان درسِ STABILITY.md: «پشتیبانی که هرگز گرفته نشده، پشتیبان نیست».
+/// راهنمای شروع کار - فقط برای کاربر تازه (بدون هیچ طرف‌حساب/پروژه‌ای)
+/// نمایش داده می‌شود؛ به محض افزودن اولین طرف‌حساب یا پروژه، خودش دیگر
+/// هرگز دیده نمی‌شود (تصمیم بر مبنای همان دو شمارش در _load، بدون هیچ
+/// Setting یا فیلد ماندگار جدید).
+class _OnboardingCard extends StatelessWidget {
+  final VoidCallback onDone;
+  const _OnboardingCard({required this.onDone});
+
+  Future<void> _go(BuildContext context, Widget screen) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    onDone();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.brass, width: 0.8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.rocket_launch_outlined, color: AppColors.brass, size: 18),
+                const SizedBox(width: 7),
+                Text('شروع کار با دفتریار',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w800, color: AppColors.brass)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'برای اینکه اعداد داشبورد معنا پیدا کنند، این چند قدم را انجام دهید:',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 10),
+            _OnboardingStep(
+              number: 1,
+              title: 'تعریف اولین طرف‌حساب',
+              subtitle: 'مشتری یا کارفرمایی که با او کار می‌کنید',
+              onTap: () => _go(context, const CounterpartyFormScreen()),
+            ),
+            _OnboardingStep(
+              number: 2,
+              title: 'تعریف اولین پروژه',
+              subtitle: 'برای ردیابی جدا‌گانه درآمد و هزینه هر کار',
+              onTap: () => _go(context, const ProjectFormScreen()),
+            ),
+            _OnboardingStep(
+              number: 3,
+              title: 'ثبت اولین دریافت یا موجودی افتتاحیه',
+              subtitle: 'مثلاً موجودی فعلی صندوق یا حساب بانکی',
+              onTap: () => _go(context, const QuickReceiptScreen()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingStep extends StatelessWidget {
+  final int number;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _OnboardingStep(
+      {required this.number, required this.title, required this.subtitle, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.brass.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(pn(number),
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.brass)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_left, color: AppColors.brass, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackupReminderBanner extends StatelessWidget {
+  final int? daysSince; // null یعنی هرگز پشتیبان گرفته نشده
+  final VoidCallback onTap;
+  const _BackupReminderBanner({required this.daysSince, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final message = daysSince == null
+        ? 'هنوز هیچ پشتیبانی تهیه نکرده‌اید'
+        : '${pn(daysSince!)} روز از آخرین پشتیبان‌گیری گذشته';
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () async {
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+        onTap();
+      },
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.brass.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.brass),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                '$message — همین حالا یک نسخه تهیه کنید',
+                style: const TextStyle(fontSize: 13, color: AppColors.brass, fontWeight: FontWeight.w700),
+              ),
             ),
             const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
           ],

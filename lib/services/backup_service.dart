@@ -12,12 +12,18 @@ import '../models/project.dart';
 import '../models/project_price_event.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
+import '../utils/formatters.dart';
 
 /// نسخه فعلی فرمت فایل پشتیبان. فقط همین نسخه برای Restore پشتیبانی
 /// می‌شود؛ طبق سیاست این مرحله («سیستم Migration کامل بین نسخه‌ها ساخته
 /// نشود مگر ضروری باشد»)، نسخه‌های دیگر با خطای صریح رد می‌شوند، نه حدس
 /// زده یا به‌زور Import شوند.
 const int kBackupFormatVersion = 5;
+
+/// کلید تنظیمات برای تاریخ آخرین پشتیبان‌گیری موفق - در همان جدول
+/// key-value تنظیمات موجود ذخیره می‌شود (بدون هیچ جدول/ستون جدید)، برای
+/// یادآور پشتیبان‌گیری در داشبورد.
+const String kLastBackupDateSettingKey = 'last_backup_date';
 
 /// استثنای اختصاصی برای خطاهای اعتبارسنجی/بازیابی پشتیبان - پیام آن برای
 /// نمایش مستقیم به کاربر مناسب است.
@@ -37,6 +43,11 @@ class BackupService {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${dir.path}/daftaryar_backup_$stamp.json');
     await file.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
+
+    // ثبت تاریخ آخرین پشتیبان‌گیری موفق - برای یادآور داشبورد. همین‌جا (نه
+    // پس از تأیید Share) ثبت می‌شود چون گزارش نتیجه Share روی همه پلتفرم‌ها
+    // قابل‌اتکا نیست؛ فایل پشتیبان با موفقیت ساخته شده که خودش هدف اصلی است.
+    await _db.setSetting(kLastBackupDateSettingKey, todayJalaliString());
 
     await Share.shareXFiles([XFile(file.path)], text: 'پشتیبان دفتریار');
     return file.path;

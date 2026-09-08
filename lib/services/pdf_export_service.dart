@@ -257,33 +257,7 @@ class PdfExportService {
 
                 if (transactions.isNotEmpty) ...[
                   _sectionTitle('گردش تراکنش‌ها'),
-                  pw.Table(
-                    border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-                    columnWidths: const {
-                      0: pw.FlexColumnWidth(1),
-                      1: pw.FlexColumnWidth(1),
-                      2: pw.FlexColumnWidth(2),
-                      3: pw.FlexColumnWidth(1.2),
-                    },
-                    children: [
-                      pw.TableRow(
-                        decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                        children: [
-                          _cell('تاریخ', bold: true),
-                          _cell('نوع', bold: true),
-                          _cell('شرح', bold: true),
-                          _cell('مبلغ', bold: true),
-                        ],
-                      ),
-                      for (final t in transactions)
-                        pw.TableRow(children: [
-                          _cell(formatJalaliLong(t['date'] as String)),
-                          _cell(t['type'] as String),
-                          _cell((t['description'] as String?) ?? '—'),
-                          _cell(formatMoney((t['amount'] as num).toDouble(), withSuffix: false)),
-                        ]),
-                    ],
-                  ),
+                  _transactionsTable(transactions),
                 ],
               ],
             ),
@@ -293,6 +267,87 @@ class PdfExportService {
     );
 
     await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$counterpartyName.pdf');
+  }
+
+  /// صورتحساب مختص یک پروژه خاص - برخلاف exportCounterpartyStatement که
+  /// همه پروژه‌های یک طرف‌حساب را با هم می‌آورد، این خروجی وقتی کاربر
+  /// می‌خواهد فقط وضعیت مالی یک کار مشخص را برای همان کارفرما بفرستد
+  /// (بدون افشای بقیه پروژه‌های او) استفاده می‌شود.
+  Future<void> exportProjectStatement({
+    required String projectTitle,
+    required String counterpartyName,
+    String? counterpartyPhone,
+    required double agreedAmount,
+    required double received,
+    required List<Map<String, dynamic>> transactions, // {date, description, type, amount}
+  }) async {
+    await _loadFonts();
+    final remaining = agreedAmount - received;
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        textDirection: pw.TextDirection.rtl,
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(28),
+        build: (ctx) => [
+          pw.Directionality(
+            textDirection: pw.TextDirection.rtl,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                _header('صورتحساب پروژه', projectTitle),
+                pw.Text(
+                    'کارفرما: $counterpartyName${counterpartyPhone != null ? ' — $counterpartyPhone' : ''}',
+                    style: pw.TextStyle(font: _regularFont, fontSize: 10, color: PdfColors.grey700)),
+                pw.Text('تاریخ صدور: ${formatJalaliLong(todayJalaliString())}',
+                    style: pw.TextStyle(font: _regularFont, fontSize: 9, color: PdfColors.grey600)),
+                pw.SizedBox(height: 14),
+                _row('مبلغ قرارداد', formatMoney(agreedAmount)),
+                _row('دریافتی', formatMoney(received)),
+                _row('باقی‌مانده', formatMoney(remaining), bold: true),
+                if (transactions.isNotEmpty) ...[
+                  _sectionTitle('گردش تراکنش‌ها'),
+                  _transactionsTable(transactions),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$projectTitle.pdf');
+  }
+
+  pw.Widget _transactionsTable(List<Map<String, dynamic>> transactions) {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1),
+        1: pw.FlexColumnWidth(1),
+        2: pw.FlexColumnWidth(2),
+        3: pw.FlexColumnWidth(1.2),
+      },
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _cell('تاریخ', bold: true),
+            _cell('نوع', bold: true),
+            _cell('شرح', bold: true),
+            _cell('مبلغ', bold: true),
+          ],
+        ),
+        for (final t in transactions)
+          pw.TableRow(children: [
+            _cell(formatJalaliLong(t['date'] as String)),
+            _cell(t['type'] as String),
+            _cell((t['description'] as String?) ?? '—'),
+            _cell(formatMoney((t['amount'] as num).toDouble(), withSuffix: false)),
+          ]),
+      ],
+    );
   }
 
   pw.Widget _cell(String text, {bool bold = false}) {

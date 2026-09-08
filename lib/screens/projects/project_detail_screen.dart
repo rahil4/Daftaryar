@@ -9,6 +9,7 @@ import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
 import '../../widgets/project_receipt_context_box.dart';
+import '../../services/pdf_export_service.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import 'project_form_screen.dart';
 import 'project_finance_screen.dart';
@@ -25,11 +26,13 @@ class ProjectDetailScreen extends StatefulWidget {
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTickerProviderStateMixin {
   late final TabController _tab = TabController(length: 3, vsync: this);
   final _db = DatabaseHelper.instance;
+  final _pdf = PdfExportService();
   late ProjectModel _project;
   CounterpartyModel? _counterparty;
   List<JournalEntryModel> _entries = [];
   Map<String, dynamic>? _summary;
   bool _loading = true;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -55,6 +58,41 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       _summary = summary;
       _loading = false;
     });
+  }
+
+  /// خروجی PDF صورتحساب مختص همین پروژه - برای ارسال به کارفرما، بدون
+  /// افشای بقیه پروژه‌های او (برخلاف خروجی سطح طرف‌حساب که همه را با هم
+  /// می‌آورد).
+  Future<void> _exportStatement() async {
+    setState(() => _exporting = true);
+    try {
+      final cashFlow = await _db.projectFinancials(_project.id!);
+      final transactions = <Map<String, dynamic>>[];
+      for (final e in _entries) {
+        for (final l in e.lines) {
+          if (l.projectId != _project.id) continue;
+          if (l.debit == 0 && l.credit == 0) continue;
+          transactions.add({
+            'date': e.date,
+            'description': e.description ?? _project.title,
+            'type': l.credit > 0 ? 'دریافت' : 'پرداخت',
+            'amount': l.credit > 0 ? l.credit : l.debit,
+          });
+        }
+      }
+      transactions.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+      await _pdf.exportProjectStatement(
+        projectTitle: _project.title,
+        counterpartyName: _counterparty?.name ?? '—',
+        counterpartyPhone: _counterparty?.phone,
+        agreedAmount: _project.agreedAmount,
+        received: cashFlow['received']!,
+        transactions: transactions,
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   /// لغو پروژه: یک Workflow مستقل و کوچک، نه یک انتخاب ساده در فرم عمومی
@@ -127,6 +165,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       appBar: AppBar(
         title: Text(_project.title),
         actions: [
+          IconButton(
+            icon: _exporting
+                ? const SizedBox(
+                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.ios_share_outlined),
+            tooltip: 'خروجی صورتحساب',
+            onPressed: _exporting ? null : _exportStatement,
+          ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
             onPressed: () async {

@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
+import '../models/attachment.dart';
 import '../models/counterparty.dart';
 import '../models/project.dart';
 import '../models/project_price_event.dart';
@@ -53,7 +54,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -196,6 +197,25 @@ class DatabaseHelper {
         );
       }
     }
+    if (oldVersion < 6) {
+      // پیوست عکس/رسید به سند - فقط یک جدول جدید و کاملاً خالی؛ هیچ جدول
+      // یا ستون موجودی تغییر نمی‌کند، پس هیچ داده مالی موجودی متأثر
+      // نمی‌شود (کم‌ریسک‌ترین نوع تغییر Schema).
+      await _createAttachmentsTable(db);
+    }
+  }
+
+  Future<void> _createAttachmentsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entryId INTEGER NOT NULL,
+        filePath TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_attachments_entryId ON attachments (entryId)');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -375,6 +395,8 @@ class DatabaseHelper {
         createdAt TEXT NOT NULL
       )
     ''');
+
+    await _createAttachmentsTable(db);
 
     await _seedDefaultAccounts(db);
   }
@@ -1146,6 +1168,33 @@ class DatabaseHelper {
         await db.query('journal_lines', where: 'entryId = ?', whereArgs: [id], orderBy: 'id ASC');
     final lines = lineMaps.map((m) => JournalLineModel.fromMap(m)).toList();
     return JournalEntryModel.fromMap(maps.first, lines: lines);
+  }
+
+  // ---------------- پیوست‌های سند (عکس/رسید) ----------------
+  // فقط داده مرجع/نمایشی - در هیچ محاسبه مالی مصرف نمی‌شود.
+
+  Future<int> insertAttachment(AttachmentModel a) async {
+    final db = await database;
+    return db.insert('attachments', a.toMap()..remove('id'));
+  }
+
+  Future<List<AttachmentModel>> getAttachments(int entryId) async {
+    final db = await database;
+    final maps =
+        await db.query('attachments', where: 'entryId = ?', whereArgs: [entryId], orderBy: 'id ASC');
+    return maps.map((m) => AttachmentModel.fromMap(m)).toList();
+  }
+
+  Future<AttachmentModel?> getAttachment(int id) async {
+    final db = await database;
+    final maps = await db.query('attachments', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return AttachmentModel.fromMap(maps.first);
+  }
+
+  Future<void> deleteAttachment(int id) async {
+    final db = await database;
+    await db.delete('attachments', where: 'id = ?', whereArgs: [id]);
   }
 
   /// سطرهای دفتر یک حساب به همراه تاریخ و شرح سند، برای نمایش دفتر معین/کل

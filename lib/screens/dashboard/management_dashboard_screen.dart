@@ -13,6 +13,7 @@ import '../counterparties/counterparty_form_screen.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
+import '../journal/journal_form_screen.dart';
 import '../projects/project_form_screen.dart';
 import '../reports/outstanding_receivables_screen.dart';
 import '../settings/settings_screen.dart';
@@ -501,6 +502,19 @@ class _QuickActionsRow extends StatelessWidget {
             onTap: () async {
               final result =
                   await Navigator.push(context, MaterialPageRoute(builder: (_) => const QuickExpenseScreen()));
+              if (result == true) onDone();
+            },
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _QuickActionButton(
+            label: 'سند',
+            icon: Icons.receipt_long_outlined,
+            color: AppColors.brass,
+            onTap: () async {
+              final result =
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const JournalFormScreen()));
               if (result == true) onDone();
             },
           ),

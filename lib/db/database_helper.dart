@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
 import '../models/attachment.dart';
+import '../models/cash_receipt_category.dart';
 import '../models/counterparty.dart';
 import '../models/project.dart';
 import '../models/project_price_event.dart';
@@ -1655,6 +1656,21 @@ class DatabaseHelper {
     return breakdown;
   }
 
+  /// تفکیک هزینه یک بازه به‌ازای هر زیرحساب هزینه، همراه با خودِ AccountModel
+  /// (نه فقط نام) - برای گزارش «دریافت و هزینه» که با زدن روی یک زیردسته،
+  /// اسناد همان حساب را نشان می‌دهد (accountId لازم است، نه فقط نامش).
+  Future<List<Map<String, dynamic>>> expenseBreakdownDetailed({String? fromDate, String? toDate}) async {
+    final accounts = await getAccounts(type: kAccountExpense);
+    final result = <Map<String, dynamic>>[];
+    for (final acc in accounts) {
+      final bal = await accountBalance(acc.id!, fromDate: fromDate, toDate: toDate);
+      if (bal['balance']! != 0) {
+        result.add({'account': acc, 'total': bal['balance']!});
+      }
+    }
+    return result;
+  }
+
   /// موجودی بانک‌ها به تفکیک زیرحساب: اگر حساب «بانک» زیرحساب داشته باشد
   /// (مثلاً بانک ملی، بانک صادرات)، هرکدام جداگانه برگردانده می‌شود؛
   /// در غیر این صورت خود حساب «بانک» به‌عنوان یک ردیف برگردانده می‌شود.
@@ -2832,6 +2848,116 @@ class DatabaseHelper {
       current = byId[current.parentId];
     }
     return false;
+  }
+
+  /// اسناد دقیقاً دوسطری با یک سمت نقد/بانکی بدهکار در بازه، به همراه طرف
+  /// مقابل - پایه مشترک برای مبلغ‌بندی (cashReceiptsBreakdown) و فهرست اسناد
+  /// (cashReceiptEntries) یک دسته، تا منطق طبقه‌بندی یک‌بار نوشته شود.
+  /// اسناد چندسطری (غیر دقیقاً دوسطری) به‌طور قطعی قابل طبقه‌بندی نیستند و
+  /// همیشه «سایر منابع» به‌حساب می‌آیند، دقیقاً مثل _classifyControlAccountMovement.
+  Future<List<Map<String, dynamic>>> _cashReceiptRows({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return [];
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(cashIds.length, '?').join(',');
+
+    String dateWhere = '';
+    final dateArgs = <Object?>[];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+
+    final allAccounts = await getAccounts();
+    final accountsById = {for (final a in allAccounts) if (a.id != null) a.id!: a};
+
+    final twoLineRows = await db.rawQuery('''
+      SELECT je.id as entryId, cl.debit as amount, other.accountId as otherAccountId
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      WHERE cl.accountId IN ($placeholders) AND cl.debit > 0
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $dateWhere
+    ''', [...cashIds, ...dateArgs]);
+
+    final result = <Map<String, dynamic>>[];
+    for (final row in twoLineRows) {
+      final otherAccountId = row['otherAccountId'] as int?;
+      final otherAccount = otherAccountId != null ? accountsById[otherAccountId] : null;
+      // انتقال بین دو حساب نقد/بانکی خودمان (مثلاً صندوق به بانک) دریافتی
+      // واقعی نیست - نباید در هیچ دسته‌ای شمرده شود.
+      if (otherAccount != null && _isCashOrBankById(otherAccountId, accountsById)) continue;
+      CashReceiptCategory category;
+      if (otherAccount?.systemKey == kSystemKeyCustomerAdvance ||
+          otherAccount?.systemKey == kSystemKeyReceivable) {
+        category = CashReceiptCategory.projects;
+      } else if (otherAccount?.type == kAccountIncome) {
+        category = CashReceiptCategory.directIncome;
+      } else {
+        category = CashReceiptCategory.other;
+      }
+      result.add({
+        'entryId': row['entryId'] as int,
+        'amount': (row['amount'] as num).toDouble(),
+        'category': category,
+      });
+    }
+
+    // اسناد غیر-دقیقاً-دوسطری: کامل و بدون طبقه‌بندی دقیق، در «سایر منابع».
+    final unclassified = await db.rawQuery('''
+      SELECT je.id as entryId, cl.debit as amount
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      WHERE cl.accountId IN ($placeholders) AND cl.debit > 0
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) != 2
+        $dateWhere
+    ''', [...cashIds, ...dateArgs]);
+    for (final row in unclassified) {
+      result.add({
+        'entryId': row['entryId'] as int,
+        'amount': (row['amount'] as num).toDouble(),
+        'category': CashReceiptCategory.other,
+      });
+    }
+
+    return result;
+  }
+
+  /// جمع دریافتی نقدی یک بازه، به تفکیک منبع - برای گزارش «دریافت و هزینه».
+  Future<Map<CashReceiptCategory, double>> cashReceiptsBreakdown(
+      {String? fromDate, String? toDate}) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final result = <CashReceiptCategory, double>{};
+    for (final row in rows) {
+      final category = row['category'] as CashReceiptCategory;
+      final amount = row['amount'] as double;
+      result[category] = (result[category] ?? 0) + amount;
+    }
+    return result;
+  }
+
+  /// اسناد دریافتی یک دسته مشخص در بازه - برای نمایش فهرست تک‌تک اسناد وقتی
+  /// کاربر روی یک دسته در گزارش «دریافت و هزینه» می‌زند.
+  Future<List<JournalEntryModel>> cashReceiptEntries({
+    required CashReceiptCategory category,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final entryIds = rows.where((r) => r['category'] == category).map((r) => r['entryId'] as int).toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
   }
 
   Future<Map<String, double>> _classifyControlAccountMovement({

@@ -2900,7 +2900,8 @@ class DatabaseHelper {
     final accountsById = {for (final a in allAccounts) if (a.id != null) a.id!: a};
 
     final twoLineRows = await db.rawQuery('''
-      SELECT je.id as entryId, cl.debit as amount, other.accountId as otherAccountId
+      SELECT je.id as entryId, cl.debit as amount, cl.counterpartyId as counterpartyId,
+             other.accountId as otherAccountId
       FROM journal_lines cl
       JOIN journal_entries je ON je.id = cl.entryId
       JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
@@ -2929,12 +2930,13 @@ class DatabaseHelper {
         'entryId': row['entryId'] as int,
         'amount': (row['amount'] as num).toDouble(),
         'category': category,
+        'counterpartyId': row['counterpartyId'] as int?,
       });
     }
 
     // اسناد غیر-دقیقاً-دوسطری: کامل و بدون طبقه‌بندی دقیق، در «سایر منابع».
     final unclassified = await db.rawQuery('''
-      SELECT je.id as entryId, cl.debit as amount
+      SELECT je.id as entryId, cl.debit as amount, cl.counterpartyId as counterpartyId
       FROM journal_lines cl
       JOIN journal_entries je ON je.id = cl.entryId
       WHERE cl.accountId IN ($placeholders) AND cl.debit > 0
@@ -2946,6 +2948,7 @@ class DatabaseHelper {
         'entryId': row['entryId'] as int,
         'amount': (row['amount'] as num).toDouble(),
         'category': CashReceiptCategory.other,
+        'counterpartyId': row['counterpartyId'] as int?,
       });
     }
 
@@ -2974,6 +2977,53 @@ class DatabaseHelper {
   }) async {
     final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
     final entryIds = rows.where((r) => r['category'] == category).map((r) => r['entryId'] as int).toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
+  }
+
+  /// دریافتی نقدی دسته «پروژه‌ها» یک بازه، به تفکیک مشتری - برای گزارش
+  /// «دریافت و هزینه» که با زدن روی «دریافت از مشتریان/پروژه‌ها»، اول فهرست
+  /// مشتری‌ها را نشان می‌دهد نه فهرست تخت همه اسناد. counterpartyId=null
+  /// یعنی سند دریافتی بدون طرف‌حساب مشخص (نامشخص).
+  Future<List<Map<String, dynamic>>> cashReceiptsByCustomer({String? fromDate, String? toDate}) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final projectRows = rows.where((r) => r['category'] == CashReceiptCategory.projects);
+    final totals = <int?, double>{};
+    for (final row in projectRows) {
+      final cpId = row['counterpartyId'] as int?;
+      totals[cpId] = (totals[cpId] ?? 0) + (row['amount'] as double);
+    }
+    final counterparties = await getCounterparties(includeInactive: true);
+    final byId = {for (final c in counterparties) if (c.id != null) c.id!: c};
+    final result = <Map<String, dynamic>>[];
+    totals.forEach((cpId, total) {
+      result.add({
+        'counterpartyId': cpId,
+        'counterpartyName': cpId != null ? (byId[cpId]?.name ?? 'نامشخص') : 'نامشخص',
+        'total': total,
+      });
+    });
+    return result;
+  }
+
+  /// اسناد دریافتی دسته «پروژه‌ها» یک مشتری مشخص در بازه - برای فهرست تک‌تک
+  /// اسناد وقتی کاربر روی نام آن مشتری می‌زند.
+  Future<List<JournalEntryModel>> cashReceiptEntriesForCustomer({
+    required int? counterpartyId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final entryIds = rows
+        .where((r) =>
+            r['category'] == CashReceiptCategory.projects && r['counterpartyId'] == counterpartyId)
+        .map((r) => r['entryId'] as int)
+        .toSet();
     final entries = <JournalEntryModel>[];
     for (final id in entryIds) {
       final entry = await getJournalEntry(id);

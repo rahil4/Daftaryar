@@ -343,4 +343,56 @@ void main() {
       expect(beforeSecond, 5000000);
     });
   });
+
+  group('cashReceiptsByCustomer / cashReceiptEntriesForCustomer — دریافتی به تفکیک مشتری', () {
+    test('دو مشتری جدا با دریافتی جدا، هرکدام ردیف مستقل خودشان را می‌گیرند', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final cp1 = await createCounterparty('مشتری اول');
+      final cp2 = await createCounterparty('مشتری دوم');
+      final project1 = await createProject(cp1);
+      final project2 = await createProject(cp2);
+
+      await db.receiveProjectPayment(
+          projectId: project1, cashAccountId: cash.id!, amount: 3000000, date: '1404/02/01');
+      await db.receiveProjectPayment(
+          projectId: project2, cashAccountId: cash.id!, amount: 5000000, date: '1404/02/02');
+
+      final breakdown =
+          await db.cashReceiptsByCustomer(fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(breakdown.length, 2);
+
+      final row1 = breakdown.firstWhere((r) => r['counterpartyId'] == cp1);
+      final row2 = breakdown.firstWhere((r) => r['counterpartyId'] == cp2);
+      expect(row1['counterpartyName'], 'مشتری اول');
+      expect(row1['total'], 3000000);
+      expect(row2['counterpartyName'], 'مشتری دوم');
+      expect(row2['total'], 5000000);
+
+      final entries1 = await db.cashReceiptEntriesForCustomer(
+          counterpartyId: cp1, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(entries1.length, 1);
+      final entries2 = await db.cashReceiptEntriesForCustomer(
+          counterpartyId: cp2, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(entries2.length, 1);
+    });
+
+    test('دریافتی مستقیم/غیرپروژه‌ای در تفکیک مشتری لحاظ نمی‌شود', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final otherIncome =
+          (await db.getAccounts(type: kAccountIncome)).firstWhere((a) => a.name == 'سایر درآمدها');
+
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/01',
+        createdAt: '1404/02/01',
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 1000000),
+          JournalLineModel(accountId: otherIncome.id!, credit: 1000000),
+        ],
+      ));
+
+      final breakdown =
+          await db.cashReceiptsByCustomer(fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(breakdown, isEmpty);
+    });
+  });
 }

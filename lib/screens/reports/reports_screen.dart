@@ -4,7 +4,9 @@ import 'package:shamsi_date/shamsi_date.dart';
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
 import '../../models/cash_receipt_category.dart';
+import '../../models/financial_reports.dart';
 import '../../models/journal_entry.dart';
+import '../../services/financial_reporting_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import 'outstanding_receivables_screen.dart';
@@ -25,7 +27,7 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 3, vsync: this);
+  late final TabController _tab = TabController(length: 4, vsync: this);
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +56,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
             Tab(text: 'سود و زیان'),
             Tab(text: 'تراز آزمایشی'),
             Tab(text: 'دریافت و هزینه'),
+            Tab(text: 'سود مشتریان'),
           ],
         ),
       ),
@@ -63,6 +66,7 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           _ProfitLossTab(),
           _TrialBalanceTab(),
           _CashActivityTab(),
+          _CustomerProfitTab(),
         ],
       ),
     );
@@ -974,6 +978,18 @@ class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen
       e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.debit);
 
   void _openCategory(CashReceiptCategory category) {
+    // دسته «پروژه‌ها» اول به تفکیک مشتری می‌رود (نه مستقیم فهرست تخت اسناد) -
+    // تا کاربر یک‌نگاه ببیند از هر مشتری چقدر دریافت کرده.
+    if (category == CashReceiptCategory.projects) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _CashReceiptCustomerBreakdownScreen(
+              fromDate: widget.fromDate, toDate: widget.toDate),
+        ),
+      );
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1000,6 +1016,81 @@ class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen
         .toList();
     return _BreakdownListView(
       title: 'دریافتی به تفکیک منبع',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
+
+/// دریافتی از مشتریان/پروژه‌ها در یک بازه، به تفکیک هر مشتری - زدن روی هر
+/// مشتری، فهرست اسناد دریافتی همان مشتری را باز می‌کند.
+class _CashReceiptCustomerBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  const _CashReceiptCustomerBreakdownScreen({required this.fromDate, required this.toDate});
+
+  @override
+  State<_CashReceiptCustomerBreakdownScreen> createState() =>
+      _CashReceiptCustomerBreakdownScreenState();
+}
+
+class _CashReceiptCustomerBreakdownScreenState extends State<_CashReceiptCustomerBreakdownScreen> {
+  final _db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _breakdown = [];
+  Set<int> _cashAccountIds = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final breakdown =
+        await _db.cashReceiptsByCustomer(fromDate: widget.fromDate, toDate: widget.toDate);
+    breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final cashAccounts = await _db.getCashAccounts();
+    setState(() {
+      _breakdown = breakdown;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
+      _loading = false;
+    });
+  }
+
+  int _amountOf(JournalEntryModel e) =>
+      e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.debit);
+
+  void _openCustomer(int? counterpartyId, String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: name,
+          loadEntries: () => _db.cashReceiptEntriesForCustomer(
+              counterpartyId: counterpartyId, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: _amountOf,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final total = _breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final rows = _breakdown
+        .map((r) => _BreakdownRow(
+              label: r['counterpartyName'] as String,
+              amount: r['total'] as double,
+              onTap: () => _openCustomer(r['counterpartyId'] as int?, r['counterpartyName'] as String),
+            ))
+        .toList();
+    return _BreakdownListView(
+      title: 'دریافتی از مشتریان به تفکیک مشتری',
       subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
       total: total,
       rows: rows,
@@ -1298,3 +1389,187 @@ class _TransactionListScreenState extends State<_TransactionListScreen> {
   }
 }
 
+
+/// ---------------- تب سود مشتریان: سود واقعی هر مشتری (نه فقط دریافتی) ----------------
+/// برخلاف تب «دریافت و هزینه» که کاملاً نقدی و مربوط به یک بازه انتخابی
+/// است، این تب حسابداری/تعهدی و Lifetime است: مبلغ نهایی پروژه‌های
+/// Finalize‌شده هر مشتری (netRevenue) منهای هزینه مستقیم همان پروژه‌ها
+/// (directProjectCost) = سود واقعی (Contribution). عمداً بازه‌ای نیست، چون
+/// این نسبت مستقیماً به FinancialReportingService.getAllCustomerReports که
+/// از قبل Lifetime طراحی شده متکی است - رجوع به توضیح خودِ آن سرویس.
+class _CustomerProfitTab extends StatefulWidget {
+  const _CustomerProfitTab();
+
+  @override
+  State<_CustomerProfitTab> createState() => _CustomerProfitTabState();
+}
+
+class _CustomerProfitTabState extends State<_CustomerProfitTab> {
+  final _db = DatabaseHelper.instance;
+  final _reporting = FinancialReportingService();
+  List<CustomerFinancialReport> _reports = [];
+  Map<int, String> _names = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final reports = await _reporting.getAllCustomerReports(sortBy: CustomerReportSort.contribution);
+    final counterparties = await _db.getCounterparties(includeInactive: true);
+    setState(() {
+      _reports = reports;
+      _names = {for (final c in counterparties) if (c.id != null) c.id!: c.name};
+      _loading = false;
+    });
+  }
+
+  void _openCustomer(CustomerFinancialReport report) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _CustomerProjectsScreen(
+          counterpartyId: report.counterpartyId,
+          counterpartyName: _names[report.counterpartyId] ?? 'نامشخص',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlueprintGridBackground(
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                children: [
+                  const Text('سود مشتریان',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'مبلغ نهایی پروژه‌های تکمیل‌شده هر مشتری منهای هزینه مستقیم همان پروژه‌ها - کل عمر (نه یک بازه)',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_reports.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text('هنوز هیچ پروژه‌ای ثبت نشده.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    ..._reports.map((r) {
+                      final name = _names[r.counterpartyId] ?? 'نامشخص';
+                      final profit = r.projectContribution;
+                      final margin = r.contributionMargin;
+                      final color = profit == null
+                          ? AppColors.textSecondary
+                          : (profit >= 0 ? AppColors.positive : AppColors.negative);
+                      return Card(
+                        child: ListTile(
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(
+                            'درآمد خالص: ${formatMoney(r.netRevenue, withSuffix: false)}'
+                            '  ·  هزینه مستقیم: ${formatMoney(r.directProjectCost, withSuffix: false)}'
+                            '${margin != null ? '\nحاشیه سود: ${margin.toStringAsFixed(1)}٪' : ''}',
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                          ),
+                          isThreeLine: margin != null,
+                          trailing: Text(
+                            profit != null ? formatMoney(profit, withSuffix: false) : '—',
+                            style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 14),
+                          ),
+                          onTap: () => _openCustomer(r),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+/// پروژه‌های یک مشتری با سود/زیان تک‌تک آن‌ها - درون‌رفت از تب سود مشتریان.
+class _CustomerProjectsScreen extends StatefulWidget {
+  final int counterpartyId;
+  final String counterpartyName;
+  const _CustomerProjectsScreen({required this.counterpartyId, required this.counterpartyName});
+
+  @override
+  State<_CustomerProjectsScreen> createState() => _CustomerProjectsScreenState();
+}
+
+class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
+  final _reporting = FinancialReportingService();
+  List<ProjectFinancialReport> _projects = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final projects = await _reporting.getProjectReports(counterpartyId: widget.counterpartyId);
+    final sorted = _reporting.sortProjectReports(projects, ProjectReportSort.contribution);
+    setState(() {
+      _projects = sorted;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.counterpartyName)),
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _projects.isEmpty
+                ? const Center(
+                    child: Text('این مشتری هنوز پروژه‌ای ندارد.',
+                        style: TextStyle(color: AppColors.textSecondary)))
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: _projects.map((p) {
+                      final color = !p.isFinalized
+                          ? AppColors.textSecondary
+                          : (p.projectContribution == null
+                              ? AppColors.textSecondary
+                              : (p.projectContribution! >= 0 ? AppColors.positive : AppColors.negative));
+                      return Card(
+                        child: ListTile(
+                          title: Text(p.projectName),
+                          subtitle: Text(
+                            !p.isFinalized
+                                ? 'نهایی نشده - هنوز درآمد شناسایی نشده'
+                                : 'درآمد خالص: ${formatMoney(p.netRevenue ?? 0, withSuffix: false)}'
+                                    '  ·  هزینه مستقیم: ${formatMoney(p.directProjectCost, withSuffix: false)}',
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                          ),
+                          trailing: Text(
+                            p.isFinalized && p.projectContribution != null
+                                ? formatMoney(p.projectContribution!, withSuffix: false)
+                                : '—',
+                            style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 14),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+      ),
+    );
+  }
+}

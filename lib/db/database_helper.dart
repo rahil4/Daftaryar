@@ -1656,16 +1656,39 @@ class DatabaseHelper {
     return breakdown;
   }
 
-  /// تفکیک هزینه یک بازه به‌ازای هر زیرحساب هزینه، همراه با خودِ AccountModel
-  /// (نه فقط نام) - برای گزارش «دریافت و هزینه» که با زدن روی یک زیردسته،
-  /// اسناد همان حساب را نشان می‌دهد (accountId لازم است، نه فقط نامش).
-  Future<List<Map<String, dynamic>>> expenseBreakdownDetailed({String? fromDate, String? toDate}) async {
-    final accounts = await getAccounts(type: kAccountExpense);
+  /// مانده یک حساب به‌همراه همه زیرحساب‌هایش (بازگشتی) - سرشاخه = مجموع
+  /// زیرشاخه‌ها تا برگ‌ها، دقیقاً مطابق ساختار واقعی دفتر حساب‌ها. برای
+  /// گزارش سلسله‌مراتبی «دریافت و هزینه» (سرشاخه → زیرشاخه → ... → برگ).
+  Future<double> accountBalanceWithDescendants(int accountId, {String? fromDate, String? toDate}) async {
+    final own = await accountBalance(accountId, fromDate: fromDate, toDate: toDate);
+    double total = own['balance']!;
+    final account = await getAccount(accountId);
+    if (account == null) return total;
+    final siblings = await getAccounts(type: account.type);
+    for (final child in siblings.where((a) => a.parentId == accountId)) {
+      total += await accountBalanceWithDescendants(child.id!, fromDate: fromDate, toDate: toDate);
+    }
+    return total;
+  }
+
+  /// زیرشاخه‌های مستقیم یک حساب (یا سرشاخه‌های یک نوع، اگر parentId=null)،
+  /// هرکدام با مانده رول‌آپ‌شده (خودش + همه زیرشاخه‌هایش) - برای نمایش
+  /// سلسله‌مراتبی گزارش «دریافت و هزینه»: کاربر از سرشاخه شروع می‌کند و با
+  /// زدن روی هر ردیف که hasChildren دارد، یک سطح پایین‌تر می‌رود، تا به برگ‌ها برسد.
+  Future<List<Map<String, dynamic>>> accountChildrenBreakdown(
+    String type, {
+    int? parentId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final all = await getAccounts(type: type);
+    final children = all.where((a) => a.parentId == parentId);
     final result = <Map<String, dynamic>>[];
-    for (final acc in accounts) {
-      final bal = await accountBalance(acc.id!, fromDate: fromDate, toDate: toDate);
-      if (bal['balance']! != 0) {
-        result.add({'account': acc, 'total': bal['balance']!});
+    for (final acc in children) {
+      final total = await accountBalanceWithDescendants(acc.id!, fromDate: fromDate, toDate: toDate);
+      final hasChildren = all.any((a) => a.parentId == acc.id);
+      if (total != 0) {
+        result.add({'account': acc, 'total': total, 'hasChildren': hasChildren});
       }
     }
     return result;

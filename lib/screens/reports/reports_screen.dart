@@ -958,11 +958,23 @@ class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen
   }
 }
 
-/// هزینه یک بازه به تفکیک زیرحساب - زدن روی هر زیرحساب، فهرست اسناد همان حساب را باز می‌کند
+/// هزینه یک بازه، به‌صورت سلسله‌مراتبی: اول سرشاخه‌های هزینه (هرکدام مجموع
+/// زیرشاخه‌هایش)، با زدن روی هرکدام یک سطح پایین‌تر می‌رویم، تا به یک برگ
+/// (حساب بدون زیرحساب) برسیم که آنجا فهرست تک‌تک اسناد باز می‌شود. اگر خودِ
+/// یک سرشاخه هم پیش از گرفتن زیرحساب سند مستقیم داشته (طبق قاعده Leaf-Lock
+/// دیگر بعد از آن اجازه ثبت مستقیم ندارد)، آن مبلغ هم به‌صورت یک ردیف جدا
+/// («ثبت مستقیم») نشان داده می‌شود تا مجموع همیشه دقیقاً درست باشد.
 class _ExpenseBreakdownScreen extends StatefulWidget {
   final String fromDate;
   final String toDate;
-  const _ExpenseBreakdownScreen({required this.fromDate, required this.toDate});
+  final int? parentId;
+  final String? parentAccountName;
+  const _ExpenseBreakdownScreen({
+    required this.fromDate,
+    required this.toDate,
+    this.parentId,
+    this.parentAccountName,
+  });
 
   @override
   State<_ExpenseBreakdownScreen> createState() => _ExpenseBreakdownScreenState();
@@ -970,7 +982,8 @@ class _ExpenseBreakdownScreen extends StatefulWidget {
 
 class _ExpenseBreakdownScreenState extends State<_ExpenseBreakdownScreen> {
   final _db = DatabaseHelper.instance;
-  List<Map<String, dynamic>> _breakdown = [];
+  List<Map<String, dynamic>> _children = [];
+  double? _ownDirect;
   bool _loading = true;
 
   @override
@@ -980,28 +993,51 @@ class _ExpenseBreakdownScreenState extends State<_ExpenseBreakdownScreen> {
   }
 
   Future<void> _load() async {
-    final breakdown =
-        await _db.expenseBreakdownDetailed(fromDate: widget.fromDate, toDate: widget.toDate);
-    breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final children = await _db.accountChildrenBreakdown(kAccountExpense,
+        parentId: widget.parentId, fromDate: widget.fromDate, toDate: widget.toDate);
+    children.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    double? ownDirect;
+    if (widget.parentId != null) {
+      final bal = await _db.accountBalance(widget.parentId!, fromDate: widget.fromDate, toDate: widget.toDate);
+      ownDirect = bal['balance']! != 0 ? bal['balance'] : null;
+    }
     setState(() {
-      _breakdown = breakdown;
+      _children = children;
+      _ownDirect = ownDirect;
       _loading = false;
     });
   }
 
-  void _openAccount(AccountModel account) {
+  void _openTransactions(int accountId, String label) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => _TransactionListScreen(
-          title: account.name,
+          title: label,
           loadEntries: () =>
-              _db.getJournalEntries(accountId: account.id, fromDate: widget.fromDate, toDate: widget.toDate),
-          amountOf: (e) =>
-              e.lines.where((l) => l.accountId == account.id).fold(0, (s, l) => s + l.debit),
+              _db.getJournalEntries(accountId: accountId, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: (e) => e.lines.where((l) => l.accountId == accountId).fold(0, (s, l) => s + l.debit),
         ),
       ),
     );
+  }
+
+  void _openChild(AccountModel account, bool hasChildren) {
+    if (hasChildren) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _ExpenseBreakdownScreen(
+            fromDate: widget.fromDate,
+            toDate: widget.toDate,
+            parentId: account.id,
+            parentAccountName: account.name,
+          ),
+        ),
+      );
+    } else {
+      _openTransactions(account.id!, account.name);
+    }
   }
 
   @override
@@ -1009,16 +1045,23 @@ class _ExpenseBreakdownScreenState extends State<_ExpenseBreakdownScreen> {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    final total = _breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
-    final rows = _breakdown
-        .map((r) => _BreakdownRow(
-              label: (r['account'] as AccountModel).name,
-              amount: r['total'] as double,
-              onTap: () => _openAccount(r['account'] as AccountModel),
-            ))
-        .toList();
+    final childrenSum = _children.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final total = childrenSum + (_ownDirect ?? 0);
+    final rows = <_BreakdownRow>[
+      if (_ownDirect != null)
+        _BreakdownRow(
+          label: 'ثبت مستقیم روی «${widget.parentAccountName}»',
+          amount: _ownDirect!,
+          onTap: () => _openTransactions(widget.parentId!, widget.parentAccountName!),
+        ),
+      ..._children.map((r) => _BreakdownRow(
+            label: (r['account'] as AccountModel).name,
+            amount: r['total'] as double,
+            onTap: () => _openChild(r['account'] as AccountModel, r['hasChildren'] as bool),
+          )),
+    ];
     return _BreakdownListView(
-      title: 'هزینه به تفکیک زیردسته',
+      title: widget.parentAccountName ?? 'هزینه به تفکیک زیردسته',
       subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
       total: total,
       rows: rows,

@@ -142,8 +142,8 @@ void main() {
     });
   });
 
-  group('expenseBreakdownDetailed — تفکیک هزینه به زیرحساب', () {
-    test('هزینه به‌تفکیک زیرحساب گروه‌بندی می‌شود و فهرست اسناد آن قابل بازیابی است', () async {
+  group('accountChildrenBreakdown / accountBalanceWithDescendants — تفکیک سلسله‌مراتبی هزینه', () {
+    test('یک برگ بدون زیرحساب مستقیم در سطح سرشاخه‌ها ظاهر می‌شود و فهرست اسناد آن قابل بازیابی است', () async {
       final cash = (await db.getCashAccounts()).first;
       final transport =
           (await db.getAccounts(type: kAccountExpense)).firstWhere((a) => a.name == 'حمل و نقل');
@@ -158,14 +158,71 @@ void main() {
         ],
       ));
 
-      final breakdown = await db.expenseBreakdownDetailed(fromDate: '1404/01/01', toDate: '1404/12/29');
-      final row = breakdown.firstWhere((r) => (r['account'] as AccountModel).name == 'حمل و نقل');
+      final roots =
+          await db.accountChildrenBreakdown(kAccountExpense, fromDate: '1404/01/01', toDate: '1404/12/29');
+      final row = roots.firstWhere((r) => (r['account'] as AccountModel).name == 'حمل و نقل');
       expect(row['total'], 800000);
+      expect(row['hasChildren'], false);
 
       final entries = await db.getJournalEntries(
           accountId: transport.id, fromDate: '1404/01/01', toDate: '1404/12/29');
       expect(entries.length, 1);
       expect(entries.first.description, 'کرایه رفت‌وآمد میدانی');
+    });
+
+    test('سرشاخه = مجموع زیرشاخه‌ها؛ زیرشاخه با زیرشاخه ادامه‌دار درست جمع می‌بندد تا برگ', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final officeExpense =
+          (await db.getAccounts(type: kAccountExpense)).firstWhere((a) => a.name == 'هزینه‌های دفتر');
+
+      // یک زیرشاخه مستقیم زیر سرشاخه، و یک زیرشاخهِ زیرشاخه (دو سطح پایین‌تر)
+      final level1 = await db.insertAccount(AccountModel(
+        name: 'اجاره دفتر',
+        type: kAccountExpense,
+        parentId: officeExpense.id,
+        allowChildren: true,
+        createdAt: '1404/01/01',
+      ));
+      final level2 = await db.insertAccount(AccountModel(
+        name: 'اجاره شعبه مرکزی',
+        type: kAccountExpense,
+        parentId: level1,
+        createdAt: '1404/01/01',
+      ));
+
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/20',
+        createdAt: '1404/02/20',
+        description: 'اجاره ماهانه شعبه مرکزی',
+        lines: [
+          JournalLineModel(accountId: level2, debit: 3000000),
+          JournalLineModel(accountId: cash.id!, credit: 3000000),
+        ],
+      ));
+
+      // سرشاخه («هزینه‌های دفتر») باید کل ۳ میلیون را از دو سطح پایین‌تر رول‌آپ کند
+      final rootTotal =
+          await db.accountBalanceWithDescendants(officeExpense.id!, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(rootTotal, 3000000);
+
+      final roots =
+          await db.accountChildrenBreakdown(kAccountExpense, fromDate: '1404/01/01', toDate: '1404/12/29');
+      final officeRow = roots.firstWhere((r) => (r['account'] as AccountModel).id == officeExpense.id);
+      expect(officeRow['total'], 3000000);
+      expect(officeRow['hasChildren'], true);
+
+      final underOffice = await db.accountChildrenBreakdown(kAccountExpense,
+          parentId: officeExpense.id, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(underOffice.length, 1);
+      expect(underOffice.first['total'], 3000000);
+      expect(underOffice.first['hasChildren'], true);
+
+      final underLevel1 =
+          await db.accountChildrenBreakdown(kAccountExpense, parentId: level1, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(underLevel1.length, 1);
+      expect((underLevel1.first['account'] as AccountModel).name, 'اجاره شعبه مرکزی');
+      expect(underLevel1.first['total'], 3000000);
+      expect(underLevel1.first['hasChildren'], false);
     });
   });
 }

@@ -356,16 +356,38 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                     ProjectReceiptContextBox(project: _selectedProject!, summary: _projectSummary!),
                   ],
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<int?>(
-                    initialValue: _projectId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('—')),
-                      ..._projects.map((p) => DropdownMenuItem(value: p.id, child: Text(p.title))),
-                    ],
-                    onChanged: _onProjectChanged,
-                  ),
+                  // «ایجاد طلب» با انتخاب پروژه ترکیب نمی‌شود: این اپ هیچ راهی
+                  // برای ساختن طلب روی یک پروژه نهایی‌نشده ندارد (طلب فقط با
+                  // نهایی‌سازی پروژه ساخته می‌شود). اگر این دراپ‌داون این‌جا
+                  // نمایش داده می‌شد، انتخاب پروژه بی‌سروصدا خودِ حالت «ایجاد
+                  // طلب» را نادیده می‌گرفت و به‌جایش receiveProjectPayment
+                  // (یعنی دریافت نقدی واقعی/پیش‌دریافت) اجرا می‌شد - دقیقاً
+                  // همان گزارش کاربر: بانک بدهکار شد برای پولی که واقعاً
+                  // دریافت نشده بود.
+                  if (_mode == _ReceiptMode.creditSale)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.textSecondary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'طلب ایجادشده در این حالت به هیچ پروژه‌ای وصل نمی‌شود. برای طلب یک پروژه '
+                        'مشخص، آن پروژه را نهایی کنید - طلب پروژه فقط با نهایی‌سازی ساخته می‌شود.',
+                        style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<int?>(
+                      initialValue: _projectId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'پروژه (اختیاری)'),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('—')),
+                        ..._projects.map((p) => DropdownMenuItem(value: p.id, child: Text(p.title))),
+                      ],
+                      onChanged: _onProjectChanged,
+                    ),
                   const SizedBox(height: 12),
                   JalaliDateField(
                     label: 'تاریخ',

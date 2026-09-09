@@ -5,7 +5,7 @@ import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/formatters.dart';
 
-/// یک سری داده برای نمودار چندخطی
+/// یک سری داده برای نمودار چندستونی
 class ChartSeries {
   final String label;
   final List<TrendPoint> points;
@@ -13,15 +13,12 @@ class ChartSeries {
   const ChartSeries({required this.label, required this.points, required this.color});
 }
 
-/// نمودار مقایسه‌ای چندخطی - برای نمایش دو سری هم‌واحد (مثلاً درآمد
-/// شناسایی‌شده در برابر دریافت نقدی) روی یک محور مشترک، تا شکاف بین آن‌ها
-/// مستقیماً دیده شود نه با مقایسه ذهنی دو نمودار جدا.
+/// نمودار مقایسه‌ای چندستونی (گروهی) - برای نمایش دو سری هم‌واحد (مثلاً
+/// درآمد شناسایی‌شده در برابر دریافت نقدی) کنار هم در هر بازه، تا شکاف بین
+/// آن‌ها مستقیماً دیده شود نه با مقایسه ذهنی دو نمودار جدا.
 ///
-/// فقط خط رسم می‌شود (بدون پرکردن ناحیه زیر خط) چون با دو ناحیه نیمه‌شفاف
-/// روی هم، دقیقاً محل تقاطع - که مهم‌ترین نقطه نمودار است - گل‌آلود می‌شود.
-///
-/// نقاط null (غیرقابل‌محاسبه) به‌جای صفر، از نمودار حذف می‌شوند تا خط را
-/// به‌اشتباه به سمت صفر نکشند.
+/// نقاط null (غیرقابل‌محاسبه) به‌جای صفر، از نمودار حذف می‌شوند تا یک ستون
+/// صفر به‌اشتباه به‌جای «داده‌ای نیست» خوانده نشود.
 class MultiTrendChartWidget extends StatelessWidget {
   final String title;
   final List<ChartSeries> series;
@@ -34,22 +31,28 @@ class MultiTrendChartWidget extends StatelessWidget {
     // سری‌ها از یک مجموعه Bucket ماهانه می‌آیند پس هم‌ترازند.
     final labels = series.isEmpty ? <String>[] : series.first.points.map((p) => p.label).toList();
 
-    final barsData = <LineChartBarData>[];
+    final maxIndex = labels.length;
+    final groups = <BarChartGroupData>[];
+    // نگاشت هر ستون داخل یک گروه به شناسه سری اصلی‌اش - چون وقتی یکی از
+    // سری‌ها در یک نقطه null باشد، آن ستون اصلاً ساخته نمی‌شود و rodIndex
+    // دیگر مستقیماً با ایندکس series یکی نیست.
+    final groupSeriesIndices = <int, List<int>>{};
     var hasAnyData = false;
-    for (final s in series) {
-      final valid = <int, double>{};
-      for (var i = 0; i < s.points.length; i++) {
-        if (s.points[i].value != null) valid[i] = s.points[i].value!;
+    for (var i = 0; i < maxIndex; i++) {
+      final rods = <BarChartRodData>[];
+      final seriesIdx = <int>[];
+      for (var sIdx = 0; sIdx < series.length; sIdx++) {
+        final v = i < series[sIdx].points.length ? series[sIdx].points[i].value : null;
+        if (v == null) continue;
+        hasAnyData = true;
+        rods.add(BarChartRodData(
+            toY: v, color: series[sIdx].color, width: 7, borderRadius: BorderRadius.circular(2)));
+        seriesIdx.add(sIdx);
       }
-      if (valid.isNotEmpty) hasAnyData = true;
-      barsData.add(LineChartBarData(
-        spots: valid.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList(),
-        isCurved: true,
-        color: s.color,
-        barWidth: 2.5,
-        dotData: const FlDotData(show: true),
-        belowBarData: BarAreaData(show: false),
-      ));
+      if (rods.isNotEmpty) {
+        groups.add(BarChartGroupData(x: i, barRods: rods, barsSpace: 4));
+        groupSeriesIndices[i] = seriesIdx;
+      }
     }
 
     return Card(
@@ -70,7 +73,7 @@ class MultiTrendChartWidget extends StatelessWidget {
                         children: [
                           Container(
                             width: 10,
-                            height: 3,
+                            height: 10,
                             decoration:
                                 BoxDecoration(color: s.color, borderRadius: BorderRadius.circular(2)),
                           ),
@@ -97,8 +100,8 @@ class MultiTrendChartWidget extends StatelessWidget {
                   // لیبل ماه اول و آخر دقیقاً روی لبه نمودار قرار می‌گیرند
                   // و بدون این حاشیه، از کارت بیرون زده و بریده می‌شوند.
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: LineChart(
-                    LineChartData(
+                  child: BarChart(
+                    BarChartData(
                       gridData: const FlGridData(show: false),
                       titlesData: FlTitlesData(
                         leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -129,27 +132,23 @@ class MultiTrendChartWidget extends StatelessWidget {
                         ),
                       ),
                       borderData: FlBorderData(show: false),
-                      lineBarsData: barsData,
+                      barGroups: groups,
                       // نمایش جزئیات با لمس: تاریخ Bucket + مقدار دقیق هر
                       // سری - قبلاً نمودار فقط شکل خط را نشان می‌داد، بدون
                       // هیچ عدد قابل‌خواندنی.
-                      lineTouchData: LineTouchData(
-                        touchTooltipData: LineTouchTooltipData(
-                          getTooltipItems: (touchedSpots) {
-                            return touchedSpots.asMap().entries.map((entry) {
-                              final spot = entry.value;
-                              final idx = spot.x.toInt();
-                              final label = idx >= 0 && idx < labels.length ? labels[idx] : '';
-                              final s = series[spot.barIndex];
-                              final text = entry.key == 0 && label.isNotEmpty
-                                  ? '$label\n${s.label}: ${formatMoney(spot.y, withSuffix: false)}'
-                                  : '${s.label}: ${formatMoney(spot.y, withSuffix: false)}';
-                              return LineTooltipItem(
-                                text,
-                                TextStyle(
-                                    color: s.color, fontWeight: FontWeight.bold, fontSize: 11),
-                              );
-                            }).toList();
+                      barTouchData: BarTouchData(
+                        touchTooltipData: BarTouchTooltipData(
+                          getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                            final idx = group.x;
+                            final label = idx >= 0 && idx < labels.length ? labels[idx] : '';
+                            final seriesIdxList = groupSeriesIndices[idx] ?? const [];
+                            final s = rodIndex < seriesIdxList.length
+                                ? series[seriesIdxList[rodIndex]]
+                                : series.first;
+                            return BarTooltipItem(
+                              '$label\n${s.label}: ${formatMoney(rod.toY, withSuffix: false)}',
+                              TextStyle(color: s.color, fontWeight: FontWeight.bold, fontSize: 11),
+                            );
                           },
                         ),
                       ),

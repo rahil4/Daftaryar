@@ -5,8 +5,8 @@ import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/formatters.dart';
 
-/// نمودار روند ماهانه ساده - نقاط null (غیرقابل‌محاسبه) به‌جای صفر، از
-/// نمودار حذف می‌شوند تا خط را به‌اشتباه به سمت صفر نکشند.
+/// نمودار روند ماهانه ستونی - نقاط null (غیرقابل‌محاسبه) به‌جای صفر، از
+/// نمودار حذف می‌شوند تا یک ستون صفر به‌اشتباه به‌جای «داده‌ای نیست» خوانده نشود.
 class TrendChartWidget extends StatelessWidget {
   final String title;
   final List<TrendPoint> points;
@@ -44,63 +44,65 @@ class TrendChartWidget extends StatelessWidget {
                   // لیبل ماه اول و آخر روی لبه نمودار قرار می‌گیرند و بدون
                   // این حاشیه از کارت بیرون زده و بریده می‌شوند.
                   padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: LineChart(
-                  LineChartData(
-                    gridData: const FlGridData(show: false),
-                    titlesData: FlTitlesData(
-                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          // نام ماه‌های فارسی چند برابر معادل لاتین عرض
-                          // می‌گیرند؛ بدون interval، برچسب‌ها روی عرض
-                          // موبایل در هم می‌روند.
-                          interval: points.length <= 4 ? 1 : (points.length / 4).ceilToDouble(),
-                          reservedSize: 28,
-                          getTitlesWidget: (value, meta) {
-                            final idx = value.toInt();
-                            if (idx < 0 || idx >= points.length) return const SizedBox.shrink();
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(points[idx].label.split(' ').first,
-                                  maxLines: 1,
-                                  style: const TextStyle(fontSize: 9, color: AppColors.textSecondary)),
+                  child: BarChart(
+                    BarChartData(
+                      gridData: const FlGridData(show: false),
+                      titlesData: FlTitlesData(
+                        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            // نام ماه‌های فارسی چند برابر معادل لاتین عرض
+                            // می‌گیرند؛ بدون interval، برچسب‌ها روی عرض
+                            // موبایل در هم می‌روند.
+                            interval: points.length <= 4 ? 1 : (points.length / 4).ceilToDouble(),
+                            reservedSize: 28,
+                            getTitlesWidget: (value, meta) {
+                              final idx = value.toInt();
+                              if (idx < 0 || idx >= points.length) return const SizedBox.shrink();
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(points[idx].label.split(' ').first,
+                                    maxLines: 1,
+                                    style: const TextStyle(fontSize: 9, color: AppColors.textSecondary)),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      barGroups: validPoints.entries
+                          .map((e) => BarChartGroupData(
+                                x: e.key,
+                                barRods: [
+                                  BarChartRodData(
+                                    toY: e.value,
+                                    color: color,
+                                    width: 10,
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                ],
+                              ))
+                          .toList(),
+                      // نمایش جزئیات با لمس: تاریخ + مقدار دقیق همان ستون.
+                      barTouchData: BarTouchData(
+                        touchTooltipData: BarTouchTooltipData(
+                          getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                            final idx = group.x;
+                            final label = idx >= 0 && idx < points.length ? points[idx].label : '';
+                            return BarTooltipItem(
+                              '$label\n${formatMoney(rod.toY, withSuffix: false)}',
+                              TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
                             );
                           },
                         ),
                       ),
                     ),
-                    borderData: FlBorderData(show: false),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: validPoints.entries.map((e) => FlSpot(e.key.toDouble(), e.value)).toList(),
-                        isCurved: true,
-                        color: color,
-                        barWidth: 2.5,
-                        dotData: const FlDotData(show: true),
-                      ),
-                    ],
-                    // نمایش جزئیات با لمس: تاریخ + مقدار دقیق همان نقطه.
-                    lineTouchData: LineTouchData(
-                      touchTooltipData: LineTouchTooltipData(
-                        getTooltipItems: (touchedSpots) {
-                          return touchedSpots.map((spot) {
-                            final idx = spot.x.toInt();
-                            final label = idx >= 0 && idx < points.length ? points[idx].label : '';
-                            return LineTooltipItem(
-                              '$label\n${formatMoney(spot.y, withSuffix: false)}',
-                              TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
-                            );
-                          }).toList();
-                        },
-                      ),
-                    ),
                   ),
                 ),
-                  ),
-                ),
+              ),
           ],
         ),
       ),

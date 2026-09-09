@@ -63,7 +63,17 @@ class BackupService {
   Future<Map<String, dynamic>> collectBackupData() async {
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final projects = await _db.getProjects();
-    final accounts = await _db.getAccounts();
+    // getAccounts برای نمایش با 'type ASC, code ASC' مرتب می‌شود. زیرحساب‌های
+    // بدون کد (مثلاً «آورده مالک» زیر «سرمایه») در SQLite با code=NULL در
+    // ترتیب صعودی قبل از هر مقدار غیر-NULL می‌آیند - یعنی زیرحساب می‌تواند
+    // در فایل پشتیبان قبل از والدش (که کد دارد، مثل «سرمایه» با کد ۳۰۰۰)
+    // ظاهر شود. بازیابی این لیست را همان‌طور که هست دوباره درج می‌کند، پس
+    // به parentId والدی سند می‌زند که هنوز در دیتابیس تازه ساخته نشده -
+    // FOREIGN KEY constraint failed. دقیقاً همان کلاس باگ اسناد حسابداری
+    // زیر (رجوع به توضیح entries) - ترتیب صدور باید ترتیب واقعی درج (id
+    // صعودی) باشد، که تضمین می‌کند والد همیشه پیش از فرزندش ساخته شده.
+    final accounts = await _db.getAccounts()
+      ..sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
     // getJournalEntries برای نمایش (جدیدترین اول) با 'date DESC, id DESC'
     // مرتب می‌شود. اگر همین ترتیب مستقیم در فایل پشتیبان صادر شود، در
     // بازیابی اتمیک (replaceExisting) اسناد به ترتیب معکوس دوباره درج

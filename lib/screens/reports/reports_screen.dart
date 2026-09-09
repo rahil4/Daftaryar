@@ -624,6 +624,8 @@ class _CashActivityTabState extends State<_CashActivityTab> {
   String _toDate = '';
   double _received = 0;
   double _expense = 0;
+  double _ownerDraw = 0;
+  double _totalCash = 0;
   bool _loading = true;
 
   @override
@@ -657,9 +659,14 @@ class _CashActivityTabState extends State<_CashActivityTab> {
         await _db.cashReceiptsBreakdown(fromDate: _fromDate, toDate: _toDate);
     final expenseTotal =
         await _db.totalAccountTypeBalance(kAccountExpense, fromDate: _fromDate, toDate: _toDate);
+    final ownerDrawBreakdown =
+        await _db.ownerDrawBreakdown(fromDate: _fromDate, toDate: _toDate);
+    final totalCash = await _db.cashBalanceThrough(throughDate: _toDate);
     setState(() {
       _received = receiptsBreakdown.values.fold<double>(0, (s, v) => s + v);
       _expense = expenseTotal;
+      _ownerDraw = ownerDrawBreakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+      _totalCash = totalCash;
       _loading = false;
     });
   }
@@ -679,9 +686,17 @@ class _CashActivityTabState extends State<_CashActivityTab> {
     );
   }
 
+  void _openOwnerDraws() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => _OwnerDrawBreakdownScreen(fromDate: _fromDate, toDate: _toDate)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final net = _received - _expense;
+    final net = _received - _expense - _ownerDraw;
     return BlueprintGridBackground(
       child: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -739,6 +754,16 @@ class _CashActivityTabState extends State<_CashActivityTab> {
                   icon: Icons.arrow_upward_rounded,
                   onTap: _openExpenses,
                 ),
+                if (_ownerDraw != 0) ...[
+                  const SizedBox(height: 10),
+                  _CashSummaryTile(
+                    label: 'برداشت مالک/شرکا',
+                    amount: _ownerDraw,
+                    color: AppColors.negative,
+                    icon: Icons.arrow_upward_rounded,
+                    onTap: _openOwnerDraws,
+                  ),
+                ],
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
@@ -763,11 +788,35 @@ class _CashActivityTabState extends State<_CashActivityTab> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 const Text(
-                  'این گزارش بر مبنای پول واقعی دریافت‌شده/پرداخت‌شده در همین بازه است، نه شناسایی حسابداری درآمد.',
+                  'دریافتی − هزینه − برداشت مالک/شرکا، فقط برای همین بازه',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('موجودی کل صندوق/بانک',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text(formatMoney(_totalCash),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'موجودی واقعی نقد/بانک تا پایان همین بازه (نه فقط همین بازه؛ شامل مانده‌های قبل هم است).',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
                 ),
               ],
             ),
@@ -951,6 +1000,79 @@ class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen
         .toList();
     return _BreakdownListView(
       title: 'دریافتی به تفکیک منبع',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
+
+/// برداشت مالک/شرکا در یک بازه، به تفکیک هر شریک (حساب سرمایه‌ای که از آن
+/// برداشت شده) - زدن روی هر شریک، فهرست اسناد برداشت همان شریک را باز می‌کند.
+class _OwnerDrawBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  const _OwnerDrawBreakdownScreen({required this.fromDate, required this.toDate});
+
+  @override
+  State<_OwnerDrawBreakdownScreen> createState() => _OwnerDrawBreakdownScreenState();
+}
+
+class _OwnerDrawBreakdownScreenState extends State<_OwnerDrawBreakdownScreen> {
+  final _db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _breakdown = [];
+  Set<int> _cashAccountIds = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final breakdown = await _db.ownerDrawBreakdown(fromDate: widget.fromDate, toDate: widget.toDate);
+    breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final cashAccounts = await _db.getCashAccounts();
+    setState(() {
+      _breakdown = breakdown;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
+      _loading = false;
+    });
+  }
+
+  int _amountOf(JournalEntryModel e) =>
+      e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.credit);
+
+  void _openAccount(AccountModel account) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: account.name,
+          loadEntries: () =>
+              _db.ownerDrawEntries(accountId: account.id!, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: _amountOf,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final total = _breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final rows = _breakdown
+        .map((r) => _BreakdownRow(
+              label: (r['account'] as AccountModel).name,
+              amount: r['total'] as double,
+              onTap: () => _openAccount(r['account'] as AccountModel),
+            ))
+        .toList();
+    return _BreakdownListView(
+      title: 'برداشت مالک/شرکا به تفکیک شریک',
       subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
       total: total,
       rows: rows,

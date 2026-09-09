@@ -225,4 +225,122 @@ void main() {
       expect(underLevel1.first['hasChildren'], false);
     });
   });
+
+  group('ownerDrawBreakdown / ownerDrawEntries — برداشت مالک/شرکا', () {
+    test('برداشت مالک به تفکیک حساب سرمایه‌اش شمرده می‌شود', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final ownerDraw = await db.insertAccount(AccountModel(
+        name: 'برداشت مالک',
+        type: kAccountEquity,
+        createdAt: '1404/01/01',
+      ));
+
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/10',
+        createdAt: '1404/02/10',
+        description: 'برداشت شخصی مالک',
+        lines: [
+          JournalLineModel(accountId: ownerDraw, debit: 4000000),
+          JournalLineModel(accountId: cash.id!, credit: 4000000),
+        ],
+      ));
+
+      final breakdown = await db.ownerDrawBreakdown(fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(breakdown.length, 1);
+      expect((breakdown.first['account'] as AccountModel).name, 'برداشت مالک');
+      expect(breakdown.first['total'], 4000000);
+
+      final entries =
+          await db.ownerDrawEntries(accountId: ownerDraw, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(entries.length, 1);
+      expect(entries.first.description, 'برداشت شخصی مالک');
+    });
+
+    test('چند شریک هرکدام حساب برداشت جدا دارند - هرکدام ردیف مستقل خودش را می‌گیرد', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final draw1 = await db.insertAccount(
+          AccountModel(name: 'برداشت مالک', type: kAccountEquity, createdAt: '1404/01/01'));
+      final draw2 = await db.insertAccount(
+          AccountModel(name: 'برداشت شریک - رضا', type: kAccountEquity, createdAt: '1404/01/01'));
+
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/10',
+        createdAt: '1404/02/10',
+        lines: [
+          JournalLineModel(accountId: draw1, debit: 2000000),
+          JournalLineModel(accountId: cash.id!, credit: 2000000),
+        ],
+      ));
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/12',
+        createdAt: '1404/02/12',
+        lines: [
+          JournalLineModel(accountId: draw2, debit: 1500000),
+          JournalLineModel(accountId: cash.id!, credit: 1500000),
+        ],
+      ));
+
+      final breakdown = await db.ownerDrawBreakdown(fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(breakdown.length, 2);
+      final total = breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+      expect(total, 3500000);
+    });
+
+    test('آورده سرمایه در همان بازه، برداشت واقعی را دست‌کم نشان نمی‌دهد (برخلاف مانده خالص حساب)', () async {
+      final cash = (await db.getCashAccounts()).first;
+      final capital =
+          (await db.getAccounts(type: kAccountEquity)).firstWhere((a) => a.name == 'سرمایه');
+
+      // ۱۰ میلیون آورده مالک به سرمایه (بستانکار) - افزایش سرمایه
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/01',
+        createdAt: '1404/02/01',
+        lines: [
+          JournalLineModel(accountId: cash.id!, debit: 10000000),
+          JournalLineModel(accountId: capital.id!, credit: 10000000),
+        ],
+      ));
+      // ۴ میلیون برداشت از همان حساب سرمایه در همان بازه - کاهش سرمایه
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/15',
+        createdAt: '1404/02/15',
+        lines: [
+          JournalLineModel(accountId: capital.id!, debit: 4000000),
+          JournalLineModel(accountId: cash.id!, credit: 4000000),
+        ],
+      ));
+
+      // مانده خالص حساب سرمایه (accountBalanceWithDescendants) نشان‌دهنده
+      // برداشت واقعی نیست - چون آورده و برداشت را خالص می‌کند.
+      final netBalance =
+          await db.accountBalanceWithDescendants(capital.id!, fromDate: '1404/01/01', toDate: '1404/12/29');
+      expect(netBalance, 6000000, reason: 'مانده خالص فقط تفاضل است (۱۰ آورده منهای ۴ برداشت)، نه برداشت واقعی');
+
+      // اما ownerDrawBreakdown دقیقاً همان ۴ میلیون تراکنش نقدی خروجی واقعی را می‌دهد
+      final breakdown = await db.ownerDrawBreakdown(fromDate: '1404/01/01', toDate: '1404/12/29');
+      final total = breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+      expect(total, 4000000);
+    });
+  });
+
+  group('cashBalanceThrough — موجودی کل صندوق/بانک', () {
+    test('موجودی کل تا پایان بازه شامل مانده‌های قبل از بازه هم می‌شود', () async {
+      final cpId = await createCounterparty('مشتری د');
+      final projectId = await createProject(cpId);
+      final cash = (await db.getCashAccounts()).first;
+
+      await db.receiveProjectPayment(
+          projectId: projectId, cashAccountId: cash.id!, amount: 5000000, date: '1404/01/05');
+      await db.receiveProjectPayment(
+          projectId: projectId, cashAccountId: cash.id!, amount: 2000000, date: '1404/03/05');
+
+      // فقط داخل بازه (فروردین تا اسفند سال بعد) - چون همه یک بازه‌اند، این مساوی جمع کل است
+      final total = await db.cashBalanceThrough(throughDate: '1404/12/29');
+      expect(total, 7000000);
+
+      // موجودی «تا پیش از» بازه دوم فقط شامل دریافتی اول است
+      final beforeSecond = await db.cashBalanceThrough(throughDate: '1404/01/29');
+      expect(beforeSecond, 5000000);
+    });
+  });
 }

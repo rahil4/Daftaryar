@@ -2983,6 +2983,91 @@ class DatabaseHelper {
     return entries;
   }
 
+  /// اسناد دقیقاً دوسطری با یک سمت نقد/بانکی بستانکار (کاهش نقد) در بازه که
+  /// طرف مقابلش بدهکار شدن یک حساب سرمایه است - یعنی برداشت واقعی مالک یا
+  /// یکی از شرکا. عمداً بر مبنای همان تراکنش نقدی خروجی است، نه مانده خالص
+  /// حساب سرمایه (accountBalanceWithDescendants) - چون آن، آورده و برداشت
+  /// یک شریک را در هم می‌شکند و اگر هر دو در یک بازه رخ داده باشند، برداشت
+  /// واقعی را دست‌کم نشان می‌دهد.
+  Future<List<Map<String, dynamic>>> _ownerDrawRows({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return [];
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(cashIds.length, '?').join(',');
+
+    String dateWhere = '';
+    final dateArgs = <Object?>[];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT je.id as entryId, cl.credit as amount, other.accountId as otherAccountId
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      JOIN accounts otherAcc ON otherAcc.id = other.accountId
+      WHERE cl.accountId IN ($placeholders) AND cl.credit > 0
+        AND otherAcc.type = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $dateWhere
+    ''', [...cashIds, kAccountEquity, ...dateArgs]);
+
+    return rows
+        .map((r) => {
+              'entryId': r['entryId'] as int,
+              'amount': (r['amount'] as num).toDouble(),
+              'accountId': r['otherAccountId'] as int,
+            })
+        .toList();
+  }
+
+  /// برداشت نقدی مالک/شرکا در یک بازه، به تفکیک حساب سرمایه هرکدام - برای
+  /// گزارش «دریافت و هزینه». چند شریک با چند زیرحساب برداشت جدا ممکن است
+  /// همزمان وجود داشته باشند؛ هرکدام یک ردیف مستقل است.
+  Future<List<Map<String, dynamic>>> ownerDrawBreakdown({String? fromDate, String? toDate}) async {
+    final rows = await _ownerDrawRows(fromDate: fromDate, toDate: toDate);
+    if (rows.isEmpty) return [];
+    final allEquity = await getAccounts(type: kAccountEquity);
+    final byId = {for (final a in allEquity) if (a.id != null) a.id!: a};
+    final totals = <int, double>{};
+    for (final row in rows) {
+      final id = row['accountId'] as int;
+      totals[id] = (totals[id] ?? 0) + (row['amount'] as double);
+    }
+    final result = <Map<String, dynamic>>[];
+    totals.forEach((id, total) {
+      final account = byId[id];
+      if (account != null) result.add({'account': account, 'total': total});
+    });
+    return result;
+  }
+
+  /// اسناد برداشت یک حساب سرمایه مشخص (یک شریک) در بازه - برای فهرست تک‌تک
+  /// اسناد وقتی کاربر روی نام آن شریک در گزارش «دریافت و هزینه» می‌زند.
+  Future<List<JournalEntryModel>> ownerDrawEntries({
+    required int accountId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _ownerDrawRows(fromDate: fromDate, toDate: toDate);
+    final entryIds =
+        rows.where((r) => r['accountId'] == accountId).map((r) => r['entryId'] as int).toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
+  }
+
   Future<Map<String, double>> _classifyControlAccountMovement({
     required int accountId,
     required bool debitNormal,

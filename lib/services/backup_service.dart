@@ -280,11 +280,16 @@ class BackupService {
     // حساب‌ها: حساب‌های سیستمی هرگز دوباره ساخته نمی‌شوند - همیشه به حساب
     // سیستمی موجود روی دستگاه مقصد Map می‌شوند (اولویت ۲ این مرحله).
     // اولویت تطبیق: systemKey (شناسه پایدار و صحیح) → در صورت غیاب آن
-    // (فایل پشتیبان بسیار قدیمی)، fallback به نام+نوع.
+    // (فایل پشتیبان بسیار قدیمی)، fallback به نام+نوع. این تطبیق هیچ
+    // وابستگی ترتیبی ندارد (چیزی درج نمی‌شود، فقط Map می‌شود).
     final Map<int, int> accountIdMap = {};
     final existingAccounts = await _db.getAccounts(executor: executor);
-    for (final a in (data['accounts'] as List? ?? [])) {
-      final account = AccountModel.fromMap(Map<String, dynamic>.from(a));
+    final rawAccounts = (data['accounts'] as List? ?? [])
+        .map((a) => AccountModel.fromMap(Map<String, dynamic>.from(a)))
+        .toList();
+
+    final nonSystemAccounts = <AccountModel>[];
+    for (final account in rawAccounts) {
       if (account.isSystem) {
         AccountModel? match;
         if (account.systemKey != null) {
@@ -302,17 +307,55 @@ class BackupService {
           continue;
         }
       }
-      final mappedParentId =
-          account.parentId != null ? (accountIdMap[account.parentId] ?? account.parentId) : null;
-      final newId = await _db.insertAccount(
-        account.copyWith(
-          parentId: mappedParentId,
-          clearParent: mappedParentId == null,
-          isSystem: false,
-        ),
-        executor,
-      );
-      accountIdMap[account.id ?? -1] = newId;
+      nonSystemAccounts.add(account);
+    }
+
+    // چند-پاسی و مقاوم به ترتیب: فایل‌های پشتیبان قدیمی‌تر از رفع این باگ
+    // ممکن است زیرحساب را قبل از والدش فهرست کرده باشند (collectBackupData
+    // قبلاً حساب‌ها را با ترتیب نمایشی type/code صادر می‌کرد که برای
+    // زیرحساب‌های بدون کد والد را بعد از فرزند می‌آورد). به‌جای این‌که به
+    // ترتیب ورودی فایل اعتماد شود (و در نبود Map شدنِ والد، به id قدیمی و
+    // بی‌ربط سند بزند - FOREIGN KEY constraint)، هر پاس فقط حساب‌هایی را
+    // درج می‌کند که والدشان (اگر دارند) از قبل Map شده؛ تا وقتی پیشرفتی
+    // حاصل شود تکرار می‌شود.
+    var remaining = nonSystemAccounts;
+    while (remaining.isNotEmpty) {
+      final nextRemaining = <AccountModel>[];
+      var progressed = false;
+      for (final account in remaining) {
+        final parentUnresolved =
+            account.parentId != null && !accountIdMap.containsKey(account.parentId);
+        if (parentUnresolved) {
+          nextRemaining.add(account);
+          continue;
+        }
+        progressed = true;
+        final mappedParentId =
+            account.parentId != null ? accountIdMap[account.parentId] : null;
+        final newId = await _db.insertAccount(
+          account.copyWith(
+            parentId: mappedParentId,
+            clearParent: mappedParentId == null,
+            isSystem: false,
+          ),
+          executor,
+        );
+        accountIdMap[account.id ?? -1] = newId;
+      }
+      if (!progressed) {
+        // زنجیره غیرقابل‌حل واقعی (parentId اشاره به چیزی که اصلاً در فایل
+        // نیست، نه صرفاً ترتیب اشتباه) - به‌جای شکست کل Restore به‌خاطر
+        // چند رکورد خراب، بدون والد درج می‌شوند.
+        for (final account in nextRemaining) {
+          final newId = await _db.insertAccount(
+            account.copyWith(clearParent: true, isSystem: false),
+            executor,
+          );
+          accountIdMap[account.id ?? -1] = newId;
+        }
+        break;
+      }
+      remaining = nextRemaining;
     }
 
     for (final e in (data['journalEntries'] as List? ?? [])) {

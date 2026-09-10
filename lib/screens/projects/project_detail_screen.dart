@@ -421,12 +421,18 @@ class _OverviewTab extends StatelessWidget {
                     _amountRow('درآمد خالص (مبنای محاسبات پس از نهایی‌سازی)', formatMoney(netRevenue ?? 0),
                         bold: true),
                   ],
-                  // دریافتی/هزینه مستقیم/مابه‌التفاوت - همان کارت «وضعیت
-                  // مالی»، جدا از بخش قرارداد بالا با یک Divider؛ خطی و
-                  // بدون کارت جداگانه، چون این سه رقم به همان وزن اعداد
-                  // بالا نیاز ندارند.
+                  // دریافتی/هزینه مستقیم/مابه‌التفاوت (و پیش از نهایی‌سازی:
+                  // مانده تخمینی) - همان کارت «وضعیت مالی»، جدا از بخش
+                  // قرارداد بالا با یک Divider؛ هر رقم یک ردیف، هم‌سبک با
+                  // ردیف‌های بالا.
                   const Divider(),
-                  _cashLine(totalReceived, directProjectCost),
+                  _amountRow('مجموع دریافتی', formatMoney(totalReceived), valueColor: AppColors.positive),
+                  _amountRow('هزینه مستقیم', formatMoney(directProjectCost), valueColor: AppColors.negative),
+                  _amountRow('مابه‌التفاوت دریافتی و هزینه', formatMoney(totalReceived - directProjectCost),
+                      valueColor: AppColors.brass),
+                  if (!isFinalized && currentExpected != null)
+                    _amountRow('مانده تخمینی', formatMoney(currentExpected - totalReceived),
+                        valueColor: AppColors.brass),
                 ],
               ),
             ),
@@ -470,55 +476,68 @@ class _OverviewTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          // چهار دکمه عملیات همیشه در یک شبکه ۲×۲ هم‌عرض و هم‌سبک (خط
-          // برنزی یکسان) - فقط رنگ آیکن جهت عملیات (دریافت/پرداخت) را نشان
-          // می‌دهد؛ قبلاً «دریافت وجه» پرکنتراست‌تر از بقیه بود و باعث
-          // می‌شد چیدمان یک‌دست به‌نظر نرسد.
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 2.6,
+          // دکمه‌های عملیات - همان سبک اکشن‌های سریع داشبورد (Container
+          // پرشده با حاشیه ملایم، رنگ آیکن و متن هر دو هم‌رنگ عملیات)،
+          // فقط با سایز کمی جمع‌وجورتر چون برچسب‌های این‌جا بلندترند.
+          Row(
             children: [
-              _ActionButton(
-                icon: Icons.south_west_rounded,
-                iconColor: AppColors.positive,
-                label: 'دریافت وجه',
-                onPressed: onReceivePayment,
-              ),
-              _ActionButton(
-                icon: Icons.north_east_rounded,
-                iconColor: AppColors.negative,
-                label: 'ثبت هزینه',
-                onPressed: onAddExpense,
-              ),
-              if (!isFinalized) ...[
-                _ActionButton(
-                  icon: Icons.edit_note_outlined,
-                  iconColor: AppColors.brass,
-                  label: 'تغییر مبلغ برآوردی',
-                  onPressed: onAddPriceEvent,
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.south_west_rounded,
+                  color: AppColors.positive,
+                  label: 'دریافت وجه',
+                  onPressed: onReceivePayment,
                 ),
-                _ActionButton(
-                  icon: Icons.flag_outlined,
-                  iconColor: AppColors.brass,
-                  label: 'نهایی‌سازی پروژه',
-                  onPressed: onFinalize,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ActionButton(
+                  icon: Icons.north_east_rounded,
+                  color: AppColors.negative,
+                  label: 'ثبت هزینه',
+                  onPressed: onAddExpense,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (!isFinalized) ...[
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.edit_note_outlined,
+                    color: AppColors.brass,
+                    label: 'تغییر مبلغ برآوردی',
+                    onPressed: onAddPriceEvent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.flag_outlined,
+                    color: AppColors.brass,
+                    label: 'نهایی‌سازی پروژه',
+                    onPressed: onFinalize,
+                  ),
                 ),
               ] else ...[
-                _ActionButton(
-                  icon: Icons.discount_outlined,
-                  iconColor: AppColors.brass,
-                  label: 'ثبت تخفیف',
-                  onPressed: onAddDiscount,
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.discount_outlined,
+                    color: AppColors.brass,
+                    label: 'ثبت تخفیف',
+                    onPressed: onAddDiscount,
+                  ),
                 ),
-                _ActionButton(
-                  icon: Icons.tune_outlined,
-                  iconColor: AppColors.brass,
-                  label: 'اصلاح مبلغ نهایی',
-                  onPressed: onAddFinalAdjustment,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.tune_outlined,
+                    color: AppColors.brass,
+                    label: 'اصلاح مبلغ نهایی',
+                    onPressed: onAddFinalAdjustment,
+                  ),
                 ),
               ],
             ],
@@ -610,41 +629,7 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
-  /// ردیف «دریافتی / هزینه مستقیم / مابه‌التفاوت» - داخل کارت «وضعیت
-  /// مالی»، زیر بخش قرارداد. نام «مابه‌التفاوت دریافتی و هزینه» عمداً
-  /// «سود» یا «مانده» نیست: نه معادل «سود ناخالص پروژه» است (که خودش جدا،
-  /// تعهدی و از netRevenue محاسبه می‌شود)، نه معادل «مانده طلب» - فقط
-  /// دریافتی نقدی منهای هزینه مستقیم است.
-  Widget _cashLine(double totalReceived, double directProjectCost) {
-    final diff = totalReceived - directProjectCost;
-    Widget seg(String label, String value, Color color) {
-      return Expanded(
-        child: Column(
-          children: [
-            Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-            const SizedBox(height: 4),
-            Text(value,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color)),
-          ],
-        ),
-      );
-    }
-
-    Widget sep() => Container(width: 1, height: 30, margin: const EdgeInsets.symmetric(horizontal: 4), color: AppColors.gridLine);
-
-    return Row(
-      children: [
-        seg('مجموع دریافتی', formatMoney(totalReceived), AppColors.positive),
-        sep(),
-        seg('هزینه مستقیم', formatMoney(directProjectCost), AppColors.negative),
-        sep(),
-        seg('مابه‌التفاوت دریافتی و هزینه', formatMoney(diff), AppColors.brass),
-      ],
-    );
-  }
-
-  Widget _amountRow(String label, String value, {Widget? badge, bool bold = false}) {
+  Widget _amountRow(String label, String value, {Widget? badge, bool bold = false, Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -659,7 +644,7 @@ class _OverviewTab extends StatelessWidget {
               style: TextStyle(
                   fontSize: bold ? 15 : 13,
                   fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                  color: AppColors.textPrimary)),
+                  color: valueColor ?? AppColors.textPrimary)),
         ],
       ),
     );
@@ -680,32 +665,48 @@ class _OverviewTab extends StatelessWidget {
   }
 }
 
-/// دکمه عملیات یکسان برای شبکه ۲×۲ تب «خلاصه و مالی» - همه دکمه‌ها یک
-/// حاشیه برنزی و یک قالب دارند؛ فقط رنگ آیکن جهت عملیات (دریافت/پرداخت)
-/// را متمایز می‌کند، نه کل ظاهر دکمه.
+/// دکمه عملیات تب «خلاصه و مالی» - عیناً همان سبک _QuickActionButton
+/// داشبورد (Container پرشده با حاشیه ملایم، آیکن و متن هم‌رنگ با عملیات)،
+/// فقط کمی جمع‌وجورتر چون برچسب‌های این‌جا («نهایی‌سازی پروژه»،
+/// «تغییر مبلغ برآوردی») از دکمه‌های سه‌تایی داشبورد بلندترند.
 class _ActionButton extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
   final String label;
+  final IconData icon;
+  final Color color;
   final VoidCallback onPressed;
 
   const _ActionButton({
-    required this.icon,
-    required this.iconColor,
     required this.label,
+    required this.icon,
+    required this.color,
     required this.onPressed,
   });
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textPrimary,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onPressed,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.gridLine),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: color)),
+            ),
+          ],
+        ),
       ),
-      icon: Icon(icon, size: 18, color: iconColor),
-      label: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
     );
   }
 }

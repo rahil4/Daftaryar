@@ -11,6 +11,7 @@ import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
 import '../../services/pdf_export_service.dart';
 import '../journal/journal_entry_detail_screen.dart';
+import '../journal/quick_expense_screen.dart';
 import 'project_form_screen.dart';
 import 'project_finance_sheets.dart';
 import 'project_economics_screen.dart';
@@ -190,6 +191,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     if (result == true) _load();
   }
 
+  Future<void> _addExpense() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => QuickExpenseScreen(presetProjectId: _project.id)),
+    );
+    if (result == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -256,6 +265,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     onLoad: _load,
                     onAddOptions: _showAddOptions,
                     onReceivePayment: _receivePayment,
+                    onAddExpense: _addExpense,
                     onAddPriceEvent: _addPriceEvent,
                     onFinalize: _finalize,
                     onAddDiscount: _addDiscount,
@@ -284,6 +294,7 @@ class _OverviewTab extends StatelessWidget {
   final VoidCallback onLoad;
   final VoidCallback onAddOptions;
   final VoidCallback onReceivePayment;
+  final VoidCallback onAddExpense;
   final VoidCallback onAddPriceEvent;
   final VoidCallback onFinalize;
   final VoidCallback onAddDiscount;
@@ -298,6 +309,7 @@ class _OverviewTab extends StatelessWidget {
     required this.onLoad,
     required this.onAddOptions,
     required this.onReceivePayment,
+    required this.onAddExpense,
     required this.onAddPriceEvent,
     required this.onFinalize,
     required this.onAddDiscount,
@@ -345,7 +357,7 @@ class _OverviewTab extends StatelessWidget {
                     children: [
                       const Icon(Icons.category_outlined, size: 16, color: AppColors.textSecondary),
                       const SizedBox(width: 6),
-                      Text('${project.projectTypes.join('، ')} · ${project.status}'),
+                      Text(project.projectTypes.join('، ')),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -414,7 +426,12 @@ class _OverviewTab extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 4),
+          // دریافتی/هزینه مستقیم/اختلاف - خطی و بدون کارت، چون نمایش این سه
+          // عدد کنار هم در قالب دو StatCard جدا (یکی برای دریافتی، یکی برای
+          // هزینه) سنگین‌تر از چیزی بود که این سه رقم نیاز دارند.
+          _cashLine(totalReceived, directProjectCost),
+          const SizedBox(height: 12),
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -423,12 +440,6 @@ class _OverviewTab extends StatelessWidget {
             crossAxisSpacing: 12,
             childAspectRatio: 1.6,
             children: [
-              StatCard(
-                title: 'مجموع دریافتی',
-                value: formatMoney(totalReceived),
-                icon: Icons.south_west_rounded,
-                valueColor: AppColors.positive,
-              ),
               if (customerAdvance > 0)
                 StatCard(
                   title: 'پیش‌دریافت (تسویه‌نشده)',
@@ -450,12 +461,6 @@ class _OverviewTab extends StatelessWidget {
                   icon: Icons.account_balance_wallet_outlined,
                   valueColor: AppColors.positive,
                 ),
-              StatCard(
-                title: 'هزینه مستقیم پروژه',
-                value: formatMoney(directProjectCost),
-                icon: Icons.north_east_rounded,
-                valueColor: AppColors.negative,
-              ),
               if (projectContribution != null)
                 StatCard(
                   title: 'سود ناخالص پروژه',
@@ -472,36 +477,55 @@ class _OverviewTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          // چهار دکمه عملیات همیشه در یک شبکه ۲×۲ هم‌عرض و هم‌سبک (خط
+          // برنزی یکسان) - فقط رنگ آیکن جهت عملیات (دریافت/پرداخت) را نشان
+          // می‌دهد؛ قبلاً «دریافت وجه» پرکنتراست‌تر از بقیه بود و باعث
+          // می‌شد چیدمان یک‌دست به‌نظر نرسد.
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 2.6,
             children: [
-              ElevatedButton.icon(
+              _ActionButton(
+                icon: Icons.south_west_rounded,
+                iconColor: AppColors.positive,
+                label: 'دریافت وجه',
                 onPressed: onReceivePayment,
-                icon: const Icon(Icons.south_west_rounded, size: 18),
-                label: const Text('دریافت وجه'),
+              ),
+              _ActionButton(
+                icon: Icons.north_east_rounded,
+                iconColor: AppColors.negative,
+                label: 'ثبت هزینه',
+                onPressed: onAddExpense,
               ),
               if (!isFinalized) ...[
-                OutlinedButton.icon(
+                _ActionButton(
+                  icon: Icons.edit_note_outlined,
+                  iconColor: AppColors.brass,
+                  label: 'تغییر مبلغ برآوردی',
                   onPressed: onAddPriceEvent,
-                  icon: const Icon(Icons.edit_note_outlined, size: 18),
-                  label: const Text('تغییر مبلغ برآوردی'),
                 ),
-                OutlinedButton.icon(
+                _ActionButton(
+                  icon: Icons.flag_outlined,
+                  iconColor: AppColors.brass,
+                  label: 'نهایی‌سازی پروژه',
                   onPressed: onFinalize,
-                  icon: const Icon(Icons.flag_outlined, size: 18),
-                  label: const Text('نهایی‌سازی پروژه'),
                 ),
               ] else ...[
-                OutlinedButton.icon(
+                _ActionButton(
+                  icon: Icons.discount_outlined,
+                  iconColor: AppColors.brass,
+                  label: 'ثبت تخفیف',
                   onPressed: onAddDiscount,
-                  icon: const Icon(Icons.discount_outlined, size: 18),
-                  label: const Text('ثبت تخفیف'),
                 ),
-                OutlinedButton.icon(
+                _ActionButton(
+                  icon: Icons.tune_outlined,
+                  iconColor: AppColors.brass,
+                  label: 'اصلاح مبلغ نهایی',
                   onPressed: onAddFinalAdjustment,
-                  icon: const Icon(Icons.tune_outlined, size: 18),
-                  label: const Text('اصلاح مبلغ نهایی'),
                 ),
               ],
             ],
@@ -593,6 +617,39 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
+  /// ردیف «دریافتی / هزینه مستقیم / اختلاف» - عمداً بدون Card تا نسبت به
+  /// کارت‌های آماری اطرافش سبک‌تر باشد؛ «اختلاف» نامش عمداً «سود» نیست چون
+  /// معادل سود ناخالص تعهدی پروژه (که خودش جدا و از netRevenue محاسبه
+  /// می‌شود) نیست - فقط دریافتی نقدی منهای هزینه مستقیم است.
+  Widget _cashLine(double totalReceived, double directProjectCost) {
+    final diff = totalReceived - directProjectCost;
+    Widget seg(String label, String value, Color color) {
+      return Expanded(
+        child: Column(
+          children: [
+            Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+            const SizedBox(height: 4),
+            Text(value,
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color)),
+          ],
+        ),
+      );
+    }
+
+    Widget sep() => Container(width: 1, height: 30, margin: const EdgeInsets.symmetric(horizontal: 4), color: AppColors.gridLine);
+
+    return Row(
+      children: [
+        seg('مجموع دریافتی', formatMoney(totalReceived), AppColors.positive),
+        sep(),
+        seg('هزینه مستقیم', formatMoney(directProjectCost), AppColors.negative),
+        sep(),
+        seg('دریافتی − هزینه', formatMoney(diff), AppColors.brass),
+      ],
+    );
+  }
+
   Widget _amountRow(String label, String value, {Widget? badge, bool bold = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -625,6 +682,36 @@ class _OverviewTab extends StatelessWidget {
       decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
       child: Text('${positive ? '+' : '-'} ${formatMoney(delta.abs())}',
           style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: color)),
+    );
+  }
+}
+
+/// دکمه عملیات یکسان برای شبکه ۲×۲ تب «خلاصه و مالی» - همه دکمه‌ها یک
+/// حاشیه برنزی و یک قالب دارند؛ فقط رنگ آیکن جهت عملیات (دریافت/پرداخت)
+/// را متمایز می‌کند، نه کل ظاهر دکمه.
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final VoidCallback onPressed;
+
+  const _ActionButton({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+      ),
+      icon: Icon(icon, size: 18, color: iconColor),
+      label: Text(label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
     );
   }
 }

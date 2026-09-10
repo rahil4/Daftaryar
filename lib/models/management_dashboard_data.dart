@@ -180,9 +180,10 @@ class ManagementDashboardData {
   // Trend Charts
   final List<TrendPoint> revenueTrend;
 
-  /// روند مجموع دریافتی‌های نقدی (از مشتریان + سایر) - جریان نقد ورودی،
-  /// نه درآمد شناسایی‌شده؛ این دو عمداً جدا نگه داشته می‌شوند.
-  final List<TrendPoint> receiptsTrend;
+  /// روند مجموع هزینه‌های تعهدی (هزینه مستقیم پروژه + سربار پروژه‌ها +
+  /// هزینه‌های دفتر) - هم‌مبنا با revenueTrend (هر دو تعهدی)، برای نمودار
+  /// «درآمد و هزینه» کنار هم؛ عمداً جریان نقد خروجی نیست.
+  final List<TrendPoint> expenseTrend;
   final List<TrendPoint> operatingResultTrend;
   final List<TrendPoint> cashFlowTrend;
   final List<TrendPoint> contributionMarginTrend;
@@ -244,7 +245,7 @@ class ManagementDashboardData {
     required this.totalNegativeAdjustments,
     required this.netAdjustments,
     required this.revenueTrend,
-    required this.receiptsTrend,
+    required this.expenseTrend,
     required this.operatingResultTrend,
     required this.cashFlowTrend,
     required this.contributionMarginTrend,

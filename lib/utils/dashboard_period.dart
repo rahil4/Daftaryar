@@ -223,6 +223,29 @@ class DashboardPeriodResolver {
     return buckets;
   }
 
+  /// فهرست بازه‌های هفتگی (۷ روزه) بین دو تاریخ - سطح میانی بین روزانه (برای
+  /// بازه‌های حدود یک ماه، شلوغ و کم‌خوانا) و ماهانه (برای بازه‌های چند هفته‌ای،
+  /// خیلی کلی و فقط یک-دو نقطه). مثل monthlyBuckets، اولین Bucket از خودِ
+  /// fromDate شروع می‌شود (نه لزوماً شنبه) و آخرین Bucket دقیقاً در toDate
+  /// تمام می‌شود.
+  static List<DashboardPeriodRange> weeklyBuckets(String fromDate, String toDate) {
+    final start = parseJalaliString(fromDate)!;
+    final end = parseJalaliString(toDate)!;
+    final buckets = <DashboardPeriodRange>[];
+    var cursor = start;
+    while (cursor.compareTo(end) <= 0) {
+      final naturalWeekEnd = cursor.addDays(6);
+      final bucketEnd = naturalWeekEnd.compareTo(end) <= 0 ? naturalWeekEnd : end;
+      buckets.add(DashboardPeriodRange(
+        fromDate: jalaliToString(cursor),
+        toDate: jalaliToString(bucketEnd),
+        label: '${pn(cursor.day)} تا ${pn(bucketEnd.day)} ${_monthNames[bucketEnd.month - 1]}',
+      ));
+      cursor = bucketEnd.addDays(1);
+    }
+    return buckets;
+  }
+
   /// N روز اخیر منتهی به تاریخ مرجع (شامل خودِ آن روز) - فقط برای بازه‌های
   /// تک‌روزه انتخابی (مثل «امروز») که حتی تفکیک روزانه هم یک نقطه تنها
   /// می‌دهد؛ یک روند معنادار به‌جایش لازم است.
@@ -243,22 +266,37 @@ class DashboardPeriodResolver {
   /// انتخاب خودکار Bucketهای نمودار روند بر مبنای طول واقعی بازه انتخابی -
   /// به‌جای همیشه پرش به یک بازه ثابت (۶ ماه اخیر) که ربطی به انتخاب کاربر
   /// نداشت. بازه‌های کوتاه (هفته/ماه جاری/سفارشی کوتاه) اکنون با جزئیات
-  /// روزانه *همان بازه انتخابی* نمایش داده می‌شوند - نه یک بازه متفاوت.
-  static List<DashboardPeriodRange> trendBuckets(String fromDate, String toDate) {
+  /// روزانه یا هفتگی *همان بازه انتخابی* نمایش داده می‌شوند - نه یک بازه متفاوت.
+  ///
+  /// دو اصلاح مهم نسبت به نسخه قبلی:
+  /// ۱. بازه‌های جاری (این هفته/این ماه/این فصل/امسال) طبیعتاً تا آخر بازه
+  ///    تقویمی می‌روند، حتی روزهای هنوز‌نیامده - toDate اینجا به «امروز»
+  ///    محدود می‌شود تا نمودار تا روزهای آینده (بدون هیچ داده‌ای) کشیده
+  ///    نشود و خالی/کم‌فایده به نظر نرسد.
+  /// ۲. آستانه تفکیک روزانه از ۶۲ روز به ۱۴ روز کاهش یافت؛ بین ۱۵ تا ۶۲ روز
+  ///    از تفکیک هفتگی استفاده می‌شود - وگرنه مثلاً «این ماه» یا «این فصل»
+  ///    تا ۳۱/۹۰ ستون روزانه له‌شده روی هم تولید می‌کرد.
+  static List<DashboardPeriodRange> trendBuckets(String fromDate, String toDate, {Jalali? today}) {
     final start = parseJalaliString(fromDate)!;
-    final end = parseJalaliString(toDate)!;
+    var end = parseJalaliString(toDate)!;
+    final now = today ?? Jalali.now();
+    if (end.compareTo(now) > 0) end = now;
+    final clampedToDate = jalaliToString(end);
     final spanDays = end.julianDayNumber - start.julianDayNumber + 1;
     if (spanDays <= 1) {
       // بازه تک‌روزه (مثل «امروز») - تفکیک روزانه همین بازه هم فقط یک نقطه
       // می‌دهد؛ ۱۴ روز اخیر به‌عنوان روند معنادار جایگزین آن است.
       return lastNDays(14, reference: end);
     }
+    if (spanDays <= 14) {
+      // هفته جاری/بازه سفارشی خیلی کوتاه - جزئیات روزانه همان بازه انتخابی.
+      return dailyBuckets(fromDate, clampedToDate);
+    }
     if (spanDays <= 62) {
-      // هفته/ماه جاری/فصل کوتاه/بازه سفارشی کوتاه - جزئیات روزانه همان
-      // بازه انتخابی.
-      return dailyBuckets(fromDate, toDate);
+      // ماه جاری/فصل کوتاه/بازه سفارشی حدود یک ماه - تفکیک هفتگی.
+      return weeklyBuckets(fromDate, clampedToDate);
     }
     // بازه‌های بلندتر (فصل/سال) - تفکیک ماهانه، مثل قبل.
-    return monthlyBuckets(fromDate, toDate);
+    return monthlyBuckets(fromDate, clampedToDate);
   }
 }

@@ -281,12 +281,12 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
         ),
         const SizedBox(height: 16),
 
-        // ---------- نمودار مقایسه‌ای درآمد و دریافت ----------
+        // ---------- نمودار مقایسه‌ای درآمد و هزینه ----------
         MultiTrendChartWidget(
-          title: 'درآمد و دریافت نقدی',
+          title: 'درآمد و هزینه',
           series: [
             ChartSeries(label: 'درآمد', points: data.revenueTrend, color: AppColors.brass),
-            ChartSeries(label: 'دریافت نقدی', points: data.receiptsTrend, color: AppColors.positive),
+            ChartSeries(label: 'هزینه', points: data.expenseTrend, color: AppColors.negative),
           ],
         ),
         const SizedBox(height: 16),

@@ -6,6 +6,7 @@ import '../../models/journal_entry.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../utils/reloadable.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/quick_add_sheet.dart';
 import 'journal_entry_detail_screen.dart';
@@ -20,7 +21,7 @@ class JournalListScreen extends StatefulWidget {
   State<JournalListScreen> createState() => _JournalListScreenState();
 }
 
-class _JournalListScreenState extends State<JournalListScreen> {
+class _JournalListScreenState extends State<JournalListScreen> with Reloadable<JournalListScreen> {
   final _db = DatabaseHelper.instance;
 
   List<JournalEntryModel> _entries = [];
@@ -40,6 +41,9 @@ class _JournalListScreenState extends State<JournalListScreen> {
     super.initState();
     _load();
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);

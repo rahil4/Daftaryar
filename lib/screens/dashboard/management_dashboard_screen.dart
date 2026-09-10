@@ -9,6 +9,7 @@ import '../../services/management_dashboard_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/dashboard_period.dart';
 import '../../utils/formatters.dart';
+import '../../utils/reloadable.dart';
 import '../counterparties/counterparty_form_screen.dart';
 import '../journal/quick_receipt_screen.dart';
 import '../journal/quick_expense_screen.dart';
@@ -43,7 +44,8 @@ class ManagementDashboardScreen extends StatefulWidget {
   State<ManagementDashboardScreen> createState() => _ManagementDashboardScreenState();
 }
 
-class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
+class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
+    with Reloadable<ManagementDashboardScreen> {
   final _service = ManagementDashboardService();
   final _db = DatabaseHelper.instance;
   final _healthService = DataHealthService();
@@ -61,6 +63,9 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
     super.initState();
     _load();
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _load() async {
     setState(() {

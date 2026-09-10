@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import '../../utils/reloadable.dart';
 import '../accounts/accounts_screen.dart';
 import '../journal/journal_list_screen.dart';
 import '../settings/settings_screen.dart';
@@ -19,8 +20,21 @@ class AccountingScreen extends StatefulWidget {
   State<AccountingScreen> createState() => _AccountingScreenState();
 }
 
-class _AccountingScreenState extends State<AccountingScreen> {
+class _AccountingScreenState extends State<AccountingScreen> with Reloadable<AccountingScreen> {
   _AccountingView _view = _AccountingView.ledger;
+  final _journalKey = GlobalKey<State<JournalListScreen>>();
+  final _accountsKey = GlobalKey<State<AccountsScreen>>();
+
+  @override
+  Future<void> reload() {
+    triggerReload(_view == _AccountingView.ledger ? _journalKey : _accountsKey);
+    return Future.value();
+  }
+
+  void _switchView(_AccountingView v) {
+    setState(() => _view = v);
+    triggerReload(v == _AccountingView.ledger ? _journalKey : _accountsKey);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +55,7 @@ class _AccountingScreenState extends State<AccountingScreen> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: _ViewSwitcher(
               selected: _view,
-              onChanged: (v) => setState(() => _view = v),
+              onChanged: _switchView,
             ),
           ),
         ),
@@ -49,9 +63,9 @@ class _AccountingScreenState extends State<AccountingScreen> {
       body: BlueprintGridBackground(
         child: IndexedStack(
           index: _view.index,
-          children: const [
-            JournalListScreen(embedded: true),
-            AccountsScreen(embedded: true),
+          children: [
+            JournalListScreen(key: _journalKey, embedded: true),
+            AccountsScreen(key: _accountsKey, embedded: true),
           ],
         ),
       ),

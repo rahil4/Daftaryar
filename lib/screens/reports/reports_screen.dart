@@ -9,6 +9,7 @@ import '../../models/journal_entry.dart';
 import '../../services/financial_reporting_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../utils/reloadable.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
@@ -35,9 +36,40 @@ class ReportsScreen extends StatefulWidget {
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
-class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
+class _ReportsScreenState extends State<ReportsScreen>
+    with SingleTickerProviderStateMixin
+    implements Reloadable<ReportsScreen> {
   late final TabController _tab =
       TabController(length: 2, vsync: this, initialIndex: widget.initialTabIndex);
+  final _cashActivityKey = GlobalKey<State<_CashActivityTab>>();
+  final _customerProfitKey = GlobalKey<State<_CustomerProfitTab>>();
+  int _lastTabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastTabIndex = _tab.index;
+    _tab.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tab.removeListener(_onTabChanged);
+    _tab.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tab.indexIsChanging || _tab.index == _lastTabIndex) return;
+    _lastTabIndex = _tab.index;
+    reload();
+  }
+
+  @override
+  Future<void> reload() {
+    triggerReload(_tab.index == 0 ? _cashActivityKey : _customerProfitKey);
+    return Future.value();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,8 +97,9 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
       body: TabBarView(
         controller: _tab,
         children: [
-          const _CashActivityTab(),
+          _CashActivityTab(key: _cashActivityKey),
           _CustomerProfitTab(
+              key: _customerProfitKey,
               initialSort: widget.sortCustomersByUrgency ? _CustomerSort.urgency : _CustomerSort.profit),
         ],
       ),
@@ -121,13 +154,13 @@ class _RangeSelector extends StatelessWidget {
 /// درآمد نهایی‌شده. با زدن روی هرکدام، به تفکیک زیردسته و بعد فهرست تک‌تک
 /// اسناد می‌رود.
 class _CashActivityTab extends StatefulWidget {
-  const _CashActivityTab();
+  const _CashActivityTab({super.key});
 
   @override
   State<_CashActivityTab> createState() => _CashActivityTabState();
 }
 
-class _CashActivityTabState extends State<_CashActivityTab> {
+class _CashActivityTabState extends State<_CashActivityTab> with Reloadable<_CashActivityTab> {
   final _db = DatabaseHelper.instance;
   _RangeMode _mode = _RangeMode.month;
   String _fromDate = '';
@@ -143,6 +176,9 @@ class _CashActivityTabState extends State<_CashActivityTab> {
     super.initState();
     _applyMode(_RangeMode.month);
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _applyMode(_RangeMode mode) async {
     final today = Jalali.now();
@@ -905,13 +941,13 @@ class _TransactionListScreenState extends State<_TransactionListScreen> {
 /// از قبل Lifetime طراحی شده متکی است - رجوع به توضیح خودِ آن سرویس.
 class _CustomerProfitTab extends StatefulWidget {
   final _CustomerSort initialSort;
-  const _CustomerProfitTab({this.initialSort = _CustomerSort.profit});
+  const _CustomerProfitTab({super.key, this.initialSort = _CustomerSort.profit});
 
   @override
   State<_CustomerProfitTab> createState() => _CustomerProfitTabState();
 }
 
-class _CustomerProfitTabState extends State<_CustomerProfitTab> {
+class _CustomerProfitTabState extends State<_CustomerProfitTab> with Reloadable<_CustomerProfitTab> {
   final _db = DatabaseHelper.instance;
   final _reporting = FinancialReportingService();
   late _CustomerSort _sort = widget.initialSort;
@@ -927,6 +963,9 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> {
     super.initState();
     _load();
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);

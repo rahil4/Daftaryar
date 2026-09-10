@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/reloadable.dart';
 import 'project_form_screen.dart';
 import 'project_detail_screen.dart';
 import '../counterparties/counterparties_screen.dart';
@@ -14,7 +15,7 @@ class ProjectsScreen extends StatefulWidget {
   State<ProjectsScreen> createState() => _ProjectsScreenState();
 }
 
-class _ProjectsScreenState extends State<ProjectsScreen> {
+class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<ProjectsScreen> {
   final _db = DatabaseHelper.instance;
   List<ProjectModel> _projects = [];
   Map<int, String> _counterpartyNames = {};
@@ -27,6 +28,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     super.initState();
     _load();
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);

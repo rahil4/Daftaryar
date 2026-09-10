@@ -278,8 +278,15 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
                 const Text('هزینه‌های این بازه',
                     style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
                 const SizedBox(height: 6),
+                // چهار ردیف زیر دقیقاً با «پرداختی» بالای همین کارت جمع
+                // می‌بندد (projectPayments + projectOverheadPayments +
+                // officePayments + otherCashOutflows) - قبلاً فقط دو ردیف
+                // اول بود و عدد این کارت با «پرداختی» همخوانی نداشت.
                 _kv('پروژه‌ها', formatMoney(data.projectPayments, withSuffix: false)),
+                _kv('سربار پروژه‌ها', formatMoney(data.projectOverheadPayments, withSuffix: false)),
                 _kv('دفتر', formatMoney(data.officePayments, withSuffix: false)),
+                if (data.otherCashOutflows != 0)
+                  _kv('سایر', formatMoney(data.otherCashOutflows, withSuffix: false)),
               ],
             ),
           ),

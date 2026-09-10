@@ -326,7 +326,6 @@ class _OverviewTab extends StatelessWidget {
     final discount = summary['discount'] as double? ?? 0;
     final netRevenue = summary['netRevenue'] as double?;
     final totalReceived = summary['totalReceived'] as double? ?? 0;
-    final customerAdvance = summary['customerAdvance'] as double? ?? 0;
     final receivable = summary['receivable'] as double? ?? 0;
     final customerCredit = summary['customerCredit'] as double? ?? 0;
     final directProjectCost = summary['directProjectCost'] as double? ?? 0;
@@ -422,16 +421,17 @@ class _OverviewTab extends StatelessWidget {
                     _amountRow('درآمد خالص (مبنای محاسبات پس از نهایی‌سازی)', formatMoney(netRevenue ?? 0),
                         bold: true),
                   ],
+                  // دریافتی/هزینه مستقیم/مابه‌التفاوت - همان کارت «وضعیت
+                  // مالی»، جدا از بخش قرارداد بالا با یک Divider؛ خطی و
+                  // بدون کارت جداگانه، چون این سه رقم به همان وزن اعداد
+                  // بالا نیاز ندارند.
+                  const Divider(),
+                  _cashLine(totalReceived, directProjectCost),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 4),
-          // دریافتی/هزینه مستقیم/اختلاف - خطی و بدون کارت، چون نمایش این سه
-          // عدد کنار هم در قالب دو StatCard جدا (یکی برای دریافتی، یکی برای
-          // هزینه) سنگین‌تر از چیزی بود که این سه رقم نیاز دارند.
-          _cashLine(totalReceived, directProjectCost),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -440,13 +440,6 @@ class _OverviewTab extends StatelessWidget {
             crossAxisSpacing: 12,
             childAspectRatio: 1.6,
             children: [
-              if (customerAdvance > 0)
-                StatCard(
-                  title: 'پیش‌دریافت (تسویه‌نشده)',
-                  value: formatMoney(customerAdvance),
-                  icon: Icons.savings_outlined,
-                  valueColor: AppColors.brass,
-                ),
               if (receivable > 0)
                 StatCard(
                   title: 'مانده طلب',
@@ -617,10 +610,11 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
-  /// ردیف «دریافتی / هزینه مستقیم / اختلاف» - عمداً بدون Card تا نسبت به
-  /// کارت‌های آماری اطرافش سبک‌تر باشد؛ «اختلاف» نامش عمداً «سود» نیست چون
-  /// معادل سود ناخالص تعهدی پروژه (که خودش جدا و از netRevenue محاسبه
-  /// می‌شود) نیست - فقط دریافتی نقدی منهای هزینه مستقیم است.
+  /// ردیف «دریافتی / هزینه مستقیم / مابه‌التفاوت» - داخل کارت «وضعیت
+  /// مالی»، زیر بخش قرارداد. نام «مابه‌التفاوت دریافتی و هزینه» عمداً
+  /// «سود» یا «مانده» نیست: نه معادل «سود ناخالص پروژه» است (که خودش جدا،
+  /// تعهدی و از netRevenue محاسبه می‌شود)، نه معادل «مانده طلب» - فقط
+  /// دریافتی نقدی منهای هزینه مستقیم است.
   Widget _cashLine(double totalReceived, double directProjectCost) {
     final diff = totalReceived - directProjectCost;
     Widget seg(String label, String value, Color color) {
@@ -645,7 +639,7 @@ class _OverviewTab extends StatelessWidget {
         sep(),
         seg('هزینه مستقیم', formatMoney(directProjectCost), AppColors.negative),
         sep(),
-        seg('دریافتی − هزینه', formatMoney(diff), AppColors.brass),
+        seg('مابه‌التفاوت دریافتی و هزینه', formatMoney(diff), AppColors.brass),
       ],
     );
   }

@@ -15,7 +15,7 @@ import '../journal/quick_expense_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../journal/journal_form_screen.dart';
 import '../projects/project_form_screen.dart';
-import '../reports/outstanding_receivables_screen.dart';
+import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
@@ -292,6 +292,9 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
         const SizedBox(height: 16),
 
         // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------
+        // هر چهار کارت این بخش به تب «سود مشتریان» می‌روند - جایی که مانده
+        // طلب واقعی و مانده تخمینی هر مشتری/پروژه کنار سودشان دیده می‌شود
+        // (جایگزین صفحه حذف‌شده «طلب‌های باز»).
         Row(
           children: [
             Expanded(
@@ -300,8 +303,10 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                     value: formatMoneyCompact(data.receivableBalance),
                     color: AppColors.brass,
                     bordered: true,
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())))),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ReportsScreen(initialTabIndex: 1))))),
             const SizedBox(width: 8),
             Expanded(
                 child: _SimpleStat(
@@ -309,8 +314,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                     value: formatMoneyCompact(data.estimatedRemainingTotal),
                     color: AppColors.brass,
                     bordered: true,
-                    onTap: () => Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())))),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ReportsScreen(
+                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
           ],
         ),
         const SizedBox(height: 10),
@@ -326,8 +334,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                     onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) =>
-                                const OutstandingReceivablesScreen(openPendingProjects: true))))),
+                            builder: (_) => const ReportsScreen(
+                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
             const SizedBox(width: 8),
             Expanded(
                 child: _SimpleStat(
@@ -338,8 +346,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen> {
                     onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) =>
-                                const OutstandingReceivablesScreen(openPendingProjects: true))))),
+                            builder: (_) => const ReportsScreen(
+                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
           ],
         ),
         const SizedBox(height: 18),

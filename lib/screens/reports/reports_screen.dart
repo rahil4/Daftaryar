@@ -9,22 +9,35 @@ import '../../models/journal_entry.dart';
 import '../../services/financial_reporting_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import 'outstanding_receivables_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
 
 enum _RangeMode { month, fiscalYear, custom }
 
+/// معیار مرتب‌سازی مشتریان در تب «سود مشتریان» - جایگزین صفحه حذف‌شده
+/// «طلب‌های باز»: «سود» دیدگاه سودآوری است، «فوریت پیگیری» همان دیدگاه
+/// قدیمی «پروژه‌های معلق/پیش‌دریافت» (کدام مشتری بیشترین پول معلق - واقعی
+/// یا تخمینی - را دارد)، فقط این‌بار به‌عنوان یک مرتب‌سازی در همین گزارش،
+/// نه یک صفحه جدا.
+enum _CustomerSort { profit, urgency }
+
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key});
+  /// کدام تب اول باز شود - برای لینک مستقیم از داشبورد (مثلاً کارت
+  /// «پیش‌دریافت» مستقیم به تب «سود مشتریان» می‌رود).
+  final int initialTabIndex;
+  /// اگر true باشد، تب «سود مشتریان» با مرتب‌سازی «فوریت پیگیری» باز
+  /// می‌شود، نه «سود» (پیش‌فرض) - برای کارت‌های پیش‌دریافت/پروژه در جریان.
+  final bool sortCustomersByUrgency;
+  const ReportsScreen({super.key, this.initialTabIndex = 0, this.sortCustomersByUrgency = false});
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
 class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 2, vsync: this);
+  late final TabController _tab =
+      TabController(length: 2, vsync: this, initialIndex: widget.initialTabIndex);
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +45,6 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
       appBar: AppBar(
         title: const Text('گزارش‌ها'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.receipt_long_outlined),
-            tooltip: 'طلب‌های باز',
-            onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())),
-          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'تنظیمات',
@@ -57,9 +64,10 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
       ),
       body: TabBarView(
         controller: _tab,
-        children: const [
-          _CashActivityTab(),
-          _CustomerProfitTab(),
+        children: [
+          const _CashActivityTab(),
+          _CustomerProfitTab(
+              initialSort: widget.sortCustomersByUrgency ? _CustomerSort.urgency : _CustomerSort.profit),
         ],
       ),
     );
@@ -896,7 +904,8 @@ class _TransactionListScreenState extends State<_TransactionListScreen> {
 /// این نسبت مستقیماً به FinancialReportingService.getAllCustomerReports که
 /// از قبل Lifetime طراحی شده متکی است - رجوع به توضیح خودِ آن سرویس.
 class _CustomerProfitTab extends StatefulWidget {
-  const _CustomerProfitTab();
+  final _CustomerSort initialSort;
+  const _CustomerProfitTab({this.initialSort = _CustomerSort.profit});
 
   @override
   State<_CustomerProfitTab> createState() => _CustomerProfitTabState();
@@ -905,8 +914,12 @@ class _CustomerProfitTab extends StatefulWidget {
 class _CustomerProfitTabState extends State<_CustomerProfitTab> {
   final _db = DatabaseHelper.instance;
   final _reporting = FinancialReportingService();
+  late _CustomerSort _sort = widget.initialSort;
   List<CustomerFinancialReport> _reports = [];
   Map<int, String> _names = {};
+  // مانده تخمینی (پروژه‌های نهایی‌نشده)، جمع‌شده به تفکیک مشتری - جایگزین
+  // نمای «مانده تخمینی» صفحه حذف‌شده «طلب‌های باز».
+  Map<int, double> _estimatedByCustomer = {};
   bool _loading = true;
 
   @override
@@ -917,13 +930,46 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final reports = await _reporting.getAllCustomerReports(sortBy: CustomerReportSort.contribution);
+    final reports = await _reporting.getAllCustomerReports();
     final counterparties = await _db.getCounterparties(includeInactive: true);
+    final estimatedByProject = await _db.estimatedRemainingForOpenProjects();
+    final projects = await _db.getProjects();
+    final estimatedByCustomer = <int, double>{};
+    for (final p in projects) {
+      final estimated = estimatedByProject[p.id];
+      if (estimated != null && estimated > 0) {
+        estimatedByCustomer[p.counterpartyId] = (estimatedByCustomer[p.counterpartyId] ?? 0) + estimated;
+      }
+    }
     setState(() {
       _reports = reports;
       _names = {for (final c in counterparties) if (c.id != null) c.id!: c.name};
+      _estimatedByCustomer = estimatedByCustomer;
       _loading = false;
     });
+    _applySort();
+  }
+
+  /// مجموع مانده طلب واقعی (پروژه‌های نهایی‌شده) و مانده تخمینی (پروژه‌های
+  /// در جریان) این مشتری - معیار «فوریت پیگیری»: هرچه بیشتر، پول بیشتری
+  /// از این مشتری معلق مانده.
+  double _urgencyOf(CustomerFinancialReport r) =>
+      r.receivableBalance + (_estimatedByCustomer[r.counterpartyId] ?? 0);
+
+  void _applySort() {
+    setState(() {
+      if (_sort == _CustomerSort.profit) {
+        _reports.sort((a, b) => (b.projectContribution ?? double.negativeInfinity)
+            .compareTo(a.projectContribution ?? double.negativeInfinity));
+      } else {
+        _reports.sort((a, b) => _urgencyOf(b).compareTo(_urgencyOf(a)));
+      }
+    });
+  }
+
+  void _changeSort(_CustomerSort sort) {
+    _sort = sort;
+    _applySort();
   }
 
   void _openCustomer(CustomerFinancialReport report) {
@@ -960,6 +1006,21 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> {
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
                   ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SortChip(
+                          label: 'سود',
+                          selected: _sort == _CustomerSort.profit,
+                          onTap: () => _changeSort(_CustomerSort.profit)),
+                      const SizedBox(width: 8),
+                      _SortChip(
+                          label: 'فوریت پیگیری',
+                          selected: _sort == _CustomerSort.urgency,
+                          onTap: () => _changeSort(_CustomerSort.urgency)),
+                    ],
+                  ),
                   const SizedBox(height: 16),
                   if (_reports.isEmpty)
                     const Padding(
@@ -972,20 +1033,28 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> {
                       final name = _names[r.counterpartyId] ?? 'نامشخص';
                       final profit = r.projectContribution;
                       final margin = r.contributionMargin;
+                      final estimated = _estimatedByCustomer[r.counterpartyId] ?? 0;
                       final color = profit == null
                           ? AppColors.textSecondary
                           : (profit >= 0 ? AppColors.positive : AppColors.negative);
+                      final lines = <String>[
+                        'دریافتی: ${formatMoney(r.totalReceived, withSuffix: false)}',
+                        'درآمد خالص: ${formatMoney(r.netRevenue, withSuffix: false)}'
+                            '  ·  هزینه مستقیم: ${formatMoney(r.directProjectCost, withSuffix: false)}',
+                        if (margin != null) 'حاشیه سود: ${margin.toStringAsFixed(1)}٪',
+                        if (r.receivableBalance > 0)
+                          'مانده طلب: ${formatMoney(r.receivableBalance, withSuffix: false)}',
+                        if (estimated > 0)
+                          'در انتظار (تخمینی): ${formatMoney(estimated, withSuffix: false)}',
+                      ];
                       return Card(
                         child: ListTile(
                           title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
                           subtitle: Text(
-                            'دریافتی: ${formatMoney(r.totalReceived, withSuffix: false)}'
-                            '\nدرآمد خالص: ${formatMoney(r.netRevenue, withSuffix: false)}'
-                            '  ·  هزینه مستقیم: ${formatMoney(r.directProjectCost, withSuffix: false)}'
-                            '${margin != null ? '\nحاشیه سود: ${margin.toStringAsFixed(1)}٪' : ''}',
+                            lines.join('\n'),
                             style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
                           ),
-                          isThreeLine: true,
+                          isThreeLine: lines.length > 2,
                           trailing: Text(
                             profit != null ? formatMoney(profit, withSuffix: false) : '—',
                             style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 14),
@@ -1001,6 +1070,30 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> {
   }
 }
 
+/// چیپ کوچک انتخاب معیار مرتب‌سازی - استفاده مشترک بین تب سود مشتریان و
+/// درون‌رفت پروژه‌های هر مشتری.
+class _SortChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SortChip({required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: AppColors.brass.withValues(alpha: 0.18),
+      labelStyle: TextStyle(
+        color: selected ? AppColors.brass : AppColors.textSecondary,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+        fontSize: 12.5,
+      ),
+      onSelected: (_) => onTap(),
+    );
+  }
+}
+
 /// پروژه‌های یک مشتری با سود/زیان تک‌تک آن‌ها - درون‌رفت از تب سود مشتریان.
 class _CustomerProjectsScreen extends StatefulWidget {
   final int counterpartyId;
@@ -1012,8 +1105,16 @@ class _CustomerProjectsScreen extends StatefulWidget {
 }
 
 class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
+  final _db = DatabaseHelper.instance;
   final _reporting = FinancialReportingService();
+  _CustomerSort _sort = _CustomerSort.profit;
   List<ProjectFinancialReport> _projects = [];
+  // مانده تخمینی پروژه‌های نهایی‌نشده این مشتری - جایگزین نمای «مانده
+  // تخمینی» صفحه حذف‌شده «طلب‌های باز».
+  Map<int, double> _estimatedByProject = {};
+  // تاریخ شروع هر پروژه - فقط برای Tie-break مرتب‌سازی «فوریت» (قدیمی‌تر
+  // جلوتر)، دقیقاً مطابق منطق قبلی «پروژه‌های معلق».
+  Map<int, String> _startDateByProject = {};
   bool _loading = true;
 
   @override
@@ -1024,11 +1125,40 @@ class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
 
   Future<void> _load() async {
     final projects = await _reporting.getProjectReports(counterpartyId: widget.counterpartyId);
-    final sorted = _reporting.sortProjectReports(projects, ProjectReportSort.contribution);
+    final estimatedByProject = await _db.estimatedRemainingForOpenProjects();
+    final rawProjects = await _db.getProjects(counterpartyId: widget.counterpartyId);
     setState(() {
-      _projects = sorted;
+      _projects = projects;
+      _estimatedByProject = estimatedByProject;
+      _startDateByProject = {for (final p in rawProjects) if (p.id != null) p.id!: p.startDate};
       _loading = false;
     });
+    _applySort();
+  }
+
+  /// مانده طلب واقعی (نهایی‌شده) + مانده تخمینی (در جریان) - معیار «فوریت».
+  double _urgencyOf(ProjectFinancialReport p) =>
+      p.receivableBalance + (_estimatedByProject[p.projectId] ?? 0);
+
+  void _applySort() {
+    setState(() {
+      if (_sort == _CustomerSort.profit) {
+        _projects = _reporting.sortProjectReports(_projects, ProjectReportSort.contribution);
+      } else {
+        _projects.sort((a, b) {
+          final byUrgency = _urgencyOf(b).compareTo(_urgencyOf(a));
+          if (byUrgency != 0) return byUrgency;
+          final aDate = _startDateByProject[a.projectId] ?? '';
+          final bDate = _startDateByProject[b.projectId] ?? '';
+          return aDate.compareTo(bDate); // قدیمی‌تر جلوتر
+        });
+      }
+    });
+  }
+
+  void _changeSort(_CustomerSort sort) {
+    _sort = sort;
+    _applySort();
   }
 
   @override
@@ -1038,31 +1168,58 @@ class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
       body: BlueprintGridBackground(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : _projects.isEmpty
-                ? const Center(
-                    child: Text('این مشتری هنوز پروژه‌ای ندارد.',
-                        style: TextStyle(color: AppColors.textSecondary)))
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: _projects.map((p) {
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SortChip(
+                          label: 'سود',
+                          selected: _sort == _CustomerSort.profit,
+                          onTap: () => _changeSort(_CustomerSort.profit)),
+                      const SizedBox(width: 8),
+                      _SortChip(
+                          label: 'فوریت',
+                          selected: _sort == _CustomerSort.urgency,
+                          onTap: () => _changeSort(_CustomerSort.urgency)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_projects.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text('این مشتری هنوز پروژه‌ای ندارد.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    ..._projects.map((p) {
+                      final estimated = _estimatedByProject[p.projectId] ?? 0;
                       final color = !p.isFinalized
                           ? AppColors.textSecondary
                           : (p.projectContribution == null
                               ? AppColors.textSecondary
                               : (p.projectContribution! >= 0 ? AppColors.positive : AppColors.negative));
+                      final lines = <String>[
+                        'دریافتی: ${formatMoney(p.totalReceived, withSuffix: false)}',
+                        if (!p.isFinalized)
+                          'نهایی نشده'
+                              '${estimated > 0 ? ' - مانده تخمینی: ${formatMoney(estimated, withSuffix: false)}' : ''}'
+                        else ...[
+                          'درآمد خالص: ${formatMoney(p.netRevenue ?? 0, withSuffix: false)}'
+                              '  ·  هزینه مستقیم: ${formatMoney(p.directProjectCost, withSuffix: false)}',
+                          if (p.receivableBalance > 0)
+                            'مانده طلب: ${formatMoney(p.receivableBalance, withSuffix: false)}',
+                        ],
+                      ];
                       return Card(
                         child: ListTile(
                           title: Text(p.projectName),
                           subtitle: Text(
-                            !p.isFinalized
-                                ? 'دریافتی: ${formatMoney(p.totalReceived, withSuffix: false)}'
-                                    '\nنهایی نشده - هنوز درآمد شناسایی نشده'
-                                : 'دریافتی: ${formatMoney(p.totalReceived, withSuffix: false)}'
-                                    '\nدرآمد خالص: ${formatMoney(p.netRevenue ?? 0, withSuffix: false)}'
-                                    '  ·  هزینه مستقیم: ${formatMoney(p.directProjectCost, withSuffix: false)}',
+                            lines.join('\n'),
                             style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
                           ),
-                          isThreeLine: true,
+                          isThreeLine: lines.length > 1,
                           trailing: Text(
                             p.isFinalized && p.projectContribution != null
                                 ? formatMoney(p.projectContribution!, withSuffix: false)
@@ -1071,8 +1228,9 @@ class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
                           ),
                         ),
                       );
-                    }).toList(),
-                  ),
+                    }),
+                ],
+              ),
       ),
     );
   }

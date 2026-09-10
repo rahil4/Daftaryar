@@ -135,16 +135,30 @@ class PdfExportService {
   /// همه پروژه‌های یک طرف‌حساب را با هم می‌آورد، این خروجی وقتی کاربر
   /// می‌خواهد فقط وضعیت مالی یک کار مشخص را برای همان کارفرما بفرستد
   /// (بدون افشای بقیه پروژه‌های او) استفاده می‌شود.
+  ///
+  /// عمداً از همان اعداد summary (projectFinancialSummary) استفاده می‌کند
+  /// که تب «خلاصه و مالی» خودِ برنامه نشان می‌دهد - نه agreedAmount خام که
+  /// قبلاً استفاده می‌شد و با تغییر مبلغ برآوردی/نهایی‌سازی/تخفیف همگام
+  /// نبود. فهرست تراکنش‌ها هم عمداً receipts (فقط دریافت‌های نقدی واقعی)
+  /// است، نه سطرهای خام دفترکل - کارفرما نباید سند سیستمیِ «شناسایی
+  /// درآمد»/«انتقال پیش‌دریافت» را ببیند.
   Future<void> exportProjectStatement({
     required String projectTitle,
     required String counterpartyName,
     String? counterpartyPhone,
-    required double agreedAmount,
-    required double received,
-    required List<Map<String, dynamic>> transactions, // {date, description, type, amount}
+    required Map<String, dynamic> summary,
+    required List<Map<String, dynamic>> receipts, // {date, description, amount} - فقط دریافت نقدی
   }) async {
     await _loadFonts();
-    final remaining = agreedAmount - received;
+    final isFinalized = summary['isFinalized'] as bool;
+    final initialEstimate = summary['initialEstimate'] as double;
+    final currentExpected = summary['currentExpectedAmount'] as double?;
+    final grossFinalAmount = summary['grossFinalAmount'] as double?;
+    final discount = summary['discount'] as double? ?? 0;
+    final netRevenue = summary['netRevenue'] as double?;
+    final totalReceived = summary['totalReceived'] as double? ?? 0;
+    final receivable = summary['receivable'] as double? ?? 0;
+    final customerCredit = summary['customerCredit'] as double? ?? 0;
 
     final doc = pw.Document();
     doc.addPage(
@@ -165,12 +179,27 @@ class PdfExportService {
                 pw.Text('تاریخ صدور: ${formatJalaliLong(todayJalaliString())}',
                     style: pw.TextStyle(font: _regularFont, fontSize: 9, color: PdfColors.grey600)),
                 pw.SizedBox(height: 14),
-                _row('مبلغ قرارداد', formatMoney(agreedAmount)),
-                _row('دریافتی', formatMoney(received)),
-                _row('باقی‌مانده', formatMoney(remaining), bold: true),
-                if (transactions.isNotEmpty) ...[
-                  _sectionTitle('گردش تراکنش‌ها'),
-                  _transactionsTable(transactions),
+                if (!isFinalized)
+                  _row('مبلغ برآوردی فعلی', formatMoney(currentExpected ?? initialEstimate))
+                else ...[
+                  _row('مبلغ نهایی قرارداد', formatMoney(grossFinalAmount ?? 0)),
+                  if (discount > 0) _row('تخفیف', '- ${formatMoney(discount)}'),
+                  _row('مبلغ نهایی پس از تخفیف', formatMoney(netRevenue ?? 0), bold: true),
+                ],
+                _row('دریافتی تاکنون', formatMoney(totalReceived)),
+                if (customerCredit > 0)
+                  _row('بستانکاری (مازاد دریافتی)', formatMoney(customerCredit), bold: true)
+                else
+                  _row(
+                    isFinalized ? 'مانده طلب' : 'مانده تخمینی',
+                    formatMoney(isFinalized
+                        ? receivable
+                        : (currentExpected ?? initialEstimate) - totalReceived),
+                    bold: true,
+                  ),
+                if (receipts.isNotEmpty) ...[
+                  _sectionTitle('گردش دریافت‌ها'),
+                  _receiptsTable(receipts),
                 ],
               ],
             ),
@@ -180,6 +209,33 @@ class PdfExportService {
     );
 
     await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$projectTitle.pdf');
+  }
+
+  pw.Widget _receiptsTable(List<Map<String, dynamic>> receipts) {
+    return pw.Table(
+      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1),
+        1: pw.FlexColumnWidth(2),
+        2: pw.FlexColumnWidth(1.2),
+      },
+      children: [
+        pw.TableRow(
+          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+          children: [
+            _cell('تاریخ', bold: true),
+            _cell('شرح', bold: true),
+            _cell('مبلغ', bold: true),
+          ],
+        ),
+        for (final r in receipts)
+          pw.TableRow(children: [
+            _cell(formatJalaliLong(r['date'] as String)),
+            _cell((r['description'] as String?) ?? 'دریافت وجه'),
+            _cell(formatMoney((r['amount'] as num).toDouble(), withSuffix: false)),
+          ]),
+      ],
+    );
   }
 
   pw.Widget _transactionsTable(List<Map<String, dynamic>> transactions) {

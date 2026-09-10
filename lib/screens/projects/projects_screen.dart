@@ -70,7 +70,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<Project
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
               child: TextField(
                 decoration: const InputDecoration(
-                  hintText: 'جستجوی عنوان پروژه...',
+                  hintText: 'جستجوی عنوان پروژه یا نام مشتری...',
                   prefixIcon: Icon(Icons.search, size: 20),
                 ),
                 onChanged: (v) {

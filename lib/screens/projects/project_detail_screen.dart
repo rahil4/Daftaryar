@@ -69,33 +69,37 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
 
   /// خروجی PDF صورتحساب مختص همین پروژه - برای ارسال به کارفرما، بدون
   /// افشای بقیه پروژه‌های او (برخلاف خروجی سطح طرف‌حساب که همه را با هم
-  /// می‌آورد).
+  /// می‌آورد). عمداً فقط دریافت‌های نقدی واقعی (بدهکار شدن یک حساب نقدی/
+  /// بانکی) را فهرست می‌کند - نه هر سطر دفترکل مرتبط با این پروژه؛ سندهای
+  /// سیستمی مثل شناسایی درآمد یا انتقال پیش‌دریافت داخلی‌اند و نباید در
+  /// صورتحسابی که به کارفرما داده می‌شود دیده شوند.
   Future<void> _exportStatement() async {
+    if (_summary == null) return;
     setState(() => _exporting = true);
     try {
-      final cashFlow = await _db.projectFinancials(_project.id!);
-      final transactions = <Map<String, dynamic>>[];
+      final cashAccounts = await _db.getCashAccounts();
+      final cashAccountIds = cashAccounts.map((a) => a.id).toSet();
+      final receipts = <Map<String, dynamic>>[];
       for (final e in _entries) {
         for (final l in e.lines) {
           if (l.projectId != _project.id) continue;
-          if (l.debit == 0 && l.credit == 0) continue;
-          transactions.add({
+          if (l.debit <= 0) continue;
+          if (!cashAccountIds.contains(l.accountId)) continue;
+          receipts.add({
             'date': e.date,
-            'description': e.description ?? _project.title,
-            'type': l.credit > 0 ? 'دریافت' : 'پرداخت',
-            'amount': l.credit > 0 ? l.credit : l.debit,
+            'description': e.description ?? 'دریافت وجه',
+            'amount': l.debit,
           });
         }
       }
-      transactions.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      receipts.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
       await _pdf.exportProjectStatement(
         projectTitle: _project.title,
         counterpartyName: _counterparty?.name ?? '—',
         counterpartyPhone: _counterparty?.phone,
-        agreedAmount: _project.agreedAmount,
-        received: cashFlow['received']!,
-        transactions: transactions,
+        summary: _summary!,
+        receipts: receipts,
       );
     } finally {
       if (mounted) setState(() => _exporting = false);

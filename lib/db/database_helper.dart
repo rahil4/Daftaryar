@@ -788,6 +788,8 @@ class DatabaseHelper {
     return db.delete('projects', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// جست‌وجوی پروژه‌ها - هم روی عنوان پروژه، هم روی نام طرف‌حساب (کارفرما).
+  /// چون کاربر معمولاً اسم مشتری را به‌خاطر می‌آورد نه عنوان دقیق پروژه.
   Future<List<ProjectModel>> getProjects({int? counterpartyId, String? query}) async {
     final db = await database;
     String? where;
@@ -797,8 +799,21 @@ class DatabaseHelper {
       args.add(counterpartyId);
     }
     if (query != null && query.isNotEmpty) {
-      where = where == null ? 'title LIKE ?' : '$where AND title LIKE ?';
-      args.add('%$query%');
+      final matchingCounterparties =
+          await db.query('counterparties', columns: ['id'], where: 'name LIKE ?', whereArgs: ['%$query%']);
+      String searchClause;
+      List<Object?> searchArgs;
+      if (matchingCounterparties.isEmpty) {
+        searchClause = 'title LIKE ?';
+        searchArgs = ['%$query%'];
+      } else {
+        final ids = matchingCounterparties.map((r) => r['id'] as int).toList();
+        final placeholders = List.filled(ids.length, '?').join(',');
+        searchClause = '(title LIKE ? OR counterpartyId IN ($placeholders))';
+        searchArgs = ['%$query%', ...ids];
+      }
+      where = where == null ? searchClause : '$where AND $searchClause';
+      args.addAll(searchArgs);
     }
     final maps = await db.query('projects',
         where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'id DESC');

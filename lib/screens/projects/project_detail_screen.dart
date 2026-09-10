@@ -4,16 +4,17 @@ import '../../db/database_helper.dart';
 import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
+import '../../models/project_price_event.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
-import '../../widgets/project_receipt_context_box.dart';
 import '../../services/pdf_export_service.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import 'project_form_screen.dart';
-import 'project_finance_screen.dart';
+import 'project_finance_sheets.dart';
 import 'project_economics_screen.dart';
+import 'project_metrics_debug_screen.dart';
 
 class ProjectDetailScreen extends StatefulWidget {
   final ProjectModel project;
@@ -24,12 +25,13 @@ class ProjectDetailScreen extends StatefulWidget {
 }
 
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 3, vsync: this);
+  late final TabController _tab = TabController(length: 2, vsync: this);
   final _db = DatabaseHelper.instance;
   final _pdf = PdfExportService();
   late ProjectModel _project;
   CounterpartyModel? _counterparty;
   List<JournalEntryModel> _entries = [];
+  List<ProjectPriceEventModel> _priceEvents = [];
   Map<String, dynamic>? _summary;
   bool _loading = true;
   bool _exporting = false;
@@ -49,13 +51,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
 
   Future<void> _load() async {
     setState(() => _loading = true);
+    final project = await _db.getProject(_project.id!);
     final client = await _db.getCounterparty(_project.counterpartyId);
     final entries = await _db.getJournalEntries(projectId: _project.id);
     final summary = await _db.projectFinancialSummary(_project.id!);
+    final priceEvents = await _db.getProjectPriceEvents(_project.id!);
     setState(() {
+      _project = project ?? _project;
       _counterparty = client;
       _entries = entries;
       _summary = summary;
+      _priceEvents = priceEvents;
       _loading = false;
     });
   }
@@ -159,12 +165,45 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     showQuickAddSheet(context, presetProjectId: _project.id, onDone: _load);
   }
 
+  Future<void> _addPriceEvent() async {
+    final result = await showPriceEventSheet(context, _project);
+    if (result == true) _load();
+  }
+
+  Future<void> _finalize() async {
+    final result = await showFinalizeSheet(context, _project, _summary!['currentExpectedAmount']);
+    if (result == true) _load();
+  }
+
+  Future<void> _addDiscount() async {
+    final result = await showDiscountSheet(context, _project);
+    if (result == true) _load();
+  }
+
+  Future<void> _addFinalAdjustment() async {
+    final result = await showFinalAdjustmentSheet(context, _project);
+    if (result == true) _load();
+  }
+
+  Future<void> _receivePayment() async {
+    final result = await showReceivePaymentSheet(context, _project, _summary);
+    if (result == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(_project.title),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.analytics_outlined),
+            tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
+            ),
+          ),
           IconButton(
             icon: _exporting
                 ? const SizedBox(
@@ -197,9 +236,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
         bottom: TabBar(
           controller: _tab,
           tabs: const [
-            Tab(text: 'خلاصه'),
-            Tab(text: 'مالی'),
-            Tab(text: 'اقتصاد'),
+            Tab(text: 'خلاصه و مالی'),
+            Tab(text: 'تحلیل'),
           ],
         ),
       ),
@@ -209,15 +247,20 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
               child: TabBarView(
                 controller: _tab,
                 children: [
-                  _SummaryTab(
+                  _OverviewTab(
                     project: _project,
                     counterparty: _counterparty,
                     entries: _entries,
+                    priceEvents: _priceEvents,
                     summary: _summary!,
                     onLoad: _load,
                     onAddOptions: _showAddOptions,
+                    onReceivePayment: _receivePayment,
+                    onAddPriceEvent: _addPriceEvent,
+                    onFinalize: _finalize,
+                    onAddDiscount: _addDiscount,
+                    onAddFinalAdjustment: _addFinalAdjustment,
                   ),
-                  ProjectFinanceScreen(project: _project, embedded: true),
                   ProjectEconomicsScreen(projectId: _project.id!, embedded: true),
                 ],
               ),
@@ -226,24 +269,39 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   }
 }
 
-/// تب «خلاصه» - کارت اطلاعات کلی، آمار سریع، و فهرست اسناد این پروژه.
-/// جزئیات مالی کامل (Finalization/تخفیف/طلب) و تحلیل اقتصادی اکنون تب‌های
-/// همسطح مستقل خودشان هستند، نه دکمه‌ای که کاربر را از این صفحه خارج کند.
-class _SummaryTab extends StatelessWidget {
+/// تب «خلاصه و مالی» - ادغام دو تب قبلی «خلاصه» و «مالی» که همان چند عدد
+/// پایه (برآورد اولیه، دریافتی، هزینه مستقیم، سود، مانده طلب) را با چیدمان
+/// کمی متفاوت دوبار نشان می‌دادند. حالا هر عدد فقط یک‌بار دیده می‌شود:
+/// اطلاعات کلی پروژه → وضعیت مالی یکپارچه → دکمه‌های عملیات → تاریخچه
+/// تغییرات مبلغ → اسناد. تحلیل نسبت‌ها/مقایسه با میانگین در تب «تحلیل»
+/// جداست.
+class _OverviewTab extends StatelessWidget {
   final ProjectModel project;
   final CounterpartyModel? counterparty;
   final List<JournalEntryModel> entries;
+  final List<ProjectPriceEventModel> priceEvents;
   final Map<String, dynamic> summary;
   final VoidCallback onLoad;
   final VoidCallback onAddOptions;
+  final VoidCallback onReceivePayment;
+  final VoidCallback onAddPriceEvent;
+  final VoidCallback onFinalize;
+  final VoidCallback onAddDiscount;
+  final VoidCallback onAddFinalAdjustment;
 
-  const _SummaryTab({
+  const _OverviewTab({
     required this.project,
     required this.counterparty,
     required this.entries,
+    required this.priceEvents,
     required this.summary,
     required this.onLoad,
     required this.onAddOptions,
+    required this.onReceivePayment,
+    required this.onAddPriceEvent,
+    required this.onFinalize,
+    required this.onAddDiscount,
+    required this.onAddFinalAdjustment,
   });
 
   @override
@@ -251,17 +309,17 @@ class _SummaryTab extends StatelessWidget {
     final initialEstimate = summary['initialEstimate'] as double;
     final currentExpected = summary['currentExpectedAmount'] as double?;
     final isFinalized = summary['isFinalized'] as bool;
+    final isSettled = summary['isSettled'] as bool;
     final grossFinalAmount = summary['grossFinalAmount'] as double?;
     final discount = summary['discount'] as double? ?? 0;
     final netRevenue = summary['netRevenue'] as double?;
     final totalReceived = summary['totalReceived'] as double? ?? 0;
+    final customerAdvance = summary['customerAdvance'] as double? ?? 0;
+    final receivable = summary['receivable'] as double? ?? 0;
+    final customerCredit = summary['customerCredit'] as double? ?? 0;
     final directProjectCost = summary['directProjectCost'] as double? ?? 0;
-    final remainingInfo = computeProjectRemaining(project, summary);
-    final remaining = remainingInfo.value;
-    // «مبلغ فعلی/نهایی» که در کارت آماری اصلی نشان داده می‌شود: پیش از
-    // Finalization برآورد فعلی (پس از اعمال تاریخچه تغییرات)، پس از آن
-    // درآمد خالص واقعی.
-    final displayAmount = isFinalized ? (netRevenue ?? initialEstimate) : (currentExpected ?? initialEstimate);
+    final projectContribution = summary['projectContribution'] as double?;
+    final projectMargin = summary['projectMargin'] as double?;
     final hasChanged = !isFinalized && currentExpected != null && currentExpected != initialEstimate;
 
     return RefreshIndicator(
@@ -306,17 +364,27 @@ class _SummaryTab extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _statusChip(isFinalized ? 'نهایی‌شده' : 'در جریان',
+                  isFinalized ? AppColors.brass : AppColors.textSecondary),
+              const SizedBox(width: 8),
+              _statusChip(
+                  isSettled ? 'تسویه‌شده' : 'تسویه‌نشده', isSettled ? AppColors.positive : AppColors.negative),
+            ],
+          ),
           const SizedBox(height: 16),
-          // کارت «روند مبلغ پروژه» - رابطهٔ برآورد اولیه و مبلغ فعلی/نهایی
-          // را صریح نشان می‌دهد، به‌جای یک عدد تنها که معلوم نبود مربوط به
-          // کدام مرحله است.
+          // کارت واحد «وضعیت مالی» - جایگزین دو کارت جدا («روند مبلغ» در
+          // خلاصه قبلی + جدول اعداد در مالی قبلی) که همین اعداد را دوبار
+          // نشان می‌دادند.
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('روند مبلغ پروژه', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                  const Text('وضعیت مالی', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                   const SizedBox(height: 10),
                   _amountRow('برآورد اولیه (زمان ایجاد پروژه)', formatMoney(initialEstimate)),
                   if (!isFinalized) ...[
@@ -356,32 +424,107 @@ class _SummaryTab extends StatelessWidget {
             childAspectRatio: 1.6,
             children: [
               StatCard(
-                title: isFinalized ? 'درآمد خالص (نهایی)' : 'مبلغ فعلی (برآورد)',
-                value: formatMoney(displayAmount),
-                icon: Icons.description_outlined,
-              ),
-              StatCard(
                 title: 'مجموع دریافتی',
                 value: formatMoney(totalReceived),
                 icon: Icons.south_west_rounded,
                 valueColor: AppColors.positive,
               ),
+              if (customerAdvance > 0)
+                StatCard(
+                  title: 'پیش‌دریافت (تسویه‌نشده)',
+                  value: formatMoney(customerAdvance),
+                  icon: Icons.savings_outlined,
+                  valueColor: AppColors.brass,
+                ),
+              if (receivable > 0)
+                StatCard(
+                  title: 'مانده طلب',
+                  value: formatMoney(receivable),
+                  icon: Icons.request_quote_outlined,
+                  valueColor: AppColors.negative,
+                ),
+              if (customerCredit > 0)
+                StatCard(
+                  title: 'مازاد دریافتی (بستانکاری مشتری)',
+                  value: formatMoney(customerCredit),
+                  icon: Icons.account_balance_wallet_outlined,
+                  valueColor: AppColors.positive,
+                ),
               StatCard(
                 title: 'هزینه مستقیم پروژه',
                 value: formatMoney(directProjectCost),
                 icon: Icons.north_east_rounded,
                 valueColor: AppColors.negative,
               ),
-              StatCard(
-                title: remainingInfo.label,
-                value: remaining == null ? '—' : formatMoney(remaining.abs()),
-                icon: Icons.account_balance_wallet_outlined,
-                valueColor: remaining == null
-                    ? AppColors.textSecondary
-                    : (remaining > 0 ? AppColors.brass : AppColors.positive),
-              ),
+              if (projectContribution != null)
+                StatCard(
+                  title: 'سود ناخالص پروژه',
+                  value: formatMoney(projectContribution),
+                  icon: Icons.trending_up_rounded,
+                  valueColor: projectContribution >= 0 ? AppColors.positive : AppColors.negative,
+                ),
+              if (projectMargin != null)
+                StatCard(
+                  title: 'حاشیه سود',
+                  value: '${projectMargin.toStringAsFixed(1)}٪',
+                  icon: Icons.percent_rounded,
+                ),
             ],
           ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: onReceivePayment,
+                icon: const Icon(Icons.south_west_rounded, size: 18),
+                label: const Text('دریافت وجه'),
+              ),
+              if (!isFinalized) ...[
+                OutlinedButton.icon(
+                  onPressed: onAddPriceEvent,
+                  icon: const Icon(Icons.edit_note_outlined, size: 18),
+                  label: const Text('تغییر مبلغ برآوردی'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onFinalize,
+                  icon: const Icon(Icons.flag_outlined, size: 18),
+                  label: const Text('نهایی‌سازی پروژه'),
+                ),
+              ] else ...[
+                OutlinedButton.icon(
+                  onPressed: onAddDiscount,
+                  icon: const Icon(Icons.discount_outlined, size: 18),
+                  label: const Text('ثبت تخفیف'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onAddFinalAdjustment,
+                  icon: const Icon(Icons.tune_outlined, size: 18),
+                  label: const Text('اصلاح مبلغ نهایی'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text('تاریخچه تغییرات مبلغ', style: Theme.of(context).textTheme.titleMedium),
+          if (priceEvents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('هنوز تغییری ثبت نشده', style: TextStyle(color: AppColors.textSecondary)),
+            )
+          else
+            ...priceEvents.map((e) => Card(
+                  child: ListTile(
+                    leading: Icon(
+                      e.amount >= 0 ? Icons.add_circle_outline : Icons.remove_circle_outline,
+                      color: e.amount >= 0 ? AppColors.positive : AppColors.negative,
+                    ),
+                    title: Text('${_eventTypeLabel(e.type)} — ${formatMoney(e.amount.abs())}'),
+                    subtitle:
+                        Text('${formatJalaliLong(e.date)}${e.reason != null ? ' · ${e.reason}' : ''}'),
+                  ),
+                )),
           const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -418,6 +561,35 @@ class _SummaryTab extends StatelessWidget {
                 )),
         ],
       ),
+    );
+  }
+
+  String _eventTypeLabel(String type) {
+    switch (type) {
+      case kPriceEventAddition:
+        return 'افزایش مبلغ';
+      case kPriceEventReduction:
+        return 'کاهش مبلغ';
+      case kPriceEventAdjustment:
+        return 'اصلاح مبلغ';
+      case kPriceEventFinalAdjustment:
+        return 'اصلاح پس از نهایی‌سازی';
+      case kPriceEventDiscount:
+        return 'تخفیف';
+      default:
+        return type;
+    }
+  }
+
+  Widget _statusChip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color),
+      ),
+      child: Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
     );
   }
 

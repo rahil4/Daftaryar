@@ -9,321 +9,55 @@ import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
 import '../../widgets/persian_amount_field.dart';
 import '../../widgets/project_receipt_context_box.dart';
-import '../../widgets/stat_card.dart';
-import 'project_metrics_debug_screen.dart';
 
-/// مدیریت کامل جریان مالی پروژه: تاریخچه تغییر مبلغ، نهایی‌سازی، دریافت وجه
-/// (پیش‌دریافت پیش از Finalization / تسویه طلب پس از آن)، تخفیف نهایی، و
-/// اصلاح مبلغ نهایی. همه اعداد مستقیم از Ledger محاسبه می‌شوند.
-class ProjectFinanceScreen extends StatefulWidget {
-  final ProjectModel project;
-  final bool embedded;
-  const ProjectFinanceScreen({super.key, required this.project, this.embedded = false});
+/// شیت‌های عملیات مالی پروژه (تغییر مبلغ، نهایی‌سازی، تخفیف، اصلاح مبلغ
+/// نهایی، دریافت وجه) - همگی از تب «خلاصه و مالی» در ProjectDetailScreen
+/// صدا زده می‌شوند. هرکدام true برمی‌گرداند اگر با موفقیت ثبت شده باشد.
 
-  @override
-  State<ProjectFinanceScreen> createState() => _ProjectFinanceScreenState();
+Future<bool?> showPriceEventSheet(BuildContext context, ProjectModel project) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _PriceEventSheet(project: project),
+  );
 }
 
-class _ProjectFinanceScreenState extends State<ProjectFinanceScreen> {
-  final _db = DatabaseHelper.instance;
-  late ProjectModel _project;
-  Map<String, dynamic>? _summary;
-  List<ProjectPriceEventModel> _events = [];
-  bool _loading = true;
+Future<bool?> showFinalizeSheet(BuildContext context, ProjectModel project, double suggestedAmount) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _FinalizeSheet(project: project, suggestedAmount: suggestedAmount),
+  );
+}
 
-  @override
-  void initState() {
-    super.initState();
-    _project = widget.project;
-    _load();
-  }
+Future<bool?> showDiscountSheet(BuildContext context, ProjectModel project) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _DiscountSheet(project: project),
+  );
+}
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final project = await _db.getProject(_project.id!);
-    final summary = await _db.projectFinancialSummary(_project.id!);
-    final events = await _db.getProjectPriceEvents(_project.id!);
-    setState(() {
-      _project = project ?? _project;
-      _summary = summary;
-      _events = events;
-      _loading = false;
-    });
-  }
+Future<bool?> showFinalAdjustmentSheet(BuildContext context, ProjectModel project) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _FinalAdjustmentSheet(project: project),
+  );
+}
 
-  Future<void> _addPriceEvent() async {
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => _PriceEventSheet(project: _project),
-    );
-    if (result == true) _load();
-  }
-
-  Future<void> _finalize() async {
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => _FinalizeSheet(project: _project, suggestedAmount: _summary!['currentExpectedAmount']),
-    );
-    if (result == true) _load();
-  }
-
-  Future<void> _addDiscount() async {
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => _DiscountSheet(project: _project),
-    );
-    if (result == true) _load();
-  }
-
-  Future<void> _addFinalAdjustment() async {
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => _FinalAdjustmentSheet(project: _project),
-    );
-    if (result == true) _load();
-  }
-
-  Future<void> _receivePayment() async {
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      builder: (ctx) => _ReceivePaymentSheet(project: _project, summary: _summary),
-    );
-    if (result == true) _load();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = _summary;
-    final Widget content;
-    if (_loading || s == null) {
-      content = const Center(child: CircularProgressIndicator());
-    } else {
-      content = RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (widget.embedded)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: IconButton(
-                      icon: const Icon(Icons.analytics_outlined, size: 20),
-                      tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
-                      ),
-                    ),
-                  ),
-                Row(
-                  children: [
-                        _statusChip(_project.isFinalized ? 'نهایی‌شده' : 'در جریان',
-                            _project.isFinalized ? AppColors.brass : AppColors.textSecondary),
-                        const SizedBox(width: 8),
-                        _statusChip(
-                            (s['isSettled'] as bool) ? 'تسویه‌شده' : 'تسویه‌نشده',
-                            (s['isSettled'] as bool) ? AppColors.positive : AppColors.negative),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _row('برآورد اولیه', formatMoney(s['initialEstimate'])),
-                            if (!_project.isFinalized)
-                              _row('مبلغ مورد انتظار فعلی', formatMoney(s['currentExpectedAmount'])),
-                            if (_project.isFinalized) ...[
-                              _row('مبلغ نهایی ناخالص', formatMoney(s['grossFinalAmount'])),
-                              if ((s['discount'] as double) > 0)
-                                _row('تخفیف', '- ${formatMoney(s['discount'])}'),
-                              _row('درآمد خالص', formatMoney(s['netRevenue']), bold: true),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 1.6,
-                      children: [
-                        StatCard(
-                          title: 'مجموع دریافتی',
-                          value: formatMoney(s['totalReceived']),
-                          icon: Icons.south_west_rounded,
-                          color: AppColors.positive,
-                        ),
-                        if ((s['customerAdvance'] as double) > 0)
-                          StatCard(
-                            title: 'پیش‌دریافت (تسویه‌نشده)',
-                            value: formatMoney(s['customerAdvance']),
-                            icon: Icons.savings_outlined,
-                            color: AppColors.brass,
-                          ),
-                        if ((s['receivable'] as double) > 0)
-                          StatCard(
-                            title: 'مانده طلب',
-                            value: formatMoney(s['receivable']),
-                            icon: Icons.request_quote_outlined,
-                            color: AppColors.negative,
-                          ),
-                        if ((s['customerCredit'] as double) > 0)
-                          StatCard(
-                            title: 'مازاد دریافتی (بستانکاری مشتری)',
-                            value: formatMoney(s['customerCredit']),
-                            icon: Icons.account_balance_wallet_outlined,
-                            color: AppColors.positive,
-                          ),
-                        StatCard(
-                          title: 'هزینه مستقیم پروژه',
-                          value: formatMoney(s['directProjectCost']),
-                          icon: Icons.north_east_rounded,
-                          color: AppColors.negative,
-                        ),
-                        if (s['projectContribution'] != null)
-                          StatCard(
-                            title: 'سود ناخالص پروژه',
-                            value: formatMoney(s['projectContribution']),
-                            icon: Icons.trending_up_rounded,
-                            color: (s['projectContribution'] as double) >= 0
-                                ? AppColors.positive
-                                : AppColors.negative,
-                          ),
-                        if (s['projectMargin'] != null)
-                          StatCard(
-                            title: 'حاشیه سود',
-                            value: '${(s['projectMargin'] as double).toStringAsFixed(1)}٪',
-                            icon: Icons.percent_rounded,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: _receivePayment,
-                          icon: const Icon(Icons.south_west_rounded, size: 18),
-                          label: const Text('دریافت وجه'),
-                        ),
-                        if (!_project.isFinalized) ...[
-                          OutlinedButton.icon(
-                            onPressed: _addPriceEvent,
-                            icon: const Icon(Icons.edit_note_outlined, size: 18),
-                            label: const Text('تغییر مبلغ برآوردی'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _finalize,
-                            icon: const Icon(Icons.flag_outlined, size: 18),
-                            label: const Text('نهایی‌سازی پروژه'),
-                          ),
-                        ] else ...[
-                          OutlinedButton.icon(
-                            onPressed: _addDiscount,
-                            icon: const Icon(Icons.discount_outlined, size: 18),
-                            label: const Text('ثبت تخفیف'),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: _addFinalAdjustment,
-                            icon: const Icon(Icons.tune_outlined, size: 18),
-                            label: const Text('اصلاح مبلغ نهایی'),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Text('تاریخچه تغییرات مبلغ', style: Theme.of(context).textTheme.titleMedium),
-                    if (_events.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text('هنوز تغییری ثبت نشده',
-                            style: TextStyle(color: AppColors.textSecondary)),
-                      )
-                    else
-                      ..._events.map((e) => Card(
-                            child: ListTile(
-                              leading: Icon(
-                                e.amount >= 0 ? Icons.add_circle_outline : Icons.remove_circle_outline,
-                                color: e.amount >= 0 ? AppColors.positive : AppColors.negative,
-                              ),
-                              title: Text('${_eventTypeLabel(e.type)} — ${formatMoney(e.amount.abs())}'),
-                              subtitle: Text(
-                                  '${formatJalaliLong(e.date)}${e.reason != null ? ' · ${e.reason}' : ''}'),
-                            ),
-                          )),
-                  ],
-                ),
-              );
-    }
-
-    if (widget.embedded) return content;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('وضعیت مالی پروژه')),
-      body: BlueprintGridBackground(child: content),
-    );
-  }
-
-  String _eventTypeLabel(String type) {
-    switch (type) {
-      case kPriceEventAddition:
-        return 'افزایش مبلغ';
-      case kPriceEventReduction:
-        return 'کاهش مبلغ';
-      case kPriceEventAdjustment:
-        return 'اصلاح مبلغ';
-      case kPriceEventFinalAdjustment:
-        return 'اصلاح پس از نهایی‌سازی';
-      case kPriceEventDiscount:
-        return 'تخفیف';
-      default:
-        return type;
-    }
-  }
-
-  Widget _statusChip(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color),
-      ),
-      child: Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
-    );
-  }
-
-  Widget _row(String label, String value, {bool bold = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: AppColors.textSecondary)),
-          Text(value,
-              style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
-        ],
-      ),
-    );
-  }
+Future<bool?> showReceivePaymentSheet(
+    BuildContext context, ProjectModel project, Map<String, dynamic>? summary) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _ReceivePaymentSheet(project: project, summary: summary),
+  );
 }
 
 // ---------------- شیت‌های عملیات ----------------

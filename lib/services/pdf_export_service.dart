@@ -18,15 +18,24 @@ class PdfExportService {
     _boldFont = pw.Font.ttf(boldData);
   }
 
+  /// فونت وزیرمتن embed‌شده در PDF برای نیم‌فاصله (ZWNJ) گلیف تعریف‌شده‌ای
+  /// ندارد؛ به‌جای پهن‌ندادن نامرئی (رفتار مورد انتظار)، یک نماد غیرمنتظره
+  /// رسم می‌کند. چون این کاراکتر در متن فارسی رایج است («پروژه‌ها»،
+  /// «باقی‌مانده»، ...)، هر متنی که وارد PDF می‌شود از این تابع رد می‌شود؛
+  /// جایگزین کردن با یک فاصله معمولی، جدایی بصری کلمه را حفظ می‌کند بدون
+  /// نمایش گلیف نادرست.
+  String _clean(String s) => s.replaceAll('‌', ' ').replaceAll('‍', '');
+
   pw.Widget _header(String title, String subtitle) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
         pw.Text('دفتریار', style: pw.TextStyle(font: _regularFont, fontSize: 10, color: PdfColors.grey600)),
         pw.SizedBox(height: 4),
-        pw.Text(title, style: pw.TextStyle(font: _boldFont, fontSize: 18)),
+        pw.Text(_clean(title), style: pw.TextStyle(font: _boldFont, fontSize: 18)),
         pw.SizedBox(height: 2),
-        pw.Text(subtitle, style: pw.TextStyle(font: _regularFont, fontSize: 10, color: PdfColors.grey600)),
+        pw.Text(_clean(subtitle),
+            style: pw.TextStyle(font: _regularFont, fontSize: 10, color: PdfColors.grey600)),
         pw.SizedBox(height: 14),
         pw.Divider(color: PdfColors.grey400),
       ],
@@ -42,8 +51,10 @@ class PdfExportService {
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(label, style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: bold ? 12 : 11)),
-          pw.Text(value, style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: bold ? 12 : 11)),
+          pw.Text(_clean(label),
+              style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: bold ? 12 : 11)),
+          pw.Text(_clean(value),
+              style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: bold ? 12 : 11)),
         ],
       ),
     );
@@ -52,7 +63,8 @@ class PdfExportService {
   pw.Widget _sectionTitle(String text) {
     return pw.Padding(
       padding: const pw.EdgeInsets.only(top: 14, bottom: 6),
-      child: pw.Text(text, style: pw.TextStyle(font: _boldFont, fontSize: 12, color: PdfColors.amber800)),
+      child:
+          pw.Text(_clean(text), style: pw.TextStyle(font: _boldFont, fontSize: 12, color: PdfColors.amber800)),
     );
   }
 
@@ -148,6 +160,7 @@ class PdfExportService {
     String? counterpartyPhone,
     required Map<String, dynamic> summary,
     required List<Map<String, dynamic>> receipts, // {date, description, amount} - فقط دریافت نقدی
+    required List<Map<String, dynamic>> expenses, // {date, description, amount} - فقط هزینه مستقیم پروژه
   }) async {
     await _loadFonts();
     final isFinalized = summary['isFinalized'] as bool;
@@ -159,6 +172,7 @@ class PdfExportService {
     final totalReceived = summary['totalReceived'] as double? ?? 0;
     final receivable = summary['receivable'] as double? ?? 0;
     final customerCredit = summary['customerCredit'] as double? ?? 0;
+    final directProjectCost = summary['directProjectCost'] as double? ?? 0;
 
     final doc = pw.Document();
     doc.addPage(
@@ -187,6 +201,7 @@ class PdfExportService {
                   _row('مبلغ نهایی پس از تخفیف', formatMoney(netRevenue ?? 0), bold: true),
                 ],
                 _row('دریافتی تاکنون', formatMoney(totalReceived)),
+                _row('هزینه مستقیم پروژه', formatMoney(directProjectCost)),
                 if (customerCredit > 0)
                   _row('بستانکاری (مازاد دریافتی)', formatMoney(customerCredit), bold: true)
                 else
@@ -199,7 +214,11 @@ class PdfExportService {
                   ),
                 if (receipts.isNotEmpty) ...[
                   _sectionTitle('گردش دریافت‌ها'),
-                  _receiptsTable(receipts),
+                  _amountTable(receipts),
+                ],
+                if (expenses.isNotEmpty) ...[
+                  _sectionTitle('هزینه‌های پروژه'),
+                  _amountTable(expenses),
                 ],
               ],
             ),
@@ -211,7 +230,7 @@ class PdfExportService {
     await Printing.sharePdf(bytes: await doc.save(), filename: 'صورتحساب_$projectTitle.pdf');
   }
 
-  pw.Widget _receiptsTable(List<Map<String, dynamic>> receipts) {
+  pw.Widget _amountTable(List<Map<String, dynamic>> rows) {
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
       columnWidths: const {
@@ -228,10 +247,10 @@ class PdfExportService {
             _cell('مبلغ', bold: true),
           ],
         ),
-        for (final r in receipts)
+        for (final r in rows)
           pw.TableRow(children: [
             _cell(formatJalaliLong(r['date'] as String)),
-            _cell((r['description'] as String?) ?? 'دریافت وجه'),
+            _cell((r['description'] as String?) ?? '—'),
             _cell(formatMoney((r['amount'] as num).toDouble(), withSuffix: false)),
           ]),
       ],
@@ -271,7 +290,7 @@ class PdfExportService {
   pw.Widget _cell(String text, {bool bold = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.all(6),
-      child: pw.Text(text,
+      child: pw.Text(_clean(text),
           style: pw.TextStyle(font: bold ? _boldFont : _regularFont, fontSize: 9.5),
           textAlign: pw.TextAlign.center),
     );

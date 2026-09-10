@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
+import '../../models/account.dart';
 import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
@@ -69,30 +70,46 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
 
   /// خروجی PDF صورتحساب مختص همین پروژه - برای ارسال به کارفرما، بدون
   /// افشای بقیه پروژه‌های او (برخلاف خروجی سطح طرف‌حساب که همه را با هم
-  /// می‌آورد). عمداً فقط دریافت‌های نقدی واقعی (بدهکار شدن یک حساب نقدی/
-  /// بانکی) را فهرست می‌کند - نه هر سطر دفترکل مرتبط با این پروژه؛ سندهای
-  /// سیستمی مثل شناسایی درآمد یا انتقال پیش‌دریافت داخلی‌اند و نباید در
-  /// صورتحسابی که به کارفرما داده می‌شود دیده شوند.
+  /// می‌آورد). عمداً فقط دو نوع رویداد واقعی و قابل‌فهم فهرست می‌شود -
+  /// دریافت‌های نقدی (بدهکار شدن یک حساب نقدی/بانکی) و هزینه‌های مستقیم
+  /// پروژه (دقیقاً همان قاعده projectDirectCost: حساب نوع هزینه، به‌جز
+  /// حساب تخفیف) - نه هر سطر دفترکل؛ سندهای سیستمی مثل شناسایی درآمد یا
+  /// انتقال پیش‌دریافت داخلی‌اند و نباید در صورتحسابی که به کارفرما داده
+  /// می‌شود دیده شوند.
   Future<void> _exportStatement() async {
     if (_summary == null) return;
     setState(() => _exporting = true);
     try {
       final cashAccounts = await _db.getCashAccounts();
       final cashAccountIds = cashAccounts.map((a) => a.id).toSet();
+      final accounts = await _db.getAccounts();
+      final accountsById = {for (final a in accounts) a.id!: a};
+      final discountAccount = await _db.getServiceDiscountAccount();
+
       final receipts = <Map<String, dynamic>>[];
+      final expenses = <Map<String, dynamic>>[];
       for (final e in _entries) {
         for (final l in e.lines) {
           if (l.projectId != _project.id) continue;
           if (l.debit <= 0) continue;
-          if (!cashAccountIds.contains(l.accountId)) continue;
-          receipts.add({
-            'date': e.date,
-            'description': e.description ?? 'دریافت وجه',
-            'amount': l.debit,
-          });
+          if (cashAccountIds.contains(l.accountId)) {
+            receipts.add({
+              'date': e.date,
+              'description': e.description ?? 'دریافت وجه',
+              'amount': l.debit,
+            });
+          } else if (accountsById[l.accountId]?.type == kAccountExpense &&
+              l.accountId != discountAccount?.id) {
+            expenses.add({
+              'date': e.date,
+              'description': e.description ?? accountsById[l.accountId]?.name ?? 'هزینه پروژه',
+              'amount': l.debit,
+            });
+          }
         }
       }
       receipts.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      expenses.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
       await _pdf.exportProjectStatement(
         projectTitle: _project.title,
@@ -100,6 +117,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
         counterpartyPhone: _counterparty?.phone,
         summary: _summary!,
         receipts: receipts,
+        expenses: expenses,
       );
     } finally {
       if (mounted) setState(() => _exporting = false);

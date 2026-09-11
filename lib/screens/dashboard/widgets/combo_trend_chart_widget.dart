@@ -99,10 +99,10 @@ class ComboTrendChartWidget extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 12),
-            Wrap(
+            const Wrap(
               spacing: 14,
               runSpacing: 4,
-              children: const [
+              children: [
                 _LegendDot(color: AppColors.info, label: 'درآمد'),
                 _LegendDot(color: AppColors.negative, label: 'هزینه'),
                 _LegendLine(color: AppColors.positive, label: 'دریافتی'),
@@ -229,9 +229,9 @@ class _ComboChartPainter extends CustomPainter {
     const leftAxisWidth = 50.0;
     const bottomLabelHeight = 32.0;
     const topPad = 20.0;
-    final plotLeft = leftAxisWidth;
+    const plotLeft = leftAxisWidth;
     final plotRight = size.width;
-    final plotTop = topPad;
+    const plotTop = topPad;
     final plotBottom = size.height - bottomLabelHeight;
     final plotWidth = plotRight - plotLeft;
     final plotHeight = plotBottom - plotTop;

@@ -17,6 +17,7 @@ import '../journal/journal_entry_detail_screen.dart';
 import '../journal/journal_form_screen.dart';
 import '../projects/project_form_screen.dart';
 import '../projects/projects_screen.dart';
+import '../reports/receivables_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
@@ -386,7 +387,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         // ---------- هشدارها (فقط اگر وجود داشته باشند) ----------
         if (data.alerts.isNotEmpty) ...[
           const SizedBox(height: 8),
-          AlertsSection(data: data),
+          AlertsSection(
+            data: data,
+            onOutstandingReceivablesTap: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const ReceivablesScreen())),
+          ),
         ],
         const SizedBox(height: 24),
       ],

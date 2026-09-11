@@ -40,15 +40,14 @@ class DashboardPeriodRange {
 /// سطح تفکیک محور افقی نمودار روند داشبورد.
 enum ChartGranularity { week, month, quarter, year }
 
-/// طرح کامل محور افقی نمودار روند: بازه‌های واقعی برای Query داده هر
-/// ستون (buckets)، آیا لیبل هر ستون باید ۹۰ درجه بچرخد (فقط سطح هفته -
-/// برای جلوگیری از تداخل ۷ نام روز)، و یک زیرنویس اختیاری زیر کل محور
-/// (فقط سطح هفته: «هفته N | تاریخ تا تاریخ»).
+/// طرح کامل محور افقی نمودار روند: بازه‌های واقعی برای Query داده هر ستون
+/// (buckets) و یک زیرنویس اختیاری زیر کل محور - سطح هفته: «هفته N | تاریخ
+/// تا تاریخ»، سطح ماه: «نام‌ماه سال»، سطح فصل/سال (وقتی همه ستون‌ها در یک
+/// سال باشند): «سال سال».
 class ChartAxisPlan {
   final List<DashboardPeriodRange> buckets;
   final String? caption;
-  final bool rotateLabels;
-  ChartAxisPlan({required this.buckets, this.caption, required this.rotateLabels});
+  ChartAxisPlan({required this.buckets, this.caption});
 }
 
 /// محاسبه بازه‌های تاریخ برای گزینه‌های پیش‌فرض داشبورد - فقط ریاضیات تاریخ،
@@ -265,11 +264,13 @@ class DashboardPeriodResolver {
   /// طرح کامل محور افقی نمودار روند برای بازه/Preset انتخابی - رفتار دقیقاً
   /// طبق درخواست کاربر برای هر سطح:
   /// - هفته (امروز/این‌هفته/بازه سفارشی کوتاه): ۷ ستون شنبه→جمعه همان هفته،
-  ///   لیبل فقط نام روز (چرخانده می‌شود)، به‌همراه زیرنویس مشترک زیر کل
-  ///   محور («هفته N | تاریخ تا تاریخ»).
+  ///   لیبل فقط نام روز (افقی)، به‌همراه زیرنویس مشترک زیر کل محور («هفته
+  ///   N | تاریخ تا تاریخ»).
   /// - ماه (این‌ماه/ماه‌قبل/بازه سفارشی حدود یک ماه): یک ستون به ازای هر
-  ///   روز بازه، لیبل فقط عدد روز.
-  /// - فصل/سال: یک ستون به ازای هر ماه بازه (همان monthlyBuckets موجود).
+  ///   روز بازه، لیبل فقط عدد روز، زیرنویس «نام‌ماه سال».
+  /// - فصل/سال: یک ستون به ازای هر ماه بازه؛ اگر همه ماه‌ها در یک سال
+  ///   باشند (حالت معمول)، لیبل هر ستون فقط نام ماه است (بدون تکرار سال
+  ///   روی هر ستون) و سال یک‌بار در زیرنویس می‌آید.
   static ChartAxisPlan buildAxisPlan(
     DashboardPeriodPreset preset,
     String fromDate,
@@ -283,7 +284,7 @@ class DashboardPeriodResolver {
         return _monthAxisPlan(fromDate, toDate);
       case ChartGranularity.quarter:
       case ChartGranularity.year:
-        return ChartAxisPlan(buckets: monthlyBuckets(fromDate, toDate), rotateLabels: false);
+        return _monthlyColumnsAxisPlan(fromDate, toDate);
     }
   }
 
@@ -302,7 +303,7 @@ class DashboardPeriodResolver {
       ));
     }
     final caption = 'هفته ${pn(_weekNumberOfYear(weekStart))} | ${_dateRangeText(weekStart, weekEnd)}';
-    return ChartAxisPlan(buckets: buckets, caption: caption, rotateLabels: true);
+    return ChartAxisPlan(buckets: buckets, caption: caption);
   }
 
   static ChartAxisPlan _monthAxisPlan(String fromDate, String toDate) {
@@ -318,7 +319,33 @@ class DashboardPeriodResolver {
       ));
       cursor = cursor.addDays(1);
     }
-    return ChartAxisPlan(buckets: buckets, rotateLabels: false);
+    // اگر بازه دقیقاً یک ماه تقویمی کامل باشد (حالت معمول این‌ماه/ماه‌قبل)،
+    // زیرنویس فقط «نام‌ماه سال» است؛ اگر بازه سفارشی از مرز ماه عبور کند،
+    // برای رفع ابهام بازه دقیق تاریخ نشان داده می‌شود.
+    final caption = (start.year == end.year && start.month == end.month)
+        ? '${_monthNames[start.month - 1]} ${pn(start.year)}'
+        : _dateRangeText(start, end);
+    return ChartAxisPlan(buckets: buckets, caption: caption);
+  }
+
+  /// طرح محور افقی سطح فصل/سال: هر ستون یک ماه. اگر همه ماه‌های بازه در
+  /// یک سال شمسی باشند (حالت معمول این‌فصل/فصل‌قبل/امسال/سال‌قبل)، لیبل هر
+  /// ستون فقط نام ماه است و سال یک‌بار در زیرنویس می‌آید - نه تکرار «نام‌ماه
+  /// سال» روی هر ستون. اگر بازه (فقط ممکن برای بازه سفارشی، یا سال مالی
+  /// سفارشی که از مرز سال تقویمی عبور می‌کند) بیش از یک سال را پوشش دهد،
+  /// برای رفع ابهام هر ستون نام سال خودش را هم نگه می‌دارد و زیرنویسی
+  /// نمایش داده نمی‌شود.
+  static ChartAxisPlan _monthlyColumnsAxisPlan(String fromDate, String toDate) {
+    final monthly = monthlyBuckets(fromDate, toDate);
+    final years = monthly.map((b) => parseJalaliString(b.fromDate)!.year).toSet();
+    if (years.length == 1) {
+      final simplified = monthly.map((b) {
+        final d = parseJalaliString(b.fromDate)!;
+        return DashboardPeriodRange(fromDate: b.fromDate, toDate: b.toDate, label: _monthNames[d.month - 1]);
+      }).toList();
+      return ChartAxisPlan(buckets: simplified, caption: 'سال ${pn(years.first)}');
+    }
+    return ChartAxisPlan(buckets: monthly);
   }
 
   /// شماره هفته از ابتدای سال شمسیِ [weekStart] - هفته ۱ = هفته‌ای که ۱

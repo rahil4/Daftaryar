@@ -23,17 +23,15 @@ import '../../../utils/formatters.dart';
 /// کاربر؛ نسخه قبلی این نمودار عمداً برعکس بود، اما آن تصمیم با این
 /// درخواست جایگزین شد).
 ///
-/// [caption] زیرنویس اختیاری زیر کل محور افقی (فقط سطح هفته: «هفته N |
-/// تاریخ تا تاریخ») و [rotateLabels] چرخش ۹۰ درجه‌ی لیبل هر ستون (فقط
-/// سطح هفته، برای جلوگیری از تداخل ۷ نام روز کنار هم) - هر دو از
-/// DashboardPeriodResolver.buildAxisPlan می‌آیند.
+/// [caption] زیرنویس زیر کل محور افقی - سطح هفته: «هفته N | تاریخ تا
+/// تاریخ»، سطح ماه: «نام‌ماه سال»، سطح فصل/سال: «سال سال» - از
+/// DashboardPeriodResolver.buildAxisPlan می‌آید.
 class ComboTrendChartWidget extends StatelessWidget {
   final String title;
   final List<TrendPoint> income;
   final List<TrendPoint> expense;
   final List<TrendPoint> receipts;
   final String? caption;
-  final bool rotateLabels;
 
   const ComboTrendChartWidget({
     super.key,
@@ -42,7 +40,6 @@ class ComboTrendChartWidget extends StatelessWidget {
     required this.expense,
     required this.receipts,
     this.caption,
-    this.rotateLabels = false,
   });
 
   double _sum(List<TrendPoint> pts) => pts.fold(0.0, (s, p) => s + (p.value ?? 0));
@@ -105,7 +102,6 @@ class ComboTrendChartWidget extends StatelessWidget {
                     expense: expense,
                     receipts: receipts,
                     count: count,
-                    rotateLabels: rotateLabels,
                   ),
                 ),
               ),
@@ -214,14 +210,12 @@ class _ComboChartPainter extends CustomPainter {
   final List<TrendPoint> expense;
   final List<TrendPoint> receipts;
   final int count;
-  final bool rotateLabels;
 
   _ComboChartPainter({
     required this.income,
     required this.expense,
     required this.receipts,
     required this.count,
-    required this.rotateLabels,
   });
 
   double? _valueAt(List<TrendPoint> series, int i) => i < series.length ? series[i].value : null;
@@ -250,13 +244,7 @@ class _ComboChartPainter extends CustomPainter {
 
     const labelStyle = TextStyle(fontSize: 9, color: AppColors.textSecondary);
     const leftAxisWidth = 50.0;
-    // در سطح هفته لیبل هر ستون ۹۰ درجه می‌چرخد (۷ نام روز کنار هم بدون
-    // چرخش روی هم می‌افتند)؛ ارتفاع لازم برای محور پایین برابر عریض‌ترین
-    // لیبل چرخیده‌شده است، نه یک مقدار ثابت.
-    final bottomLabelHeight = rotateLabels
-        ? (List.generate(count, (i) => _measureTextWidth(_labelAt(i), labelStyle)).fold<double>(0, math.max) + 14)
-            .clamp(28.0, 70.0)
-        : 20.0;
+    const bottomLabelHeight = 20.0;
     const topPad = 20.0;
     const plotLeft = leftAxisWidth;
     final plotRight = size.width;
@@ -328,12 +316,7 @@ class _ComboChartPainter extends CustomPainter {
       final receiptV = _valueAt(receipts, i);
       linePoints.add(receiptV != null ? Offset(centerX, plotBottom - (receiptV / axisMax) * plotHeight) : null);
 
-      final label = _labelAt(i);
-      if (rotateLabels) {
-        _drawRotatedText(canvas, label, Offset(centerX, plotBottom + 6), labelStyle);
-      } else {
-        _drawText(canvas, label, Offset(centerX, plotBottom + 6), labelStyle, anchorY: 0);
-      }
+      _drawText(canvas, _labelAt(i), Offset(centerX, plotBottom + 6), labelStyle, anchorY: 0);
     }
 
     // خط دریافتی - پیوسته بین نقاط متوالی غیر-null، با شکست روی null
@@ -391,32 +374,6 @@ class _ComboChartPainter extends CustomPainter {
     tp.paint(canvas, Offset(dx, pos.dy - tp.height * anchorY));
   }
 
-  double _measureTextWidth(String text, TextStyle style) {
-    final tp = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.rtl,
-      maxLines: 1,
-    )..layout();
-    return tp.width;
-  }
-
-  /// لیبل را ۹۰ درجه (پادساعت‌گرد) می‌چرخاند - [anchorTop] نقطه شروع (نزدیک
-  /// محور) است و متن از همان‌جا رو به پایین/دور از نمودار کشیده می‌شود؛
-  /// برای خواندن باید سر را به چپ کج کرد (همان قرارداد رایج لیبل‌های
-  /// چرخیده در نمودارها).
-  void _drawRotatedText(Canvas canvas, String text, Offset anchorTop, TextStyle style) {
-    final tp = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: TextDirection.rtl,
-      maxLines: 1,
-    )..layout();
-    canvas.save();
-    canvas.translate(anchorTop.dx, anchorTop.dy);
-    canvas.rotate(-math.pi / 2);
-    tp.paint(canvas, Offset(-tp.width, -tp.height / 2));
-    canvas.restore();
-  }
-
   /// نزدیک‌ترین «عدد گرد» بزرگ‌تر یا مساوی roughStep (الگوی ۱/۲/۵ × ۱۰^k) -
   /// برای این‌که خط‌های راهنمای محور Y روی اعدادی مثل ۵۰,۰۰۰,۰۰۰ بیفتند،
   /// نه اعداد عجیب مثل ۴۳,۷۵۰,۰۰۰.
@@ -442,7 +399,6 @@ class _ComboChartPainter extends CustomPainter {
     return oldDelegate.income != income ||
         oldDelegate.expense != expense ||
         oldDelegate.receipts != receipts ||
-        oldDelegate.count != count ||
-        oldDelegate.rotateLabels != rotateLabels;
+        oldDelegate.count != count;
   }
 }

@@ -153,7 +153,6 @@ class ManagementDashboardService {
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
     String? trendCaption;
-    bool trendLabelsRotated = false;
     if (includeTrend) {
       // محور افقی نمودار روند باید دقیقاً با واحد تقویمی بازه انتخابی
       // هم‌راستا باشد (نه یک تقسیم دلخواه بر مبنای طول خام روز): هفته/این‌هفته
@@ -162,7 +161,6 @@ class ManagementDashboardService {
       // بازه سفارشی، طول واقعی بازه) تعیین می‌کند.
       final axisPlan = DashboardPeriodResolver.buildAxisPlan(preset, range.fromDate, range.toDate);
       trendCaption = axisPlan.caption;
-      trendLabelsRotated = axisPlan.rotateLabels;
       for (final bucket in axisPlan.buckets) {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);
@@ -259,7 +257,6 @@ class ManagementDashboardService {
       expenseTrend: expenseTrend,
       receiptsTrend: receiptsTrend,
       trendCaption: trendCaption,
-      trendLabelsRotated: trendLabelsRotated,
       operatingResultTrend: operatingResultTrend,
       cashFlowTrend: cashFlowTrend,
       contributionMarginTrend: marginTrend,

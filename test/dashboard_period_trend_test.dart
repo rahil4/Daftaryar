@@ -82,7 +82,6 @@ void main() {
       final expectedWeek = jalaliWeekRange(ref);
 
       expect(plan.buckets.length, 7);
-      expect(plan.rotateLabels, true, reason: 'در سطح هفته لیبل هر ستون باید ۹۰ درجه بچرخد');
       expect(plan.buckets.first.fromDate, jalaliToString(expectedWeek[0]), reason: 'اولین ستون باید شنبه هفته جاری باشد');
       expect(plan.buckets.last.fromDate, jalaliToString(expectedWeek[1]), reason: 'آخرین ستون باید جمعه هفته جاری باشد');
       // ترتیب Bucketها باید صعودی (تاریخی) باشد - قدیمی اول، جدید آخر؛
@@ -137,35 +136,49 @@ void main() {
   });
 
   group('buildAxisPlan — سطح ماه', () {
-    test('یک ستون به ازای هر روز ماه، لیبل فقط عدد روز', () {
+    test('یک ستون به ازای هر روز ماه، لیبل فقط عدد روز، زیرنویس «نام‌ماه سال»', () {
       final plan =
           DashboardPeriodResolver.buildAxisPlan(DashboardPeriodPreset.thisMonth, '1405/06/01', '1405/06/31');
       expect(plan.buckets.length, 31);
-      expect(plan.rotateLabels, false);
-      expect(plan.caption, isNull);
+      expect(plan.caption, 'شهریور ۱۴۰۵');
       expect(plan.buckets.first.label, pn(1));
       expect(plan.buckets.last.label, pn(31));
       expect(plan.buckets[9].label, pn(10));
     });
+
+    test('بازه سفارشی که از مرز ماه عبور می‌کند، زیرنویس بازه تاریخ کامل می‌گیرد', () {
+      final plan = DashboardPeriodResolver.buildAxisPlan(DashboardPeriodPreset.custom, '1405/06/20', '1405/07/10');
+      expect(plan.caption, isNotNull);
+      expect(plan.caption, contains('شهریور'));
+      expect(plan.caption, contains('مهر'));
+    });
   });
 
   group('buildAxisPlan — سطح فصل/سال', () {
-    test('فصل: ۳ ستون، هر کدام یک ماه', () {
+    test('فصل: ۳ ستون، هر کدام فقط نام ماه (بدون تکرار سال)، زیرنویس «سال سال»', () {
       final plan = DashboardPeriodResolver.buildAxisPlan(
           DashboardPeriodPreset.thisQuarter, '1405/04/01', '1405/06/31');
       expect(plan.buckets.length, 3);
-      expect(plan.rotateLabels, false);
-      expect(plan.caption, isNull);
+      expect(plan.caption, 'سال ۱۴۰۵');
+      expect(plan.buckets.map((b) => b.label).toList(), ['تیر', 'مرداد', 'شهریور']);
       expect(plan.buckets.first.fromDate, '1405/04/01');
       expect(plan.buckets.last.toDate, '1405/06/31');
     });
 
-    test('سال: ۱۲ ستون، هر کدام یک ماه', () {
+    test('سال: ۱۲ ستون، هر کدام فقط نام ماه، زیرنویس «سال سال»', () {
       final plan =
           DashboardPeriodResolver.buildAxisPlan(DashboardPeriodPreset.thisYear, '1405/01/01', '1405/12/29');
       expect(plan.buckets.length, 12);
-      expect(plan.rotateLabels, false);
+      expect(plan.caption, 'سال ۱۴۰۵');
+      expect(plan.buckets.first.label, 'فروردین');
+      expect(plan.buckets.last.label, 'اسفند');
+    });
+
+    test('بازه‌ای که از مرز سال عبور می‌کند، بدون زیرنویس و با لیبل «نام‌ماه سال» کامل روی هر ستون می‌ماند', () {
+      final plan = DashboardPeriodResolver.buildAxisPlan(DashboardPeriodPreset.custom, '1404/11/01', '1405/02/29');
       expect(plan.caption, isNull);
+      expect(plan.buckets.every((b) => b.label.contains(' ')), true,
+          reason: 'وقتی زیرنویس سال ممکن نیست، هر ستون باید نام‌ماه+سال خودش را نگه دارد');
     });
   });
 }

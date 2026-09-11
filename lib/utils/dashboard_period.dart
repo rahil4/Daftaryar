@@ -37,6 +37,20 @@ class DashboardPeriodRange {
   DashboardPeriodRange({required this.fromDate, required this.toDate, required this.label});
 }
 
+/// سطح تفکیک محور افقی نمودار روند داشبورد.
+enum ChartGranularity { week, month, quarter, year }
+
+/// طرح کامل محور افقی نمودار روند: بازه‌های واقعی برای Query داده هر
+/// ستون (buckets)، آیا لیبل هر ستون باید ۹۰ درجه بچرخد (فقط سطح هفته -
+/// برای جلوگیری از تداخل ۷ نام روز)، و یک زیرنویس اختیاری زیر کل محور
+/// (فقط سطح هفته: «هفته N | تاریخ تا تاریخ»).
+class ChartAxisPlan {
+  final List<DashboardPeriodRange> buckets;
+  final String? caption;
+  final bool rotateLabels;
+  ChartAxisPlan({required this.buckets, this.caption, required this.rotateLabels});
+}
+
 /// محاسبه بازه‌های تاریخ برای گزینه‌های پیش‌فرض داشبورد - فقط ریاضیات تاریخ،
 /// هیچ ارتباطی با دیتابیس یا Ledger ندارد.
 class DashboardPeriodResolver {
@@ -216,10 +230,82 @@ class DashboardPeriodResolver {
     return buckets;
   }
 
-  /// فهرست بازه‌های تک‌روزه بین دو تاریخ (شامل هر دو سر بازه) - برای نمودار
-  /// روند در بازه‌های کوتاه (هفته/ماه جاری) که تفکیک ماهانه فقط یک Bucket
-  /// (و در نتیجه یک نقطه بی‌فایده) تولید می‌کرد.
-  static List<DashboardPeriodRange> dailyBuckets(String fromDate, String toDate) {
+  /// سطح تفکیک محور افقی نمودار روند داشبورد - انتخاب می‌شود بر مبنای
+  /// این‌که بازه انتخابی به کدام واحد تقویمی طبیعی نزدیک‌تر است، نه یک
+  /// آستانه دلخواه روی تعداد خام روز.
+  static ChartGranularity resolveGranularity(
+    DashboardPeriodPreset preset,
+    String fromDate,
+    String toDate,
+  ) {
+    switch (preset) {
+      case DashboardPeriodPreset.today:
+      case DashboardPeriodPreset.thisWeek:
+        return ChartGranularity.week;
+      case DashboardPeriodPreset.thisMonth:
+      case DashboardPeriodPreset.lastMonth:
+        return ChartGranularity.month;
+      case DashboardPeriodPreset.thisQuarter:
+      case DashboardPeriodPreset.lastQuarter:
+        return ChartGranularity.quarter;
+      case DashboardPeriodPreset.thisYear:
+      case DashboardPeriodPreset.lastYear:
+        return ChartGranularity.year;
+      case DashboardPeriodPreset.custom:
+        final start = parseJalaliString(fromDate)!;
+        final end = parseJalaliString(toDate)!;
+        final spanDays = end.julianDayNumber - start.julianDayNumber + 1;
+        if (spanDays <= 9) return ChartGranularity.week;
+        if (spanDays <= 35) return ChartGranularity.month;
+        if (spanDays <= 100) return ChartGranularity.quarter;
+        return ChartGranularity.year;
+    }
+  }
+
+  /// طرح کامل محور افقی نمودار روند برای بازه/Preset انتخابی - رفتار دقیقاً
+  /// طبق درخواست کاربر برای هر سطح:
+  /// - هفته (امروز/این‌هفته/بازه سفارشی کوتاه): ۷ ستون شنبه→جمعه همان هفته،
+  ///   لیبل فقط نام روز (چرخانده می‌شود)، به‌همراه زیرنویس مشترک زیر کل
+  ///   محور («هفته N | تاریخ تا تاریخ»).
+  /// - ماه (این‌ماه/ماه‌قبل/بازه سفارشی حدود یک ماه): یک ستون به ازای هر
+  ///   روز بازه، لیبل فقط عدد روز.
+  /// - فصل/سال: یک ستون به ازای هر ماه بازه (همان monthlyBuckets موجود).
+  static ChartAxisPlan buildAxisPlan(
+    DashboardPeriodPreset preset,
+    String fromDate,
+    String toDate,
+  ) {
+    final granularity = resolveGranularity(preset, fromDate, toDate);
+    switch (granularity) {
+      case ChartGranularity.week:
+        return _weekAxisPlan(fromDate);
+      case ChartGranularity.month:
+        return _monthAxisPlan(fromDate, toDate);
+      case ChartGranularity.quarter:
+      case ChartGranularity.year:
+        return ChartAxisPlan(buckets: monthlyBuckets(fromDate, toDate), rotateLabels: false);
+    }
+  }
+
+  static ChartAxisPlan _weekAxisPlan(String fromDate) {
+    final ref = parseJalaliString(fromDate)!;
+    final range = jalaliWeekRange(ref);
+    final weekStart = range[0];
+    final weekEnd = range[1];
+    final buckets = <DashboardPeriodRange>[];
+    for (var i = 0; i < 7; i++) {
+      final day = weekStart.addDays(i);
+      buckets.add(DashboardPeriodRange(
+        fromDate: jalaliToString(day),
+        toDate: jalaliToString(day),
+        label: _weekDayNames[day.weekDay - 1],
+      ));
+    }
+    final caption = 'هفته ${pn(_weekNumberOfYear(weekStart))} | ${_dateRangeText(weekStart, weekEnd)}';
+    return ChartAxisPlan(buckets: buckets, caption: caption, rotateLabels: true);
+  }
+
+  static ChartAxisPlan _monthAxisPlan(String fromDate, String toDate) {
     final start = parseJalaliString(fromDate)!;
     final end = parseJalaliString(toDate)!;
     final buckets = <DashboardPeriodRange>[];
@@ -228,89 +314,36 @@ class DashboardPeriodResolver {
       buckets.add(DashboardPeriodRange(
         fromDate: jalaliToString(cursor),
         toDate: jalaliToString(cursor),
-        // برچسب دوخطی: نام روز هفته + تاریخ - برای نمودار روند که این دو را
-        // در دو ردیف جدا زیر هر ستون نشان می‌دهد.
-        label: '${_weekDayNames[cursor.weekDay - 1]}\n${pn(cursor.day)} ${_monthNames[cursor.month - 1]}',
+        label: pn(cursor.day),
       ));
       cursor = cursor.addDays(1);
     }
-    return buckets;
+    return ChartAxisPlan(buckets: buckets, rotateLabels: false);
   }
 
-  /// فهرست بازه‌های هفتگی (۷ روزه) بین دو تاریخ - سطح میانی بین روزانه (برای
-  /// بازه‌های حدود یک ماه، شلوغ و کم‌خوانا) و ماهانه (برای بازه‌های چند هفته‌ای،
-  /// خیلی کلی و فقط یک-دو نقطه). مثل monthlyBuckets، اولین Bucket از خودِ
-  /// fromDate شروع می‌شود (نه لزوماً شنبه) و آخرین Bucket دقیقاً در toDate
-  /// تمام می‌شود.
-  static List<DashboardPeriodRange> weeklyBuckets(String fromDate, String toDate) {
-    final start = parseJalaliString(fromDate)!;
-    final end = parseJalaliString(toDate)!;
-    final buckets = <DashboardPeriodRange>[];
-    var cursor = start;
-    while (cursor.compareTo(end) <= 0) {
-      final naturalWeekEnd = cursor.addDays(6);
-      final bucketEnd = naturalWeekEnd.compareTo(end) <= 0 ? naturalWeekEnd : end;
-      buckets.add(DashboardPeriodRange(
-        fromDate: jalaliToString(cursor),
-        toDate: jalaliToString(bucketEnd),
-        label: '${pn(cursor.day)} تا ${pn(bucketEnd.day)} ${_monthNames[bucketEnd.month - 1]}',
-      ));
-      cursor = bucketEnd.addDays(1);
-    }
-    return buckets;
+  /// شماره هفته از ابتدای سال شمسیِ [weekStart] - هفته ۱ = هفته‌ای که ۱
+  /// فروردین همان سال در آن قرار دارد؛ هفته‌ها بر مبنای شنبه محاسبه
+  /// می‌شوند (هم‌راستا با jalaliWeekRange). این فقط یک شماره نمایشی برای
+  /// زیرنویس نمودار است، نه یک استاندارد رسمی (تقویم جلالی تعریف رسمی
+  /// «شماره هفته سال» ندارد).
+  static int _weekNumberOfYear(Jalali weekStart) {
+    final firstWeekStart = jalaliWeekRange(Jalali(weekStart.year, 1, 1))[0];
+    final diffDays = weekStart.julianDayNumber - firstWeekStart.julianDayNumber;
+    return (diffDays / 7).round() + 1;
   }
 
-  /// N روز اخیر منتهی به تاریخ مرجع (شامل خودِ آن روز) - فقط برای بازه‌های
-  /// تک‌روزه انتخابی (مثل «امروز») که حتی تفکیک روزانه هم یک نقطه تنها
-  /// می‌دهد؛ یک روند معنادار به‌جایش لازم است.
-  static List<DashboardPeriodRange> lastNDays(int count, {Jalali? reference}) {
-    final ref = reference ?? Jalali.now();
-    final buckets = <DashboardPeriodRange>[];
-    for (var i = count - 1; i >= 0; i--) {
-      final day = ref.addDays(-i);
-      buckets.add(DashboardPeriodRange(
-        fromDate: jalaliToString(day),
-        toDate: jalaliToString(day),
-        label: '${_weekDayNames[day.weekDay - 1]}\n${pn(day.day)} ${_monthNames[day.month - 1]}',
-      ));
+  /// نمایش خوانای بازه [start]..[end] برای زیرنویس نمودار - اگر هر دو سر
+  /// در یک ماه/سال باشند کوتاه («۲۰ تا ۲۷ اردیبهشت ۱۴۰۵»)، وگرنه (هفته‌ای
+  /// که از مرز ماه یا سال عبور می‌کند) هر سر بازه نام ماه/سال خودش را
+  /// جداگانه می‌گیرد.
+  static String _dateRangeText(Jalali start, Jalali end) {
+    if (start.year == end.year && start.month == end.month) {
+      return '${pn(start.day)} تا ${pn(end.day)} ${_monthNames[start.month - 1]} ${pn(start.year)}';
     }
-    return buckets;
-  }
-
-  /// انتخاب خودکار Bucketهای نمودار روند بر مبنای طول واقعی بازه انتخابی -
-  /// به‌جای همیشه پرش به یک بازه ثابت (۶ ماه اخیر) که ربطی به انتخاب کاربر
-  /// نداشت. بازه‌های کوتاه (هفته/ماه جاری/سفارشی کوتاه) اکنون با جزئیات
-  /// روزانه یا هفتگی *همان بازه انتخابی* نمایش داده می‌شوند - نه یک بازه متفاوت.
-  ///
-  /// دو اصلاح مهم نسبت به نسخه قبلی:
-  /// ۱. بازه‌های جاری (این هفته/این ماه/این فصل/امسال) طبیعتاً تا آخر بازه
-  ///    تقویمی می‌روند، حتی روزهای هنوز‌نیامده - toDate اینجا به «امروز»
-  ///    محدود می‌شود تا نمودار تا روزهای آینده (بدون هیچ داده‌ای) کشیده
-  ///    نشود و خالی/کم‌فایده به نظر نرسد.
-  /// ۲. آستانه تفکیک روزانه از ۶۲ روز به ۱۴ روز کاهش یافت؛ بین ۱۵ تا ۶۲ روز
-  ///    از تفکیک هفتگی استفاده می‌شود - وگرنه مثلاً «این ماه» یا «این فصل»
-  ///    تا ۳۱/۹۰ ستون روزانه له‌شده روی هم تولید می‌کرد.
-  static List<DashboardPeriodRange> trendBuckets(String fromDate, String toDate, {Jalali? today}) {
-    final start = parseJalaliString(fromDate)!;
-    var end = parseJalaliString(toDate)!;
-    final now = today ?? Jalali.now();
-    if (end.compareTo(now) > 0) end = now;
-    final clampedToDate = jalaliToString(end);
-    final spanDays = end.julianDayNumber - start.julianDayNumber + 1;
-    if (spanDays <= 1) {
-      // بازه تک‌روزه (مثل «امروز») - تفکیک روزانه همین بازه هم فقط یک نقطه
-      // می‌دهد؛ ۱۴ روز اخیر به‌عنوان روند معنادار جایگزین آن است.
-      return lastNDays(14, reference: end);
+    if (start.year == end.year) {
+      return '${pn(start.day)} ${_monthNames[start.month - 1]} تا ${pn(end.day)} ${_monthNames[end.month - 1]} ${pn(start.year)}';
     }
-    if (spanDays <= 14) {
-      // هفته جاری/بازه سفارشی خیلی کوتاه - جزئیات روزانه همان بازه انتخابی.
-      return dailyBuckets(fromDate, clampedToDate);
-    }
-    if (spanDays <= 62) {
-      // ماه جاری/فصل کوتاه/بازه سفارشی حدود یک ماه - تفکیک هفتگی.
-      return weeklyBuckets(fromDate, clampedToDate);
-    }
-    // بازه‌های بلندتر (فصل/سال) - تفکیک ماهانه، مثل قبل.
-    return monthlyBuckets(fromDate, clampedToDate);
+    return '${pn(start.day)} ${_monthNames[start.month - 1]} ${pn(start.year)} تا '
+        '${pn(end.day)} ${_monthNames[end.month - 1]} ${pn(end.year)}';
   }
 }

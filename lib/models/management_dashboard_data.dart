@@ -190,6 +190,15 @@ class ManagementDashboardData {
   /// هر جا این عدد مصرف می‌شود باید همیشه با برچسب/رنگ مجزا از دو سری
   /// تعهدی نمایش داده شود تا این تفاوت مبنا گم نشود.
   final List<TrendPoint> receiptsTrend;
+
+  /// زیرنویس اختیاری زیر محور افقی نمودار روند - فقط وقتی سطح تفکیک
+  /// «هفته» است پر می‌شود (مثلاً «هفته ۵ | ۲۰ تا ۲۷ اردیبهشت ۱۴۰۵»)؛
+  /// برای سطح ماه/فصل/سال همیشه null است.
+  final String? trendCaption;
+
+  /// آیا لیبل هر ستون محور افقی نمودار روند باید ۹۰ درجه بچرخد - فقط در
+  /// سطح «هفته» true است (۷ نام روز کنار هم بدون چرخش روی هم می‌افتند).
+  final bool trendLabelsRotated;
   final List<TrendPoint> operatingResultTrend;
   final List<TrendPoint> cashFlowTrend;
   final List<TrendPoint> contributionMarginTrend;
@@ -253,6 +262,8 @@ class ManagementDashboardData {
     required this.revenueTrend,
     required this.expenseTrend,
     required this.receiptsTrend,
+    this.trendCaption,
+    this.trendLabelsRotated = false,
     required this.operatingResultTrend,
     required this.cashFlowTrend,
     required this.contributionMarginTrend,

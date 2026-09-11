@@ -152,13 +152,18 @@ class ManagementDashboardService {
     List<TrendPoint> operatingResultTrend = [];
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
+    String? trendCaption;
+    bool trendLabelsRotated = false;
     if (includeTrend) {
-      // Bucketهای نمودار روند باید همان بازه‌ای را نشان دهند که کاربر
-      // انتخاب کرده - نه همیشه یک بازه ثابت متفاوت (۶ ماه اخیر) که ربطی به
-      // انتخاب نداشت. trendBuckets بر مبنای طول واقعی بازه، جزئیات روزانه
-      // (بازه‌های کوتاه) یا ماهانه (بازه‌های بلند) را خودکار انتخاب می‌کند.
-      final buckets = DashboardPeriodResolver.trendBuckets(range.fromDate, range.toDate);
-      for (final bucket in buckets) {
+      // محور افقی نمودار روند باید دقیقاً با واحد تقویمی بازه انتخابی
+      // هم‌راستا باشد (نه یک تقسیم دلخواه بر مبنای طول خام روز): هفته/این‌هفته
+      // → ۷ روز شنبه تا جمعه، این‌ماه/ماه‌قبل → روزهای همان ماه، فصل/سال →
+      // ماه‌های همان بازه. buildAxisPlan این تناظر را طبق preset (یا برای
+      // بازه سفارشی، طول واقعی بازه) تعیین می‌کند.
+      final axisPlan = DashboardPeriodResolver.buildAxisPlan(preset, range.fromDate, range.toDate);
+      trendCaption = axisPlan.caption;
+      trendLabelsRotated = axisPlan.rotateLabels;
+      for (final bucket in axisPlan.buckets) {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);
         revenueTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netRevenue));
@@ -253,6 +258,8 @@ class ManagementDashboardService {
       revenueTrend: revenueTrend,
       expenseTrend: expenseTrend,
       receiptsTrend: receiptsTrend,
+      trendCaption: trendCaption,
+      trendLabelsRotated: trendLabelsRotated,
       operatingResultTrend: operatingResultTrend,
       cashFlowTrend: cashFlowTrend,
       contributionMarginTrend: marginTrend,

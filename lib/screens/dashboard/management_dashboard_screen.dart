@@ -259,6 +259,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
           income: data.revenueTrend,
           expense: data.expenseTrend,
           receipts: data.receiptsTrend,
+          caption: data.trendCaption,
+          rotateLabels: data.trendLabelsRotated,
         ),
         const SizedBox(height: 16),
 

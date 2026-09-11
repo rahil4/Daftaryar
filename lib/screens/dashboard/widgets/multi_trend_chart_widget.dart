@@ -49,10 +49,21 @@ class MultiTrendChartWidget extends StatelessWidget {
             toY: v, color: series[sIdx].color, width: 7, borderRadius: BorderRadius.circular(2)));
         seriesIdx.add(sIdx);
       }
-      if (rods.isNotEmpty) {
-        groups.add(BarChartGroupData(x: i, barRods: rods, barsSpace: 4));
-        groupSeriesIndices[i] = seriesIdx;
-      }
+      // مهم: باید برای هر Bucket - حتی وقتی هیچ سری‌ای مقدار ندارد - یک
+      // BarChartGroupData ساخته شود (هرچند با barRods خالی)، نه اینکه از
+      // لیست groups حذف شود. fl_chart موقعیت افقی هر ستون را صرفاً از روی
+      // ترتیب/تعداد عناصر همین لیست (calculateGroupsX) حساب می‌کند، نه از
+      // روی مقدار x - در حالی‌که برچسب‌های محور افقی مستقل و بر مبنای کل
+      // بازه (0..maxIndex-1) چیده می‌شوند. اگر Bucketهای خالی حذف شوند، دو
+      // مقیاس متفاوت پدید می‌آید و ستون‌ها زیر برچسب درست خودشان نمی‌افتند
+      // (مثلاً یک ستون تنها، وسط نمودار، زیر برچسب اشتباه).
+      groups.add(BarChartGroupData(
+        x: i,
+        barRods: rods,
+        barsSpace: 4,
+        showingTooltipIndicators: List.generate(rods.length, (i) => i),
+      ));
+      groupSeriesIndices[i] = seriesIdx;
     }
 
     return Card(
@@ -95,7 +106,9 @@ class MultiTrendChartWidget extends StatelessWidget {
               )
             else
               SizedBox(
-                height: 150,
+                // کمی بلندتر از قبل چون حالا مقدار هر ستون همیشه بالای
+                // خودش نوشته می‌شود (نه فقط با لمس) و به فضا نیاز دارد.
+                height: 170,
                 child: Padding(
                   // لیبل ماه اول و آخر دقیقاً روی لبه نمودار قرار می‌گیرند
                   // و بدون این حاشیه، از کارت بیرون زده و بریده می‌شوند.
@@ -133,21 +146,27 @@ class MultiTrendChartWidget extends StatelessWidget {
                       ),
                       borderData: FlBorderData(show: false),
                       barGroups: groups,
-                      // نمایش جزئیات با لمس: تاریخ Bucket + مقدار دقیق هر
-                      // سری - قبلاً نمودار فقط شکل خط را نشان می‌داد، بدون
-                      // هیچ عدد قابل‌خواندنی.
+                      // مقدار هر ستون همیشه بالای خودش نمایش داده می‌شود
+                      // (showingTooltipIndicators در ساخت groups) - نه فقط
+                      // با لمس؛ برای همین برچسب کوتاه و فشرده (فقط مبلغ) با
+                      // رنگ سری است، نه توضیح کامل تاریخ/نام سری که برای
+                      // چند برچسب هم‌زمان روی نمودار شلوغ می‌شود.
                       barTouchData: BarTouchData(
                         touchTooltipData: BarTouchTooltipData(
+                          getTooltipColor: (group) => Colors.transparent,
+                          tooltipPadding: EdgeInsets.zero,
+                          tooltipMargin: 4,
+                          fitInsideHorizontally: true,
+                          fitInsideVertically: true,
                           getTooltipItem: (group, groupIndex, rod, rodIndex) {
                             final idx = group.x;
-                            final label = idx >= 0 && idx < labels.length ? labels[idx] : '';
                             final seriesIdxList = groupSeriesIndices[idx] ?? const [];
                             final s = rodIndex < seriesIdxList.length
                                 ? series[seriesIdxList[rodIndex]]
                                 : series.first;
                             return BarTooltipItem(
-                              '$label\n${s.label}: ${formatMoney(rod.toY, withSuffix: false)}',
-                              TextStyle(color: s.color, fontWeight: FontWeight.bold, fontSize: 11),
+                              formatMoneyCompact(rod.toY),
+                              TextStyle(color: s.color, fontWeight: FontWeight.w800, fontSize: 9),
                             );
                           },
                         ),

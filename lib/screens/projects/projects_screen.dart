@@ -9,7 +9,11 @@ import 'project_detail_screen.dart';
 import '../counterparties/counterparties_screen.dart';
 
 class ProjectsScreen extends StatefulWidget {
-  const ProjectsScreen({super.key});
+  /// اگر true باشد، فقط پروژه‌های مالی «در جریان» (نهایی‌نشده) نشان داده
+  /// می‌شوند - این یک بعد کاملاً جدا از فیلتر وضعیت عملیاتی (kProjectStatuses)
+  /// است؛ از داشبورد (کارت «پروژه در جریان») صدا زده می‌شود.
+  final bool onlyOpenFinancially;
+  const ProjectsScreen({super.key, this.onlyOpenFinancially = false});
 
   @override
   State<ProjectsScreen> createState() => _ProjectsScreenState();
@@ -38,9 +42,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<Project
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final names = {for (final c in counterparties) c.id!: c.name};
     setState(() {
-      _projects = _statusFilter == null
+      var filtered = _statusFilter == null
           ? projects
           : projects.where((p) => p.status == _statusFilter).toList();
+      if (widget.onlyOpenFinancially) {
+        filtered = filtered.where((p) => !p.isFinalized).toList();
+      }
+      _projects = filtered;
       _counterpartyNames = names;
       _loading = false;
     });
@@ -50,7 +58,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<Project
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('پروژه‌ها'),
+        title: Text(widget.onlyOpenFinancially ? 'پروژه‌ها · در جریان' : 'پروژه‌ها'),
         actions: [
           IconButton(
             icon: const Icon(Icons.people_alt_outlined),

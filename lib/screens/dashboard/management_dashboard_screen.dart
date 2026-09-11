@@ -16,6 +16,7 @@ import '../journal/quick_expense_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../journal/journal_form_screen.dart';
 import '../projects/project_form_screen.dart';
+import '../projects/projects_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
@@ -247,7 +248,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         ),
         const SizedBox(height: 12),
 
-        // ---------- دریافتی / پرداختی این بازه ----------
+        // ---------- عملکرد این بازه ----------
+        _label('عملکرد این بازه'),
         Row(
           children: [
             Expanded(
@@ -303,35 +305,19 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         ),
         const SizedBox(height: 16),
 
-        // ---------- مطالبات و مانده تخمینی (قابل‌کلیک) ----------
-        // هر چهار کارت این بخش به تب «سود مشتریان» می‌روند - جایی که مانده
-        // طلب واقعی و مانده تخمینی هر مشتری/پروژه کنار سودشان دیده می‌شود
-        // (جایگزین صفحه حذف‌شده «طلب‌های باز»).
-        Row(
-          children: [
-            Expanded(
-                child: _SimpleStat(
-                    label: 'مطالبات ›',
-                    value: formatMoneyCompact(data.receivableBalance),
-                    color: AppColors.brass,
-                    bordered: true,
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ReportsScreen(initialTabIndex: 1))))),
-            const SizedBox(width: 8),
-            Expanded(
-                child: _SimpleStat(
-                    label: 'مانده تخمینی ›',
-                    value: formatMoneyCompact(data.estimatedRemainingTotal),
-                    color: AppColors.brass,
-                    bordered: true,
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ReportsScreen(
-                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
-          ],
+        // ---------- طلب و پیش‌دریافت ----------
+        _label('طلب و پیش‌دریافت'),
+        // مطالبات (بدهی رسمی، پروژه‌های نهایی‌شده) و مانده تخمینی (بدهی
+        // غیررسمی، پروژه‌های در جریان) هر دو یک مفهوم‌اند - «چقدر پول
+        // طلبکاریم» - فقط با درجه قطعیت متفاوت؛ در یک کارت با هم دیده
+        // می‌شوند تا کارت جدا و ناوبری تکراری نداشته باشیم. هر دو به تب
+        // «سود مشتریان» می‌روند - جایی که این دو عدد به تفکیک مشتری/پروژه
+        // دیده می‌شود (جایگزین صفحه حذف‌شده «طلب‌های باز»).
+        _ReceivablesCard(
+          receivable: data.receivableBalance,
+          estimatedRemaining: data.estimatedRemainingTotal,
+          onTap: () => Navigator.push(
+              context, MaterialPageRoute(builder: (_) => const ReportsScreen(initialTabIndex: 1))),
         ),
         const SizedBox(height: 10),
 
@@ -341,13 +327,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
             Expanded(
                 child: _SimpleStat(
                     label: 'پروژه در جریان ›',
-                    value:
-                        '${pn(data.openProjectsCount)} · ${formatMoneyCompact(data.openProjectsTotal)}',
+                    value: pn(data.openProjectsCount),
                     onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) => const ReportsScreen(
-                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
+                            builder: (_) => const ProjectsScreen(onlyOpenFinancially: true))))),
             const SizedBox(width: 8),
             Expanded(
                 child: _SimpleStat(
@@ -491,6 +475,59 @@ class _SimpleStat extends StatelessWidget {
   }
 }
 
+/// کارت واحد «مطالبات + مانده تخمینی» - جایگزین دو _SimpleStat جدا که هر
+/// دو به یک مقصد می‌رفتند؛ چون هر دو یک مفهوم‌اند (پول طلبکاری، با درجه
+/// قطعیت متفاوت)، یک کارت با دو ستون منطقی‌تر از دو کارت جدا با ناوبری
+/// تکراری است.
+class _ReceivablesCard extends StatelessWidget {
+  final double receivable;
+  final double estimatedRemaining;
+  final VoidCallback onTap;
+  const _ReceivablesCard(
+      {required this.receivable, required this.estimatedRemaining, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget col(String label, double value) {
+      return Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(formatMoneyCompact(value),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.brass)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.brass, width: 0.8),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Row(
+            children: [
+              col('مطالبات ›', receivable),
+              Container(width: 1, height: 34, margin: const EdgeInsets.symmetric(horizontal: 10), color: AppColors.gridLine),
+              col('مانده تخمینی ›', estimatedRemaining),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// ردیف دو دکمه اقدام سریع (دریافت/پرداخت)
 class _QuickActionsRow extends StatelessWidget {

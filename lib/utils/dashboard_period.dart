@@ -138,6 +138,18 @@ class DashboardPeriodResolver {
 
   /// فهرست بازه‌های ماهانه بین دو تاریخ (شامل هر دو سر بازه) - برای نمودارهای
   /// روند ماهانه؛ صرفاً محاسبه تاریخ است.
+  /// نام روزهای هفته شمسی - برای برچسب دوخطی Bucketهای روزانه (نام روز +
+  /// تاریخ) در نمودار روند؛ اندیس بر مبنای Jalali.weekDay (۱=شنبه..۷=جمعه).
+  static const List<String> _weekDayNames = [
+    'شنبه',
+    'یکشنبه',
+    'دوشنبه',
+    'سه‌شنبه',
+    'چهارشنبه',
+    'پنجشنبه',
+    'جمعه',
+  ];
+
   static const List<String> _monthNames = [
     'فروردین',
     'اردیبهشت',
@@ -216,7 +228,9 @@ class DashboardPeriodResolver {
       buckets.add(DashboardPeriodRange(
         fromDate: jalaliToString(cursor),
         toDate: jalaliToString(cursor),
-        label: '${pn(cursor.day)} ${_monthNames[cursor.month - 1]}',
+        // برچسب دوخطی: نام روز هفته + تاریخ - برای نمودار روند که این دو را
+        // در دو ردیف جدا زیر هر ستون نشان می‌دهد.
+        label: '${_weekDayNames[cursor.weekDay - 1]}\n${pn(cursor.day)} ${_monthNames[cursor.month - 1]}',
       ));
       cursor = cursor.addDays(1);
     }
@@ -257,7 +271,7 @@ class DashboardPeriodResolver {
       buckets.add(DashboardPeriodRange(
         fromDate: jalaliToString(day),
         toDate: jalaliToString(day),
-        label: '${pn(day.day)} ${_monthNames[day.month - 1]}',
+        label: '${_weekDayNames[day.weekDay - 1]}\n${pn(day.day)} ${_monthNames[day.month - 1]}',
       ));
     }
     return buckets;

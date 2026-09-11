@@ -181,9 +181,15 @@ class ManagementDashboardData {
   final List<TrendPoint> revenueTrend;
 
   /// روند مجموع هزینه‌های تعهدی (هزینه مستقیم پروژه + سربار پروژه‌ها +
-  /// هزینه‌های دفتر) - هم‌مبنا با revenueTrend (هر دو تعهدی)، برای نمودار
-  /// «درآمد و هزینه» کنار هم؛ عمداً جریان نقد خروجی نیست.
+  /// هزینه‌های دفتر) - هم‌مبنا با revenueTrend (هر دو تعهدی).
   final List<TrendPoint> expenseTrend;
+
+  /// روند دریافتی نقدی (customerReceipts + otherCashInflows هر Bucket) -
+  /// عمداً مبنایش با revenueTrend/expenseTrend فرق دارد (نقدی، نه تعهدی).
+  /// طبق درخواست صریح کاربر برای نمایش هر سه کنار هم در نمودار داشبورد؛
+  /// هر جا این عدد مصرف می‌شود باید همیشه با برچسب/رنگ مجزا از دو سری
+  /// تعهدی نمایش داده شود تا این تفاوت مبنا گم نشود.
+  final List<TrendPoint> receiptsTrend;
   final List<TrendPoint> operatingResultTrend;
   final List<TrendPoint> cashFlowTrend;
   final List<TrendPoint> contributionMarginTrend;
@@ -246,6 +252,7 @@ class ManagementDashboardData {
     required this.netAdjustments,
     required this.revenueTrend,
     required this.expenseTrend,
+    required this.receiptsTrend,
     required this.operatingResultTrend,
     required this.cashFlowTrend,
     required this.contributionMarginTrend,

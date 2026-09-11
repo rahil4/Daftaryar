@@ -22,7 +22,7 @@ import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
-import 'widgets/multi_trend_chart_widget.dart';
+import 'widgets/combo_trend_chart_widget.dart';
 
 /// اگر بیش از این تعداد روز از آخرین پشتیبان‌گیری موفق گذشته باشد (یا
 /// اصلاً پشتیبانی گرفته نشده باشد)، بنر یادآور در داشبورد نمایش داده
@@ -250,25 +250,17 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
 
         // ---------- عملکرد این بازه ----------
         _label('عملکرد این بازه'),
-        Row(
-          children: [
-            Expanded(
-                child: _SimpleStat(
-                    label: 'دریافتی',
-                    value: formatMoneyCompact(data.customerReceipts + data.otherCashInflows),
-                    color: AppColors.positive)),
-            const SizedBox(width: 8),
-            Expanded(
-                child: _SimpleStat(
-                    label: 'پرداختی',
-                    value: formatMoneyCompact(data.projectPayments +
-                        data.projectOverheadPayments +
-                        data.officePayments +
-                        data.otherCashOutflows),
-                    color: AppColors.negative)),
-          ],
+        // نمودار ترکیبی: درآمد/هزینه (تعهدی، ستون) + دریافتی (نقدی، خط) -
+        // جایگزین ردیف قبلی «دریافتی/پرداختی» و MultiTrendChartWidget که
+        // جدا از هم بودند؛ سه کارت خلاصه بالای خودِ نمودار، دقیقاً هم‌رنگ با
+        // سه سری نمودار زیرشان.
+        ComboTrendChartWidget(
+          title: 'درآمد و هزینه',
+          income: data.revenueTrend,
+          expense: data.expenseTrend,
+          receipts: data.receiptsTrend,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 16),
 
         // ---------- هزینه‌های این بازه (تفکیک پروژه/دفتر) ----------
         Card(
@@ -292,16 +284,6 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
               ],
             ),
           ),
-        ),
-        const SizedBox(height: 16),
-
-        // ---------- نمودار مقایسه‌ای درآمد و هزینه ----------
-        MultiTrendChartWidget(
-          title: 'درآمد و هزینه',
-          series: [
-            ChartSeries(label: 'درآمد', points: data.revenueTrend, color: AppColors.brass),
-            ChartSeries(label: 'هزینه', points: data.expenseTrend, color: AppColors.negative),
-          ],
         ),
         const SizedBox(height: 16),
 

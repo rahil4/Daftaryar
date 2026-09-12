@@ -1789,7 +1789,12 @@ class DatabaseHelper {
   /// به هر دلیلی (فایل پشتیبان قدیمی یا دستکاری‌شده) در ورودی Restore
   /// حضور داشته باشند، به‌صورت دفاعی این‌جا هم نادیده گرفته می‌شوند تا
   /// Restore هرگز نتواند قفل امنیتی فعلی دستگاه مقصد را تغییر دهد.
-  static const List<String> kSecuritySettingKeys = ['pin_hash', 'lock_enabled', 'biometric_enabled'];
+  static const List<String> kSecuritySettingKeys = [
+    'pin_hash',
+    'pin_salt',
+    'lock_enabled',
+    'biometric_enabled',
+  ];
 
   Future<void> setAllSettings(Map<String, String> settings, [DatabaseExecutor? executor]) async {
     for (final entry in settings.entries) {

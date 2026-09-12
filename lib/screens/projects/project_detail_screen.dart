@@ -1,7 +1,7 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
-import '../../models/account.dart';
 import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
@@ -11,6 +11,7 @@ import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/quick_add_sheet.dart';
 import '../../services/pdf_export_service.dart';
+import '../../services/project_statement_builder.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../journal/quick_expense_screen.dart';
 import 'project_form_screen.dart';
@@ -92,70 +93,21 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       final accountsById = {for (final a in accounts) a.id!: a};
       final discountAccount = await _db.getServiceDiscountAccount();
 
-      final receipts = <Map<String, dynamic>>[];
-      final expenses = <Map<String, dynamic>>[];
-      for (final e in _entries) {
-        final entryLines = e.lines.where((l) => l.projectId == _project.id).toList();
-        if (entryLines.isEmpty) continue;
-
-        // یک سند باید یا «هزینه» باشد یا «دریافت/اصلاح دریافت» - نه هر دو.
-        // بدون این تفکیک سطح-به-سطح، پای بستانکار (نقد) هر سند هزینه
-        // (بدهکار حساب هزینه / بستانکار نقد) هم چون حساب نقد را بستانکار
-        // می‌کند، اشتباهاً به‌عنوان «اصلاح یک دریافت قبلی» با مبلغ منفی در
-        // فهرست دریافت‌ها ظاهر می‌شد - یعنی هر هزینه دو بار (یک‌بار مثبت در
-        // فهرست هزینه‌ها، یک‌بار منفی در فهرست دریافت‌ها) اثر می‌گذاشت.
-        final isExpenseEntry = entryLines.any((l) =>
-            l.debit > 0 &&
-            accountsById[l.accountId]?.type == kAccountExpense &&
-            l.accountId != discountAccount?.id);
-
-        if (isExpenseEntry) {
-          for (final l in entryLines) {
-            if (l.debit > 0 &&
-                accountsById[l.accountId]?.type == kAccountExpense &&
-                l.accountId != discountAccount?.id) {
-              expenses.add({
-                'date': e.date,
-                'description': e.description ?? accountsById[l.accountId]?.name ?? 'هزینه پروژه',
-                'amount': l.debit,
-              });
-            }
-          }
-          continue;
-        }
-
-        for (final l in entryLines) {
-          if (!cashAccountIds.contains(l.accountId)) continue;
-          if (l.debit > 0) {
-            receipts.add({
-              'date': e.date,
-              'description': e.description ?? 'دریافت وجه',
-              'amount': l.debit,
-            });
-          } else if (l.credit > 0) {
-            // برگشت/اصلاح یک دریافت اشتباه قبلی (رجوع به
-            // DatabaseHelper.reverseProjectReceipt) - عمداً به‌جای حذف
-            // بی‌صدا از صورتحساب، به‌صورت مبلغ منفی در همان فهرست
-            // دریافت‌ها نشان داده می‌شود تا برای مشتری هم روشن باشد که
-            // یک دریافت قبلی اصلاح/لغو شده، نه این‌که رقمی گم شده باشد.
-            receipts.add({
-              'date': e.date,
-              'description': e.description ?? 'اصلاح دریافت',
-              'amount': -l.credit,
-            });
-          }
-        }
-      }
-      receipts.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
-      expenses.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      final lists = buildProjectStatementLists(
+        entries: _entries,
+        projectId: _project.id!,
+        cashAccountIds: cashAccountIds,
+        accountsById: accountsById,
+        discountAccountId: discountAccount?.id,
+      );
 
       await _pdf.exportProjectStatement(
         projectTitle: _project.title,
         counterpartyName: _counterparty?.name ?? '—',
         counterpartyPhone: _counterparty?.phone,
         summary: _summary!,
-        receipts: receipts,
-        expenses: expenses,
+        receipts: lists.receipts,
+        expenses: lists.expenses,
       );
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -401,14 +353,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       appBar: AppBar(
         title: Text(_project.title),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.analytics_outlined),
-            tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
+          // این دکمه فقط در build دیباگ دیده می‌شود - صفحه‌ی تشخیصی داخلی
+          // برای توسعه‌دهنده است و نباید در نسخه‌ی نصبی کاربر نهایی
+          // (release/APK منتشرشده) قابل دسترس باشد.
+          if (kDebugMode)
+            IconButton(
+              icon: const Icon(Icons.analytics_outlined),
+              tooltip: 'Debug: شاخص‌های مالی (Metrics Layer)',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => ProjectMetricsDebugScreen(projectId: _project.id!)),
+              ),
             ),
-          ),
           IconButton(
             icon: _exporting
                 ? const SizedBox(

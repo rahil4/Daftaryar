@@ -95,34 +95,53 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       final receipts = <Map<String, dynamic>>[];
       final expenses = <Map<String, dynamic>>[];
       for (final e in _entries) {
-        for (final l in e.lines) {
-          if (l.projectId != _project.id) continue;
-          if (cashAccountIds.contains(l.accountId)) {
-            if (l.debit > 0) {
-              receipts.add({
+        final entryLines = e.lines.where((l) => l.projectId == _project.id).toList();
+        if (entryLines.isEmpty) continue;
+
+        // یک سند باید یا «هزینه» باشد یا «دریافت/اصلاح دریافت» - نه هر دو.
+        // بدون این تفکیک سطح-به-سطح، پای بستانکار (نقد) هر سند هزینه
+        // (بدهکار حساب هزینه / بستانکار نقد) هم چون حساب نقد را بستانکار
+        // می‌کند، اشتباهاً به‌عنوان «اصلاح یک دریافت قبلی» با مبلغ منفی در
+        // فهرست دریافت‌ها ظاهر می‌شد - یعنی هر هزینه دو بار (یک‌بار مثبت در
+        // فهرست هزینه‌ها، یک‌بار منفی در فهرست دریافت‌ها) اثر می‌گذاشت.
+        final isExpenseEntry = entryLines.any((l) =>
+            l.debit > 0 &&
+            accountsById[l.accountId]?.type == kAccountExpense &&
+            l.accountId != discountAccount?.id);
+
+        if (isExpenseEntry) {
+          for (final l in entryLines) {
+            if (l.debit > 0 &&
+                accountsById[l.accountId]?.type == kAccountExpense &&
+                l.accountId != discountAccount?.id) {
+              expenses.add({
                 'date': e.date,
-                'description': e.description ?? 'دریافت وجه',
+                'description': e.description ?? accountsById[l.accountId]?.name ?? 'هزینه پروژه',
                 'amount': l.debit,
               });
-            } else if (l.credit > 0) {
-              // برگشت/اصلاح یک دریافت اشتباه قبلی (رجوع به
-              // DatabaseHelper.reverseProjectReceipt) - عمداً به‌جای حذف
-              // بی‌صدا از صورتحساب، به‌صورت مبلغ منفی در همان فهرست
-              // دریافت‌ها نشان داده می‌شود تا برای مشتری هم روشن باشد که
-              // یک دریافت قبلی اصلاح/لغو شده، نه این‌که رقمی گم شده باشد.
-              receipts.add({
-                'date': e.date,
-                'description': e.description ?? 'اصلاح دریافت',
-                'amount': -l.credit,
-              });
             }
-          } else if (l.debit > 0 &&
-              accountsById[l.accountId]?.type == kAccountExpense &&
-              l.accountId != discountAccount?.id) {
-            expenses.add({
+          }
+          continue;
+        }
+
+        for (final l in entryLines) {
+          if (!cashAccountIds.contains(l.accountId)) continue;
+          if (l.debit > 0) {
+            receipts.add({
               'date': e.date,
-              'description': e.description ?? accountsById[l.accountId]?.name ?? 'هزینه پروژه',
+              'description': e.description ?? 'دریافت وجه',
               'amount': l.debit,
+            });
+          } else if (l.credit > 0) {
+            // برگشت/اصلاح یک دریافت اشتباه قبلی (رجوع به
+            // DatabaseHelper.reverseProjectReceipt) - عمداً به‌جای حذف
+            // بی‌صدا از صورتحساب، به‌صورت مبلغ منفی در همان فهرست
+            // دریافت‌ها نشان داده می‌شود تا برای مشتری هم روشن باشد که
+            // یک دریافت قبلی اصلاح/لغو شده، نه این‌که رقمی گم شده باشد.
+            receipts.add({
+              'date': e.date,
+              'description': e.description ?? 'اصلاح دریافت',
+              'amount': -l.credit,
             });
           }
         }

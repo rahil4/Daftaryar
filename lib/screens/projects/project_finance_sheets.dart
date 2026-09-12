@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/journal_entry.dart';
 import '../../models/project.dart';
 import '../../models/project_price_event.dart';
 import '../../theme/app_theme.dart';
@@ -57,6 +58,17 @@ Future<bool?> showReceivePaymentSheet(
     isScrollControlled: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _ReceivePaymentSheet(project: project, summary: summary),
+  );
+}
+
+/// ویرایش مستقیم یک سند «دریافت وجه پروژه» موجود - رجوع به
+/// DatabaseHelper.updateProjectReceipt برای شرایط دقیق مجاز بودن.
+Future<bool?> showEditReceiptSheet(BuildContext context, JournalEntryModel entry) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _EditReceiptSheet(entry: entry),
   );
 }
 
@@ -448,6 +460,115 @@ class _ReceivePaymentSheetState extends State<_ReceivePaymentSheet> {
                       ? const SizedBox(
                           height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('ثبت دریافت'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// شیت ویرایش مستقیم سند دریافت وجه (مبلغ/حساب/تاریخ/توضیح) - در قالب و
+/// اجزای همان _ReceivePaymentSheet، فقط پیش‌پرشده با مقادیر فعلی سند و
+/// صدازننده DatabaseHelper.updateProjectReceipt به‌جای receiveProjectPayment.
+class _EditReceiptSheet extends StatefulWidget {
+  final JournalEntryModel entry;
+  const _EditReceiptSheet({required this.entry});
+
+  @override
+  State<_EditReceiptSheet> createState() => _EditReceiptSheetState();
+}
+
+class _EditReceiptSheetState extends State<_EditReceiptSheet> {
+  final _db = DatabaseHelper.instance;
+  late final JournalLineModel _cashLine = widget.entry.lines.firstWhere((l) => l.debit > 0);
+  late final _amount =
+      TextEditingController(text: formatMoney(_cashLine.debit.toDouble(), withSuffix: false));
+  late final _description = TextEditingController(text: widget.entry.description ?? '');
+  late String _date = widget.entry.date;
+  List<AccountModel> _cashAccounts = [];
+  int? _cashAccountId;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cashAccountId = _cashLine.accountId;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final accounts = await _db.getCashAccounts();
+    setState(() {
+      _cashAccounts = accounts;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    if (_cashAccountId == null) return;
+    final amount = parsePersianAmount(_amount.text) ?? 0;
+    if (amount <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await _db.updateProjectReceipt(
+        entryId: widget.entry.id!,
+        cashAccountId: _cashAccountId!,
+        amount: amount,
+        date: _date,
+        description: _description.text.trim().isNotEmpty ? _description.text.trim() : null,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+      child: _loading
+          ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('ویرایش سند دریافت', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                const Text(
+                  'مبلغ، حساب نقد/بانک، تاریخ یا توضیح این سند را مستقیماً اصلاح کنید - خودِ همین سند در جای خودش به‌روزرسانی می‌شود.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                PersianAmountField(controller: _amount, label: 'مبلغ (تومان) *'),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _cashAccountId,
+                  decoration: const InputDecoration(labelText: 'حساب نقد/بانک'),
+                  items: _cashAccounts
+                      .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _cashAccountId = v),
+                ),
+                const SizedBox(height: 12),
+                JalaliDateField(label: 'تاریخ', value: _date, onChanged: (v) => setState(() => _date = v)),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: _description,
+                    decoration: const InputDecoration(labelText: 'شرح (اختیاری)')),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('ذخیره اصلاحات'),
                 ),
               ],
             ),

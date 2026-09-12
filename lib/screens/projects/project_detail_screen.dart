@@ -286,6 +286,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     }
   }
 
+  /// ویرایش مستقیم مبلغ/حساب نقد/تاریخ/توضیح یک سند دریافت وجه - بدون
+  /// ساختن سند دوم؛ رجوع به DatabaseHelper.updateProjectReceipt.
+  Future<void> _editReceipt(JournalEntryModel entry) async {
+    final result = await showEditReceiptSheet(context, entry);
+    if (result == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -359,6 +366,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     onAddFinalAdjustment: _addFinalAdjustment,
                     cashAccountIds: _cashAccountIds,
                     onFixReceipt: _fixMistakenReceipt,
+                    onEditReceipt: _editReceipt,
                   ),
                   ProjectEconomicsScreen(projectId: _project.id!, embedded: true),
                 ],
@@ -390,6 +398,7 @@ class _OverviewTab extends StatelessWidget {
   final VoidCallback onAddFinalAdjustment;
   final Set<int> cashAccountIds;
   final ValueChanged<JournalEntryModel> onFixReceipt;
+  final ValueChanged<JournalEntryModel> onEditReceipt;
 
   const _OverviewTab({
     required this.project,
@@ -407,6 +416,7 @@ class _OverviewTab extends StatelessWidget {
     required this.onAddFinalAdjustment,
     required this.cashAccountIds,
     required this.onFixReceipt,
+    required this.onEditReceipt,
   });
 
   @override
@@ -675,12 +685,14 @@ class _OverviewTab extends StatelessWidget {
           else
             ...entries.map((e) {
               // سند «دریافت وجه پروژه» سیستمی که هنوز اصلاح نشده - فقط این
-              // نوع سند دکمه «اصلاح دریافت اشتباه» می‌گیرد (رجوع به
-              // DatabaseHelper.reverseProjectReceipt برای شرط دقیق تشخیص و
-              // محافظت‌های آن).
-              final isFixableReceipt = e.isSystemGenerated &&
+              // نوع سند منوی اصلاح می‌گیرد. ویرایش مستقیم (updateProjectReceipt)
+              // فقط روی ساختار ساده دو-سطری مجاز است؛ برگشت
+              // (reverseProjectReceipt) روی هر «دریافت وجه پروژه»ای کار می‌کند
+              // (حتی سندهای چندسطریِ تقسیم‌شده بابت مازاد دریافتی).
+              final isReversibleReceipt = e.isSystemGenerated &&
                   e.lines.any((l) => l.debit > 0 && cashAccountIds.contains(l.accountId)) &&
                   !entries.any((other) => other.description?.contains('(سند اصلی #${e.id})') == true);
+              final isEditableReceipt = isReversibleReceipt && e.lines.length == 2;
               return Card(
                 child: ListTile(
                   leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
@@ -689,11 +701,22 @@ class _OverviewTab extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isFixableReceipt)
-                        IconButton(
+                      if (isReversibleReceipt)
+                        PopupMenuButton<String>(
                           icon: const Icon(Icons.build_outlined, color: AppColors.brass, size: 20),
-                          tooltip: 'اصلاح دریافت اشتباه',
-                          onPressed: () => onFixReceipt(e),
+                          tooltip: 'اصلاح این سند',
+                          onSelected: (choice) {
+                            if (choice == 'edit') {
+                              onEditReceipt(e);
+                            } else if (choice == 'reverse') {
+                              onFixReceipt(e);
+                            }
+                          },
+                          itemBuilder: (ctx) => [
+                            if (isEditableReceipt)
+                              const PopupMenuItem(value: 'edit', child: Text('ویرایش دریافت')),
+                            const PopupMenuItem(value: 'reverse', child: Text('اصلاح دریافت اشتباه')),
+                          ],
                         ),
                       const Icon(Icons.chevron_left),
                     ],

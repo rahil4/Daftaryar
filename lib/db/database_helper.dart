@@ -2594,6 +2594,104 @@ class DatabaseHelper {
     ));
   }
 
+  /// ویرایش مستقیم یک سند «دریافت وجه پروژه» موجود (مبلغ/حساب نقد یا
+  /// بانک/تاریخ/توضیح) - بدون ساختن سند جدید یا برگشت؛ خودِ همان سند در
+  /// جای خودش اصلاح می‌شود (طبق درخواست صریح کاربر که reverseProjectReceipt
+  /// را برای اصلاح یک عدد/حساب ساده اشتباه، دو-سندی و ناکافی دانست).
+  ///
+  /// فقط روی سندهایی مجاز است که ساختاراً «دریافت وجه پروژه»ی ساده‌اند:
+  /// دقیقاً دو سطر (بدهکار نقد/بانک + بستانکار یک حساب کنترلی واحد -
+  /// دریافتنی یا پیش‌دریافت). سندهایی که به‌دلیل Overpayment بین چند حساب
+  /// تقسیم شده‌اند (بیش از دو سطر) از این مسیر رد می‌شوند - پیچیدگی تقسیم
+  /// را نمی‌توان با یک فرم ساده ویرایش کرد؛ برای آن‌ها reverseProjectReceipt
+  /// باقی می‌ماند. حساب کنترلی مقصد (دریافتنی/پیش‌دریافت) و پروژه/طرف‌حساب
+  /// عمداً قابل تغییر نیستند - این‌ها با وضعیت Finalize بودن پروژه در زمان
+  /// ثبت اصلی تعیین شده‌اند، نه یک انتخاب آزاد فرم ویرایش.
+  Future<void> updateProjectReceipt({
+    required int entryId,
+    required int cashAccountId,
+    required double amount,
+    required String date,
+    String? description,
+  }) async {
+    if (amount <= 0) throw Exception('مبلغ باید بزرگ‌تر از صفر باشد.');
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است؛ می‌توانید مستقیماً از صفحه سند حذف و دوباره ثبتش کنید.');
+    }
+    final accounts = await getAccounts();
+    final accountsById = {for (final a in accounts) a.id!: a};
+    final cashLines =
+        original.lines.where((l) => l.debit > 0 && _isCashOrBankById(l.accountId, accountsById)).toList();
+    if (cashLines.isEmpty) {
+      throw Exception('این سند «دریافت وجه پروژه» نیست؛ فقط این نوع سند قابل ویرایش مستقیم است.');
+    }
+    if (original.lines.length != 2) {
+      throw Exception(
+          'این سند به‌دلیل ساختار خاص (تقسیم‌شده بین چند حساب، معمولاً بابت مازاد دریافتی) قابل ویرایش مستقیم نیست؛ از «اصلاح دریافت اشتباه» استفاده کنید.');
+    }
+    final creditLine = original.lines.firstWhere((l) => l.credit > 0);
+
+    // اگر حساب مقصد این دریافت پیش‌دریافت یا بستانکاری مشتری باشد و از
+    // زمان ثبت این دریافت وضعیت پروژه طوری تغییر کرده که موجودی فعلی آن
+    // حساب کمتر از سهم همین سند است (مثلاً پروژه از آن‌موقع نهایی و کل
+    // پیش‌دریافتش به دریافتنی منتقل شده)، ویرایش متوقف می‌شود - همان
+    // محافظتی که در reverseProjectReceipt هم هست. توجه: مقصد «دریافتنی»
+    // عمداً بررسی نمی‌شود چون _validateJournalEntry پایین‌تر خودش کاهش/
+    // افزایش AR را با Overpayment Guard می‌سنجد.
+    if (creditLine.projectId != null) {
+      final advanceAccount = await getCustomerAdvanceAccount();
+      final creditAccount = await getCustomerCreditAccount();
+      double? currentBalance;
+      if (advanceAccount != null && creditLine.accountId == advanceAccount.id) {
+        currentBalance = await projectAdvanceBalance(creditLine.projectId!);
+      } else if (creditAccount != null && creditLine.accountId == creditAccount.id) {
+        currentBalance = await projectCustomerCreditBalance(creditLine.projectId!);
+      }
+      if (currentBalance != null && currentBalance < creditLine.credit) {
+        throw Exception(
+            'وضعیت این پروژه از زمان ثبت این دریافت تغییر کرده (برای مثال پروژه نهایی و پیش‌دریافتش مصرف شده) و دیگر قابل ویرایش مستقیم نیست. برای رفع، یک سند دستی اصلاحی ثبت کنید.');
+      }
+    }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      // ابتدا سطرهای قبلی حذف می‌شوند تا بررسی مانده‌ها (Overpayment Guard
+      // در _validateJournalEntry) نسبت به وضعیتِ «بدون این سند» انجام شود،
+      // نه با احتساب دوباره اثر خودِ همین سند پیش از ویرایش.
+      await txn.delete('journal_lines', where: 'entryId = ?', whereArgs: [entryId]);
+      final newEntry = JournalEntryModel(
+        id: entryId,
+        date: date,
+        description: description,
+        createdAt: original.createdAt,
+        source: kJournalSourceSystem,
+        lines: [
+          JournalLineModel(
+              accountId: cashAccountId,
+              debit: amount.round(),
+              projectId: cashLines.first.projectId,
+              counterpartyId: cashLines.first.counterpartyId),
+          JournalLineModel(
+              accountId: creditLine.accountId,
+              credit: amount.round(),
+              projectId: creditLine.projectId,
+              counterpartyId: creditLine.counterpartyId),
+        ],
+      );
+      await _validateJournalEntry(newEntry, txn);
+      await txn.update('journal_entries', {'date': date, 'description': description},
+          where: 'id = ?', whereArgs: [entryId]);
+      for (final line in newEntry.lines) {
+        final map = line.toMap()
+          ..remove('id')
+          ..['entryId'] = entryId;
+        await txn.insert('journal_lines', map);
+      }
+    });
+  }
+
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
   /// طبق تعریف رسمی: Settled فقط یعنی isFinalized + بدون مانده طلب/پیش‌دریافت.

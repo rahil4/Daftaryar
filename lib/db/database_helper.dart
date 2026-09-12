@@ -2692,6 +2692,144 @@ class DatabaseHelper {
     });
   }
 
+  /// اصلاح یک سند «تخفیف» اشتباه با ثبت یک سند برگشتِ دقیقاً معکوس -
+  /// مشابه reverseProjectReceipt، اما برای تخفیف. برخلاف دریافت وجه،
+  /// اینجا امکان «ویرایش مستقیم» ارائه نمی‌شود: هر تخفیف علاوه بر سند
+  /// حسابداری، یک ردیف در project_price_events هم دارد که هیچ کلید خارجی
+  /// به سند مرتبطش ندارد (ستون entryId روی آن جدول وجود ندارد)؛ افزودن
+  /// چنین ستونی یک ALTER TABLE است و طبق قرارداد پایداری (STABILITY.md)
+  /// نیازمند توقف و گفت‌وگوی جداست، نه یک رفع باگ ساده. برای همین، اصلاح
+  /// اینجا هم به روش برگشت (Append-Only) انجام می‌شود: هم یک سند برگشت
+  /// حسابداری و هم یک رویداد قیمتِ خنثی‌کننده (علامت مخالف) اضافه می‌شود -
+  /// نیازی به یافتن/ویرایش ردیف قیمت اصلی نیست، فقط جمعش خنثی می‌شود.
+  Future<int> reverseProjectDiscount(int entryId) async {
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است؛ می‌توانید مستقیماً از صفحه سند حذفش کنید.');
+    }
+    final discountAccount = await getServiceDiscountAccount();
+    final discountLine = discountAccount == null
+        ? null
+        : original.lines.where((l) => l.accountId == discountAccount.id && l.debit > 0).firstOrNull;
+    if (discountLine == null) {
+      throw Exception('این سند «تخفیف» نیست؛ فقط این نوع سند با این عملیات قابل اصلاح است.');
+    }
+
+    final projectId = discountLine.projectId;
+    final marker = '(سند اصلی #$entryId)';
+    if (projectId != null) {
+      final existing = await getJournalEntries(projectId: projectId);
+      if (existing.any((e) => e.description?.contains(marker) == true)) {
+        throw Exception('این سند قبلاً اصلاح شده است.');
+      }
+    }
+
+    final reversalLines = original.lines
+        .map((l) => JournalLineModel(
+              accountId: l.accountId,
+              debit: l.credit,
+              credit: l.debit,
+              projectId: l.projectId,
+              counterpartyId: l.counterpartyId,
+              description: l.description,
+            ))
+        .toList();
+    final newEntryId = await insertJournalEntry(JournalEntryModel(
+      date: todayJalaliString(),
+      description: 'اصلاح: برگشت سند تخفیف اشتباه $marker',
+      createdAt: todayJalaliString(),
+      source: kJournalSourceSystem,
+      lines: reversalLines,
+    ));
+    if (projectId != null) {
+      // رویداد اصلی با amount منفی ثبت شده بود (recordProjectDiscount)؛
+      // رویداد خنثی‌کننده با همان مقدار ولی مثبت، جمع را دقیقاً به حالت
+      // قبل برمی‌گرداند.
+      await addProjectPriceEvent(
+        projectId: projectId,
+        type: kPriceEventDiscount,
+        amount: discountLine.debit.toDouble(),
+        reason: 'برگشت تخفیف اشتباه $marker',
+        date: todayJalaliString(),
+      );
+    }
+    return newEntryId;
+  }
+
+  /// اصلاح یک سند «اصلاح مبلغ نهایی» اشتباه با ثبت یک سند برگشتِ دقیقاً
+  /// معکوس - رجوع به توضیح reverseProjectDiscount برای این‌که چرا اینجا
+  /// هم فقط برگشت (نه ویرایش مستقیم) ارائه می‌شود.
+  ///
+  /// تشخیص این سند صرفاً بر مبنای متن توضیح کافی نیست (چون سند «نهایی‌سازی
+  /// - شناسایی درآمد» هم دقیقاً همان دو حساب - دریافتنی/درآمد - را لمس
+  /// می‌کند)؛ پس هر دو شرط با هم لازم است: (۱) توضیح دقیقاً با پیشوند
+  /// ثابت و غیرقابل‌تغییر توسط کاربر «اصلاح مبلغ نهایی» شروع شود (برخلاف
+  /// توضیح آزاد سند دریافت وجه، اینجا کاربر فقط می‌تواند یک «دلیل» بعد از
+  /// این پیشوند اضافه کند، نه کل توضیح را جایگزین کند) و (۲) سند هیچ سطر
+  /// نقد/بانکی نداشته باشد (تا یک دریافت وجه با توضیح دستکاری‌شده مشابه،
+  /// اشتباهاً به‌عنوان اصلاح مبلغ نهایی شناسایی نشود).
+  Future<int> reverseFinalAdjustment(int entryId) async {
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است؛ می‌توانید مستقیماً از صفحه سند حذفش کنید.');
+    }
+    if (original.description == null || !original.description!.startsWith('اصلاح مبلغ نهایی')) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند با این عملیات قابل اصلاح است.');
+    }
+    final accounts = await getAccounts();
+    final accountsById = {for (final a in accounts) a.id!: a};
+    if (original.lines.any((l) => _isCashOrBankById(l.accountId, accountsById))) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند با این عملیات قابل اصلاح است.');
+    }
+    final arAccount = await getReceivableAccount();
+    final arLine = arAccount == null
+        ? null
+        : original.lines.where((l) => l.accountId == arAccount.id).firstOrNull;
+    if (arLine == null) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند با این عملیات قابل اصلاح است.');
+    }
+    final signedAmount = arLine.debit > 0 ? arLine.debit.toDouble() : -arLine.credit.toDouble();
+
+    final projectId = arLine.projectId;
+    final marker = '(سند اصلی #$entryId)';
+    if (projectId != null) {
+      final existing = await getJournalEntries(projectId: projectId);
+      if (existing.any((e) => e.description?.contains(marker) == true)) {
+        throw Exception('این سند قبلاً اصلاح شده است.');
+      }
+    }
+
+    final reversalLines = original.lines
+        .map((l) => JournalLineModel(
+              accountId: l.accountId,
+              debit: l.credit,
+              credit: l.debit,
+              projectId: l.projectId,
+              counterpartyId: l.counterpartyId,
+              description: l.description,
+            ))
+        .toList();
+    final newEntryId = await insertJournalEntry(JournalEntryModel(
+      date: todayJalaliString(),
+      description: 'اصلاح: برگشت سند اصلاح مبلغ نهایی اشتباه $marker',
+      createdAt: todayJalaliString(),
+      source: kJournalSourceSystem,
+      lines: reversalLines,
+    ));
+    if (projectId != null) {
+      await addProjectPriceEvent(
+        projectId: projectId,
+        type: kPriceEventFinalAdjustment,
+        amount: -signedAmount,
+        reason: 'برگشت اصلاح مبلغ نهایی اشتباه $marker',
+        date: todayJalaliString(),
+      );
+    }
+    return newEntryId;
+  }
+
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
   /// طبق تعریف رسمی: Settled فقط یعنی isFinalized + بدون مانده طلب/پیش‌دریافت.

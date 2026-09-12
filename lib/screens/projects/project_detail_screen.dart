@@ -36,6 +36,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   List<ProjectPriceEventModel> _priceEvents = [];
   Map<String, dynamic>? _summary;
   Set<int> _cashAccountIds = {};
+  int? _discountAccountId;
   bool _loading = true;
   bool _exporting = false;
 
@@ -60,6 +61,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     final summary = await _db.projectFinancialSummary(_project.id!);
     final priceEvents = await _db.getProjectPriceEvents(_project.id!);
     final cashAccounts = await _db.getCashAccounts();
+    final discountAccount = await _db.getServiceDiscountAccount();
     setState(() {
       _project = project ?? _project;
       _counterparty = client;
@@ -67,6 +69,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       _summary = summary;
       _priceEvents = priceEvents;
       _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
+      _discountAccountId = discountAccount?.id;
       _loading = false;
     });
   }
@@ -293,6 +296,64 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     if (result == true) _load();
   }
 
+  /// اصلاح یک سند «تخفیف» اشتباه - رجوع به DatabaseHelper.reverseProjectDiscount
+  /// برای این‌که چرا اینجا فقط برگشت ممکن است، نه ویرایش مستقیم.
+  Future<void> _fixMistakenDiscount(JournalEntryModel entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('اصلاح تخفیف اشتباه'),
+        content: const Text(
+            'یک سند برگشت، دقیقاً معکوس این تخفیف ثبت می‌شود (خودِ سند اصلی حذف نمی‌شود، فقط برای حفظ سوابق در تاریخچه می‌ماند و اثرش خنثی می‌شود). سپس می‌توانید تخفیف صحیح را ثبت کنید. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('اصلاح شود')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await _db.reverseProjectDiscount(entry.id!);
+      await _load();
+      if (!mounted) return;
+      await _addDiscount();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
+    }
+  }
+
+  /// اصلاح یک سند «اصلاح مبلغ نهایی» اشتباه - رجوع به
+  /// DatabaseHelper.reverseFinalAdjustment.
+  Future<void> _fixMistakenAdjustment(JournalEntryModel entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('اصلاح این اصلاح مبلغ نهایی'),
+        content: const Text(
+            'یک سند برگشت، دقیقاً معکوس این اصلاح ثبت می‌شود (خودِ سند اصلی حذف نمی‌شود، فقط برای حفظ سوابق در تاریخچه می‌ماند و اثرش خنثی می‌شود). سپس می‌توانید اصلاح صحیح را ثبت کنید. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('اصلاح شود')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await _db.reverseFinalAdjustment(entry.id!);
+      await _load();
+      if (!mounted) return;
+      await _addFinalAdjustment();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -365,8 +426,11 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     onAddDiscount: _addDiscount,
                     onAddFinalAdjustment: _addFinalAdjustment,
                     cashAccountIds: _cashAccountIds,
+                    discountAccountId: _discountAccountId,
                     onFixReceipt: _fixMistakenReceipt,
                     onEditReceipt: _editReceipt,
+                    onFixDiscount: _fixMistakenDiscount,
+                    onFixAdjustment: _fixMistakenAdjustment,
                   ),
                   ProjectEconomicsScreen(projectId: _project.id!, embedded: true),
                 ],
@@ -397,8 +461,11 @@ class _OverviewTab extends StatelessWidget {
   final VoidCallback onAddDiscount;
   final VoidCallback onAddFinalAdjustment;
   final Set<int> cashAccountIds;
+  final int? discountAccountId;
   final ValueChanged<JournalEntryModel> onFixReceipt;
   final ValueChanged<JournalEntryModel> onEditReceipt;
+  final ValueChanged<JournalEntryModel> onFixDiscount;
+  final ValueChanged<JournalEntryModel> onFixAdjustment;
 
   const _OverviewTab({
     required this.project,
@@ -415,8 +482,11 @@ class _OverviewTab extends StatelessWidget {
     required this.onAddDiscount,
     required this.onAddFinalAdjustment,
     required this.cashAccountIds,
+    required this.discountAccountId,
     required this.onFixReceipt,
     required this.onEditReceipt,
+    required this.onFixDiscount,
+    required this.onFixAdjustment,
   });
 
   @override
@@ -684,15 +754,40 @@ class _OverviewTab extends StatelessWidget {
             )
           else
             ...entries.map((e) {
-              // سند «دریافت وجه پروژه» سیستمی که هنوز اصلاح نشده - فقط این
-              // نوع سند منوی اصلاح می‌گیرد. ویرایش مستقیم (updateProjectReceipt)
-              // فقط روی ساختار ساده دو-سطری مجاز است؛ برگشت
-              // (reverseProjectReceipt) روی هر «دریافت وجه پروژه»ای کار می‌کند
-              // (حتی سندهای چندسطریِ تقسیم‌شده بابت مازاد دریافتی).
+              // آیا این سند قبلاً یک بار اصلاح شده؟ (یک سند دیگر در همین
+              // پروژه با اشاره صریح به این سند در توضیحش) - مشترک بین هر
+              // سه نوع قابل‌اصلاح، تا اصلاح دوباره ممکن نباشد.
+              final alreadyReversed =
+                  entries.any((other) => other.description?.contains('(سند اصلی #${e.id})') == true);
+
+              // سند «دریافت وجه پروژه» سیستمی - ویرایش مستقیم
+              // (updateProjectReceipt) فقط روی ساختار ساده دو-سطری مجاز
+              // است؛ برگشت (reverseProjectReceipt) روی هر «دریافت وجه
+              // پروژه»ای کار می‌کند (حتی سندهای چندسطریِ تقسیم‌شده بابت
+              // مازاد دریافتی).
               final isReversibleReceipt = e.isSystemGenerated &&
-                  e.lines.any((l) => l.debit > 0 && cashAccountIds.contains(l.accountId)) &&
-                  !entries.any((other) => other.description?.contains('(سند اصلی #${e.id})') == true);
+                  !alreadyReversed &&
+                  e.lines.any((l) => l.debit > 0 && cashAccountIds.contains(l.accountId));
               final isEditableReceipt = isReversibleReceipt && e.lines.length == 2;
+
+              // سند «تخفیف» سیستمی - فقط برگشت (نه ویرایش مستقیم؛ رجوع به
+              // توضیح DatabaseHelper.reverseProjectDiscount).
+              final isReversibleDiscount = e.isSystemGenerated &&
+                  !alreadyReversed &&
+                  discountAccountId != null &&
+                  e.lines.any((l) => l.accountId == discountAccountId && l.debit > 0);
+
+              // سند «اصلاح مبلغ نهایی» سیستمی - تشخیص دوشرطی (توضیح +
+              // نبود سطر نقد/بانک) تا با سند نهایی‌سازی (که حساب‌های
+              // یکسانی لمس می‌کند) اشتباه گرفته نشود؛ رجوع به توضیح
+              // DatabaseHelper.reverseFinalAdjustment.
+              final isReversibleAdjustment = e.isSystemGenerated &&
+                  !alreadyReversed &&
+                  (e.description?.startsWith('اصلاح مبلغ نهایی') ?? false) &&
+                  !e.lines.any((l) => cashAccountIds.contains(l.accountId));
+
+              final hasAnyFix = isReversibleReceipt || isReversibleDiscount || isReversibleAdjustment;
+
               return Card(
                 child: ListTile(
                   leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
@@ -701,21 +796,31 @@ class _OverviewTab extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isReversibleReceipt)
+                      if (hasAnyFix)
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.build_outlined, color: AppColors.brass, size: 20),
                           tooltip: 'اصلاح این سند',
                           onSelected: (choice) {
                             if (choice == 'edit') {
                               onEditReceipt(e);
-                            } else if (choice == 'reverse') {
+                            } else if (choice == 'reverse_receipt') {
                               onFixReceipt(e);
+                            } else if (choice == 'reverse_discount') {
+                              onFixDiscount(e);
+                            } else if (choice == 'reverse_adjustment') {
+                              onFixAdjustment(e);
                             }
                           },
                           itemBuilder: (ctx) => [
                             if (isEditableReceipt)
                               const PopupMenuItem(value: 'edit', child: Text('ویرایش دریافت')),
-                            const PopupMenuItem(value: 'reverse', child: Text('اصلاح دریافت اشتباه')),
+                            if (isReversibleReceipt)
+                              const PopupMenuItem(value: 'reverse_receipt', child: Text('اصلاح دریافت اشتباه')),
+                            if (isReversibleDiscount)
+                              const PopupMenuItem(value: 'reverse_discount', child: Text('اصلاح تخفیف اشتباه')),
+                            if (isReversibleAdjustment)
+                              const PopupMenuItem(
+                                  value: 'reverse_adjustment', child: Text('اصلاح این اصلاح مبلغ نهایی')),
                           ],
                         ),
                       const Icon(Icons.chevron_left),

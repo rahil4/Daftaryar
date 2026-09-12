@@ -354,6 +354,20 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     }
   }
 
+  /// ویرایش مستقیم مبلغ/تاریخ/دلیل یک سند تخفیف - بدون ساختن سند دوم؛
+  /// رجوع به DatabaseHelper.updateProjectDiscount.
+  Future<void> _editDiscount(JournalEntryModel entry) async {
+    final result = await showEditDiscountSheet(context, entry);
+    if (result == true) _load();
+  }
+
+  /// ویرایش مستقیم مبلغ/تاریخ/دلیل یک سند اصلاح مبلغ نهایی - بدون ساختن
+  /// سند دوم؛ رجوع به DatabaseHelper.updateFinalAdjustment.
+  Future<void> _editAdjustment(JournalEntryModel entry) async {
+    final result = await showEditFinalAdjustmentSheet(context, entry);
+    if (result == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -430,7 +444,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     onFixReceipt: _fixMistakenReceipt,
                     onEditReceipt: _editReceipt,
                     onFixDiscount: _fixMistakenDiscount,
+                    onEditDiscount: _editDiscount,
                     onFixAdjustment: _fixMistakenAdjustment,
+                    onEditAdjustment: _editAdjustment,
                   ),
                   ProjectEconomicsScreen(projectId: _project.id!, embedded: true),
                 ],
@@ -465,7 +481,9 @@ class _OverviewTab extends StatelessWidget {
   final ValueChanged<JournalEntryModel> onFixReceipt;
   final ValueChanged<JournalEntryModel> onEditReceipt;
   final ValueChanged<JournalEntryModel> onFixDiscount;
+  final ValueChanged<JournalEntryModel> onEditDiscount;
   final ValueChanged<JournalEntryModel> onFixAdjustment;
+  final ValueChanged<JournalEntryModel> onEditAdjustment;
 
   const _OverviewTab({
     required this.project,
@@ -486,7 +504,9 @@ class _OverviewTab extends StatelessWidget {
     required this.onFixReceipt,
     required this.onEditReceipt,
     required this.onFixDiscount,
+    required this.onEditDiscount,
     required this.onFixAdjustment,
+    required this.onEditAdjustment,
   });
 
   @override
@@ -770,9 +790,9 @@ class _OverviewTab extends StatelessWidget {
                   e.lines.any((l) => l.debit > 0 && cashAccountIds.contains(l.accountId));
               final isEditableReceipt = isReversibleReceipt && e.lines.length == 2;
 
-              // سند «تخفیف» سیستمی - فقط برگشت (نه ویرایش مستقیم؛ رجوع به
-              // توضیح DatabaseHelper.reverseProjectDiscount).
-              final isReversibleDiscount = e.isSystemGenerated &&
+              // سند «تخفیف» سیستمی - هم ویرایش مستقیم (updateProjectDiscount)
+              // و هم برگشت (reverseProjectDiscount) در دسترس‌اند.
+              final isFixableDiscount = e.isSystemGenerated &&
                   !alreadyReversed &&
                   discountAccountId != null &&
                   e.lines.any((l) => l.accountId == discountAccountId && l.debit > 0);
@@ -780,13 +800,15 @@ class _OverviewTab extends StatelessWidget {
               // سند «اصلاح مبلغ نهایی» سیستمی - تشخیص دوشرطی (توضیح +
               // نبود سطر نقد/بانک) تا با سند نهایی‌سازی (که حساب‌های
               // یکسانی لمس می‌کند) اشتباه گرفته نشود؛ رجوع به توضیح
-              // DatabaseHelper.reverseFinalAdjustment.
-              final isReversibleAdjustment = e.isSystemGenerated &&
+              // DatabaseHelper.reverseFinalAdjustment. هم ویرایش مستقیم
+              // (updateFinalAdjustment) و هم برگشت در دسترس‌اند.
+              final isFixableAdjustment = e.isSystemGenerated &&
                   !alreadyReversed &&
                   (e.description?.startsWith('اصلاح مبلغ نهایی') ?? false) &&
                   !e.lines.any((l) => cashAccountIds.contains(l.accountId));
 
-              final hasAnyFix = isReversibleReceipt || isReversibleDiscount || isReversibleAdjustment;
+              final hasAnyFix =
+                  isReversibleReceipt || isFixableDiscount || isFixableAdjustment;
 
               return Card(
                 child: ListTile(
@@ -801,26 +823,34 @@ class _OverviewTab extends StatelessWidget {
                           icon: const Icon(Icons.build_outlined, color: AppColors.brass, size: 20),
                           tooltip: 'اصلاح این سند',
                           onSelected: (choice) {
-                            if (choice == 'edit') {
+                            if (choice == 'edit_receipt') {
                               onEditReceipt(e);
                             } else if (choice == 'reverse_receipt') {
                               onFixReceipt(e);
+                            } else if (choice == 'edit_discount') {
+                              onEditDiscount(e);
                             } else if (choice == 'reverse_discount') {
                               onFixDiscount(e);
+                            } else if (choice == 'edit_adjustment') {
+                              onEditAdjustment(e);
                             } else if (choice == 'reverse_adjustment') {
                               onFixAdjustment(e);
                             }
                           },
                           itemBuilder: (ctx) => [
                             if (isEditableReceipt)
-                              const PopupMenuItem(value: 'edit', child: Text('ویرایش دریافت')),
+                              const PopupMenuItem(value: 'edit_receipt', child: Text('ویرایش دریافت')),
                             if (isReversibleReceipt)
                               const PopupMenuItem(value: 'reverse_receipt', child: Text('اصلاح دریافت اشتباه')),
-                            if (isReversibleDiscount)
+                            if (isFixableDiscount) ...[
+                              const PopupMenuItem(value: 'edit_discount', child: Text('ویرایش تخفیف')),
                               const PopupMenuItem(value: 'reverse_discount', child: Text('اصلاح تخفیف اشتباه')),
-                            if (isReversibleAdjustment)
+                            ],
+                            if (isFixableAdjustment) ...[
+                              const PopupMenuItem(value: 'edit_adjustment', child: Text('ویرایش اصلاح مبلغ نهایی')),
                               const PopupMenuItem(
                                   value: 'reverse_adjustment', child: Text('اصلاح این اصلاح مبلغ نهایی')),
+                            ],
                           ],
                         ),
                       const Icon(Icons.chevron_left),

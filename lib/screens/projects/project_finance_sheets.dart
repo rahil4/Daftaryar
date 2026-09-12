@@ -51,6 +51,28 @@ Future<bool?> showFinalAdjustmentSheet(BuildContext context, ProjectModel projec
   );
 }
 
+/// ویرایش مستقیم یک سند «تخفیف» موجود - رجوع به
+/// DatabaseHelper.updateProjectDiscount.
+Future<bool?> showEditDiscountSheet(BuildContext context, JournalEntryModel entry) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _EditDiscountSheet(entry: entry),
+  );
+}
+
+/// ویرایش مستقیم یک سند «اصلاح مبلغ نهایی» موجود - رجوع به
+/// DatabaseHelper.updateFinalAdjustment.
+Future<bool?> showEditFinalAdjustmentSheet(BuildContext context, JournalEntryModel entry) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _EditFinalAdjustmentSheet(entry: entry),
+  );
+}
+
 Future<bool?> showReceivePaymentSheet(
     BuildContext context, ProjectModel project, Map<String, dynamic>? summary) {
   return showModalBottomSheet<bool>(
@@ -352,6 +374,198 @@ class _FinalAdjustmentSheetState extends State<_FinalAdjustmentSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// شیت ویرایش مستقیم سند تخفیف - در قالب _DiscountSheet، فقط پیش‌پرشده
+/// با مقادیر فعلی سند و صدازننده DatabaseHelper.updateProjectDiscount.
+class _EditDiscountSheet extends StatefulWidget {
+  final JournalEntryModel entry;
+  const _EditDiscountSheet({required this.entry});
+
+  @override
+  State<_EditDiscountSheet> createState() => _EditDiscountSheetState();
+}
+
+class _EditDiscountSheetState extends State<_EditDiscountSheet> {
+  final _db = DatabaseHelper.instance;
+  final _amount = TextEditingController();
+  final _reason = TextEditingController();
+  String _date = todayJalaliString();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final discountAccount = await _db.getServiceDiscountAccount();
+    final discountLine = widget.entry.lines.firstWhere((l) => l.accountId == discountAccount?.id);
+    const prefix = 'تخفیف: ';
+    final desc = widget.entry.description ?? '';
+    setState(() {
+      _amount.text = formatMoney(discountLine.debit.toDouble(), withSuffix: false);
+      _reason.text = desc.startsWith(prefix) ? desc.substring(prefix.length) : '';
+      _date = widget.entry.date;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final amount = parsePersianAmount(_amount.text) ?? 0;
+    if (amount <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await _db.updateProjectDiscount(
+        entryId: widget.entry.id!,
+        amount: amount,
+        date: _date,
+        reason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+      child: _loading
+          ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('ویرایش سند تخفیف', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                PersianAmountField(controller: _amount, label: 'مبلغ تخفیف (تومان) *'),
+                const SizedBox(height: 12),
+                JalaliDateField(label: 'تاریخ', value: _date, onChanged: (v) => setState(() => _date = v)),
+                const SizedBox(height: 12),
+                TextField(controller: _reason, decoration: const InputDecoration(labelText: 'دلیل (اختیاری)')),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('ذخیره اصلاحات'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// شیت ویرایش مستقیم سند اصلاح مبلغ نهایی - در قالب _FinalAdjustmentSheet،
+/// فقط پیش‌پرشده با مقادیر فعلی سند و صدازننده DatabaseHelper.updateFinalAdjustment.
+class _EditFinalAdjustmentSheet extends StatefulWidget {
+  final JournalEntryModel entry;
+  const _EditFinalAdjustmentSheet({required this.entry});
+
+  @override
+  State<_EditFinalAdjustmentSheet> createState() => _EditFinalAdjustmentSheetState();
+}
+
+class _EditFinalAdjustmentSheetState extends State<_EditFinalAdjustmentSheet> {
+  final _db = DatabaseHelper.instance;
+  final _amount = TextEditingController();
+  final _reason = TextEditingController();
+  String _direction = 'increase';
+  String _date = todayJalaliString();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final arAccount = await _db.getReceivableAccount();
+    final arLine = widget.entry.lines.firstWhere((l) => l.accountId == arAccount?.id);
+    final signedAmount = arLine.debit > 0 ? arLine.debit.toDouble() : -arLine.credit.toDouble();
+    const prefix = 'اصلاح مبلغ نهایی: ';
+    final desc = widget.entry.description ?? '';
+    setState(() {
+      _amount.text = formatMoney(signedAmount.abs(), withSuffix: false);
+      _direction = signedAmount >= 0 ? 'increase' : 'decrease';
+      _reason.text = desc.startsWith(prefix) ? desc.substring(prefix.length) : '';
+      _date = widget.entry.date;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final amount = parsePersianAmount(_amount.text) ?? 0;
+    if (amount <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await _db.updateFinalAdjustment(
+        entryId: widget.entry.id!,
+        amount: _direction == 'increase' ? amount : -amount,
+        date: _date,
+        reason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+      child: _loading
+          ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('ویرایش سند اصلاح مبلغ نهایی', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'increase', label: Text('افزایش درآمد')),
+                    ButtonSegment(value: 'decrease', label: Text('کاهش درآمد')),
+                  ],
+                  selected: {_direction},
+                  onSelectionChanged: (s) => setState(() => _direction = s.first),
+                ),
+                const SizedBox(height: 16),
+                PersianAmountField(controller: _amount, label: 'مبلغ اصلاح (تومان) *'),
+                const SizedBox(height: 12),
+                JalaliDateField(label: 'تاریخ', value: _date, onChanged: (v) => setState(() => _date = v)),
+                const SizedBox(height: 12),
+                TextField(controller: _reason, decoration: const InputDecoration(labelText: 'دلیل (اختیاری)')),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('ذخیره اصلاحات'),
+                ),
+              ],
+            ),
     );
   }
 }

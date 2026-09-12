@@ -2830,6 +2830,187 @@ class DatabaseHelper {
     return newEntryId;
   }
 
+  /// ویرایش مستقیم مبلغ/تاریخ/دلیل یک سند «تخفیف» موجود - بدون ساختن سند
+  /// جدید؛ خودِ همان سند در جای خودش اصلاح می‌شود (طبق درخواست صریح کاربر
+  /// که برگشت Append-Only را برای «ویرایش» کافی ندانست، حتی برای تخفیف/
+  /// اصلاح مبلغ نهایی، نه فقط دریافت وجه).
+  ///
+  /// چون project_price_events هیچ کلید خارجی به سند مرتبطش ندارد (رجوع
+  /// به توضیح reverseProjectDiscount)، ردیف رویداد قیمتِ اصلی دست‌نخورده
+  /// می‌ماند - فقط یک رویداد «دلتا» (تفاوت مبلغ جدید و قدیم) اضافه می‌شود تا
+  /// جمع کل («تخفیف کل») درست بماند، بدون نیاز به یافتن/ویرایش آن ردیف.
+  /// این رویداد دلتا در «تاریخچه تغییرات مبلغ» به‌عنوان یک ردیف اصلاحی
+  /// جداگانه دیده می‌شود (نه ادغام‌شده با ردیف اصلی)، اما خودِ سند حسابداری
+  /// (که هدف اصلی این ویرایش است) واقعاً و فقط در یک نسخه، با عدد درست،
+  /// در «اسناد این پروژه» دیده می‌شود.
+  Future<void> updateProjectDiscount({
+    required int entryId,
+    required double amount,
+    required String date,
+    String? reason,
+  }) async {
+    if (amount <= 0) throw Exception('مبلغ تخفیف باید بزرگ‌تر از صفر باشد.');
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است؛ می‌توانید مستقیماً از صفحه سند حذف و دوباره ثبتش کنید.');
+    }
+    final discountAccount = await getServiceDiscountAccount();
+    if (discountAccount == null) throw Exception('حساب کنترلی «تخفیف» یافت نشد.');
+    final discountLines =
+        original.lines.where((l) => l.accountId == discountAccount.id && l.debit > 0).toList();
+    if (discountLines.isEmpty) {
+      throw Exception('این سند «تخفیف» نیست؛ فقط این نوع سند قابل ویرایش مستقیم است.');
+    }
+    final arAccount = await getReceivableAccount();
+    if (arAccount == null) throw Exception('حساب کنترلی «دریافتنی» یافت نشد.');
+    final discountLine = discountLines.first;
+    final oldAmount = discountLine.debit.toDouble();
+    final projectId = discountLine.projectId;
+    final counterpartyId = discountLine.counterpartyId;
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('journal_lines', where: 'entryId = ?', whereArgs: [entryId]);
+      final newDescription = reason?.isNotEmpty == true ? 'تخفیف: $reason' : 'تخفیف نهایی پروژه';
+      final newEntry = JournalEntryModel(
+        id: entryId,
+        date: date,
+        description: newDescription,
+        createdAt: original.createdAt,
+        source: kJournalSourceSystem,
+        lines: [
+          JournalLineModel(
+              accountId: discountAccount.id!,
+              debit: amount.round(),
+              projectId: projectId,
+              counterpartyId: counterpartyId),
+          JournalLineModel(
+              accountId: arAccount.id!,
+              credit: amount.round(),
+              projectId: projectId,
+              counterpartyId: counterpartyId),
+        ],
+      );
+      await _validateJournalEntry(newEntry, txn);
+      await txn.update('journal_entries', {'date': date, 'description': newDescription},
+          where: 'id = ?', whereArgs: [entryId]);
+      for (final line in newEntry.lines) {
+        final map = line.toMap()
+          ..remove('id')
+          ..['entryId'] = entryId;
+        await txn.insert('journal_lines', map);
+      }
+      if (projectId != null && amount != oldAmount) {
+        await addProjectPriceEvent(
+          projectId: projectId,
+          type: kPriceEventDiscount,
+          amount: oldAmount - amount,
+          reason: 'اصلاح مبلغ تخفیف (سند #$entryId)',
+          date: date,
+          executor: txn,
+        );
+      }
+    });
+  }
+
+  /// ویرایش مستقیم مبلغ/تاریخ/دلیل یک سند «اصلاح مبلغ نهایی» موجود -
+  /// بدون ساختن سند جدید؛ رجوع به توضیح updateProjectDiscount برای دلیل
+  /// رویداد قیمتِ «دلتا». تشخیص این سند دقیقاً همان دو شرط
+  /// reverseFinalAdjustment را دارد (پیشوند ثابت توضیح + نبود سطر نقد/بانک).
+  Future<void> updateFinalAdjustment({
+    required int entryId,
+    required double amount, // علامت‌دار: مثبت=افزایش درآمد، منفی=کاهش
+    required String date,
+    String? reason,
+  }) async {
+    if (amount == 0) throw Exception('مقدار اصلاح نمی‌تواند صفر باشد.');
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است؛ می‌توانید مستقیماً از صفحه سند حذف و دوباره ثبتش کنید.');
+    }
+    if (original.description == null || !original.description!.startsWith('اصلاح مبلغ نهایی')) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند قابل ویرایش مستقیم است.');
+    }
+    final accounts = await getAccounts();
+    final accountsById = {for (final a in accounts) a.id!: a};
+    if (original.lines.any((l) => _isCashOrBankById(l.accountId, accountsById))) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند قابل ویرایش مستقیم است.');
+    }
+    final arAccount = await getReceivableAccount();
+    final revenueAccount = await getProjectRevenueAccount();
+    if (arAccount == null || revenueAccount == null) {
+      throw Exception('حساب‌های کنترلی موردنیاز یافت نشدند.');
+    }
+    final arLine = original.lines.where((l) => l.accountId == arAccount.id).firstOrNull;
+    if (arLine == null) {
+      throw Exception('این سند «اصلاح مبلغ نهایی» نیست؛ فقط این نوع سند قابل ویرایش مستقیم است.');
+    }
+    final oldSignedAmount = arLine.debit > 0 ? arLine.debit.toDouble() : -arLine.credit.toDouble();
+    final projectId = arLine.projectId;
+    final counterpartyId = arLine.counterpartyId;
+    final magnitude = amount.abs().round();
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('journal_lines', where: 'entryId = ?', whereArgs: [entryId]);
+      final newDescription =
+          reason?.isNotEmpty == true ? 'اصلاح مبلغ نهایی: $reason' : 'اصلاح مبلغ نهایی پروژه';
+      final newEntry = JournalEntryModel(
+        id: entryId,
+        date: date,
+        description: newDescription,
+        createdAt: original.createdAt,
+        source: kJournalSourceSystem,
+        lines: amount > 0
+            ? [
+                JournalLineModel(
+                    accountId: arAccount.id!,
+                    debit: magnitude,
+                    projectId: projectId,
+                    counterpartyId: counterpartyId),
+                JournalLineModel(
+                    accountId: revenueAccount.id!,
+                    credit: magnitude,
+                    projectId: projectId,
+                    counterpartyId: counterpartyId),
+              ]
+            : [
+                JournalLineModel(
+                    accountId: revenueAccount.id!,
+                    debit: magnitude,
+                    projectId: projectId,
+                    counterpartyId: counterpartyId),
+                JournalLineModel(
+                    accountId: arAccount.id!,
+                    credit: magnitude,
+                    projectId: projectId,
+                    counterpartyId: counterpartyId),
+              ],
+      );
+      await _validateJournalEntry(newEntry, txn);
+      await txn.update('journal_entries', {'date': date, 'description': newDescription},
+          where: 'id = ?', whereArgs: [entryId]);
+      for (final line in newEntry.lines) {
+        final map = line.toMap()
+          ..remove('id')
+          ..['entryId'] = entryId;
+        await txn.insert('journal_lines', map);
+      }
+      if (projectId != null && amount != oldSignedAmount) {
+        await addProjectPriceEvent(
+          projectId: projectId,
+          type: kPriceEventFinalAdjustment,
+          amount: amount - oldSignedAmount,
+          reason: 'اصلاح مقدار اصلاح مبلغ نهایی (سند #$entryId)',
+          date: date,
+          executor: txn,
+        );
+      }
+    });
+  }
+
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
   /// طبق تعریف رسمی: Settled فقط یعنی isFinalized + بدون مانده طلب/پیش‌دریافت.

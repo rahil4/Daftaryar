@@ -94,6 +94,18 @@ Future<bool?> showEditReceiptSheet(BuildContext context, JournalEntryModel entry
   );
 }
 
+/// تبدیل یک سند «دریافت وجه» که در واقع هزینه بوده (اشتباه در ماهیت، نه
+/// فقط مبلغ) به یک سند هزینه واقعی - رجوع به
+/// DatabaseHelper.convertReceiptToExpense.
+Future<bool?> showConvertReceiptToExpenseSheet(BuildContext context, JournalEntryModel entry) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.surface,
+    builder: (ctx) => _ConvertReceiptToExpenseSheet(entry: entry),
+  );
+}
+
 // ---------------- شیت‌های عملیات ----------------
 
 class _PriceEventSheet extends StatefulWidget {
@@ -783,6 +795,130 @@ class _EditReceiptSheetState extends State<_EditReceiptSheet> {
                       ? const SizedBox(
                           height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('ذخیره اصلاحات'),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// شیت تبدیل یک سند دریافتِ اشتباه (که در واقع هزینه بوده) به سند هزینه
+/// واقعی - رجوع به DatabaseHelper.convertReceiptToExpense.
+class _ConvertReceiptToExpenseSheet extends StatefulWidget {
+  final JournalEntryModel entry;
+  const _ConvertReceiptToExpenseSheet({required this.entry});
+
+  @override
+  State<_ConvertReceiptToExpenseSheet> createState() => _ConvertReceiptToExpenseSheetState();
+}
+
+class _ConvertReceiptToExpenseSheetState extends State<_ConvertReceiptToExpenseSheet> {
+  final _db = DatabaseHelper.instance;
+  late final JournalLineModel _cashLine = widget.entry.lines.firstWhere((l) => l.debit > 0);
+  late final _amount =
+      TextEditingController(text: formatMoney(_cashLine.debit.toDouble(), withSuffix: false));
+  late final _description = TextEditingController(text: widget.entry.description ?? '');
+  late String _date = widget.entry.date;
+  List<AccountModel> _cashAccounts = [];
+  List<AccountModel> _expenseAccounts = [];
+  int? _cashAccountId;
+  int? _expenseAccountId;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cashAccountId = _cashLine.accountId;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final cashAccounts = await _db.getCashAccounts();
+    final expenseAccounts = await _db.getPostableAccounts(type: kAccountExpense);
+    setState(() {
+      _cashAccounts = cashAccounts;
+      _expenseAccounts = expenseAccounts;
+      _expenseAccountId = expenseAccounts.isNotEmpty ? expenseAccounts.first.id : null;
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    if (_cashAccountId == null || _expenseAccountId == null) return;
+    final amount = parsePersianAmount(_amount.text) ?? 0;
+    if (amount <= 0) return;
+    setState(() => _saving = true);
+    try {
+      await _db.convertReceiptToExpense(
+        entryId: widget.entry.id!,
+        expenseAccountId: _expenseAccountId!,
+        cashAccountId: _cashAccountId!,
+        amount: amount,
+        date: _date,
+        description: _description.text.trim().isNotEmpty ? _description.text.trim() : null,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+      child: _loading
+          ? const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('تبدیل به سند هزینه', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                const Text(
+                  'این سند در واقع هزینه بوده، نه دریافت وجه. با ثبت، همین سند (نه یک سند جدید) به یک سند هزینه واقعی تبدیل می‌شود و مثل هر سند دستی دیگر، از این پس آزادانه قابل ویرایش/حذف خواهد بود.',
+                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<int>(
+                  initialValue: _expenseAccountId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'بابت هزینه'),
+                  items: _expenseAccounts
+                      .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _expenseAccountId = v),
+                ),
+                const SizedBox(height: 12),
+                PersianAmountField(controller: _amount, label: 'مبلغ (تومان) *'),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _cashAccountId,
+                  decoration: const InputDecoration(labelText: 'پرداخت از حساب'),
+                  items: _cashAccounts
+                      .map((a) => DropdownMenuItem(value: a.id, child: Text(a.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _cashAccountId = v),
+                ),
+                const SizedBox(height: 12),
+                JalaliDateField(label: 'تاریخ', value: _date, onChanged: (v) => setState(() => _date = v)),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: _description,
+                    decoration: const InputDecoration(labelText: 'شرح (اختیاری)')),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('تبدیل به هزینه'),
                 ),
               ],
             ),

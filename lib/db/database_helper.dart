@@ -2692,6 +2692,99 @@ class DatabaseHelper {
     });
   }
 
+  /// تبدیل یک سند «دریافت وجه پروژه» که در واقع باید هزینه ثبت می‌شد
+  /// (اشتباه در نوع/ماهیت سند، نه فقط مبلغ) به یک سند هزینه واقعی - همان
+  /// سند، در جای خودش، از ریخت دریافت (بدهکار نقد/بستانکار دریافتنی یا
+  /// پیش‌دریافت) به ریخت هزینه (بدهکار هزینه/بستانکار نقد) تغییر می‌کند.
+  ///
+  /// برخلاف updateProjectReceipt (که فقط مبلغ/حساب را در همان ریخت دریافت
+  /// اصلاح می‌کند)، این متد source سند را هم از system به manual تغییر
+  /// می‌دهد: از این پس این سند واقعاً یک هزینه دستی معمولی است - همان‌قدر
+  /// قابل حذف/ویرایش که هر سند دستی دیگر (رجوع به
+  /// JournalEntryModel.isDeletable)، بدون نیاز به هیچ مکانیزم اختصاصی
+  /// دیگری برایش.
+  Future<void> convertReceiptToExpense({
+    required int entryId,
+    required int expenseAccountId,
+    required int cashAccountId,
+    required double amount,
+    required String date,
+    String? description,
+  }) async {
+    if (amount <= 0) throw Exception('مبلغ باید بزرگ‌تر از صفر باشد.');
+    final original = await getJournalEntry(entryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است و همین حالا هم قابل حذف/اصلاح مستقیم است.');
+    }
+    final accounts = await getAccounts();
+    final accountsById = {for (final a in accounts) a.id!: a};
+    final cashLines =
+        original.lines.where((l) => l.debit > 0 && _isCashOrBankById(l.accountId, accountsById)).toList();
+    if (cashLines.isEmpty) {
+      throw Exception('این سند «دریافت وجه پروژه» نیست؛ فقط این نوع سند قابل تبدیل به هزینه است.');
+    }
+    if (original.lines.length != 2) {
+      throw Exception(
+          'این سند به‌دلیل ساختار خاص (تقسیم‌شده بین چند حساب، معمولاً بابت مازاد دریافتی) قابل تبدیل مستقیم نیست؛ از «اصلاح دریافت اشتباه» استفاده کنید.');
+    }
+    final creditLine = original.lines.firstWhere((l) => l.credit > 0);
+
+    // همان محافظت updateProjectReceipt: اگر از زمان ثبت این دریافت،
+    // وضعیت پروژه طوری تغییر کرده که حذف اثر آن روی پیش‌دریافت/بستانکاری
+    // مشتری منفی می‌شود، تبدیل خودکار متوقف می‌شود.
+    if (creditLine.projectId != null) {
+      final advanceAccount = await getCustomerAdvanceAccount();
+      final creditAccount = await getCustomerCreditAccount();
+      double? currentBalance;
+      if (advanceAccount != null && creditLine.accountId == advanceAccount.id) {
+        currentBalance = await projectAdvanceBalance(creditLine.projectId!);
+      } else if (creditAccount != null && creditLine.accountId == creditAccount.id) {
+        currentBalance = await projectCustomerCreditBalance(creditLine.projectId!);
+      }
+      if (currentBalance != null && currentBalance < creditLine.credit) {
+        throw Exception(
+            'وضعیت این پروژه از زمان ثبت این دریافت تغییر کرده (برای مثال پروژه نهایی و پیش‌دریافتش مصرف شده) و دیگر قابل تبدیل خودکار نیست. برای رفع، یک سند دستی اصلاحی ثبت کنید.');
+      }
+    }
+
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('journal_lines', where: 'entryId = ?', whereArgs: [entryId]);
+      final newEntry = JournalEntryModel(
+        id: entryId,
+        date: date,
+        description: description,
+        createdAt: original.createdAt,
+        source: kJournalSourceManual,
+        lines: [
+          JournalLineModel(
+              accountId: expenseAccountId,
+              debit: amount.round(),
+              projectId: cashLines.first.projectId,
+              counterpartyId: cashLines.first.counterpartyId),
+          JournalLineModel(
+              accountId: cashAccountId,
+              credit: amount.round(),
+              projectId: cashLines.first.projectId,
+              counterpartyId: cashLines.first.counterpartyId),
+        ],
+      );
+      await _validateJournalEntry(newEntry, txn);
+      await txn.update(
+          'journal_entries',
+          {'date': date, 'description': description, 'source': kJournalSourceManual},
+          where: 'id = ?',
+          whereArgs: [entryId]);
+      for (final line in newEntry.lines) {
+        final map = line.toMap()
+          ..remove('id')
+          ..['entryId'] = entryId;
+        await txn.insert('journal_lines', map);
+      }
+    });
+  }
+
   /// اصلاح یک سند «تخفیف» اشتباه با ثبت یک سند برگشتِ دقیقاً معکوس -
   /// مشابه reverseProjectReceipt، اما برای تخفیف. برخلاف دریافت وجه،
   /// اینجا امکان «ویرایش مستقیم» ارائه نمی‌شود: هر تخفیف علاوه بر سند

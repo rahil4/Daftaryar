@@ -296,6 +296,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     if (result == true) _load();
   }
 
+  /// تبدیل یک سند دریافتِ اشتباه (که در واقع هزینه بوده - اشتباه در
+  /// ماهیت، نه فقط مبلغ) به یک سند هزینه واقعی، در همان سند - رجوع به
+  /// DatabaseHelper.convertReceiptToExpense.
+  Future<void> _convertToExpense(JournalEntryModel entry) async {
+    final result = await showConvertReceiptToExpenseSheet(context, entry);
+    if (result == true) _load();
+  }
+
   /// اصلاح یک سند «تخفیف» اشتباه - رجوع به DatabaseHelper.reverseProjectDiscount
   /// برای این‌که چرا اینجا فقط برگشت ممکن است، نه ویرایش مستقیم.
   Future<void> _fixMistakenDiscount(JournalEntryModel entry) async {
@@ -443,6 +451,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     discountAccountId: _discountAccountId,
                     onFixReceipt: _fixMistakenReceipt,
                     onEditReceipt: _editReceipt,
+                    onConvertToExpense: _convertToExpense,
                     onFixDiscount: _fixMistakenDiscount,
                     onEditDiscount: _editDiscount,
                     onFixAdjustment: _fixMistakenAdjustment,
@@ -480,6 +489,7 @@ class _OverviewTab extends StatelessWidget {
   final int? discountAccountId;
   final ValueChanged<JournalEntryModel> onFixReceipt;
   final ValueChanged<JournalEntryModel> onEditReceipt;
+  final ValueChanged<JournalEntryModel> onConvertToExpense;
   final ValueChanged<JournalEntryModel> onFixDiscount;
   final ValueChanged<JournalEntryModel> onEditDiscount;
   final ValueChanged<JournalEntryModel> onFixAdjustment;
@@ -503,6 +513,7 @@ class _OverviewTab extends StatelessWidget {
     required this.discountAccountId,
     required this.onFixReceipt,
     required this.onEditReceipt,
+    required this.onConvertToExpense,
     required this.onFixDiscount,
     required this.onEditDiscount,
     required this.onFixAdjustment,
@@ -827,6 +838,8 @@ class _OverviewTab extends StatelessWidget {
                               onEditReceipt(e);
                             } else if (choice == 'reverse_receipt') {
                               onFixReceipt(e);
+                            } else if (choice == 'convert_to_expense') {
+                              onConvertToExpense(e);
                             } else if (choice == 'edit_discount') {
                               onEditDiscount(e);
                             } else if (choice == 'reverse_discount') {
@@ -838,8 +851,11 @@ class _OverviewTab extends StatelessWidget {
                             }
                           },
                           itemBuilder: (ctx) => [
-                            if (isEditableReceipt)
+                            if (isEditableReceipt) ...[
                               const PopupMenuItem(value: 'edit_receipt', child: Text('ویرایش دریافت')),
+                              const PopupMenuItem(
+                                  value: 'convert_to_expense', child: Text('تبدیل به هزینه (اشتباهاً دریافت ثبت شد)')),
+                            ],
                             if (isReversibleReceipt)
                               const PopupMenuItem(value: 'reverse_receipt', child: Text('اصلاح دریافت اشتباه')),
                             if (isFixableDiscount) ...[

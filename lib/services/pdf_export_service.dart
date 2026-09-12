@@ -174,6 +174,10 @@ class PdfExportService {
     final customerCredit = summary['customerCredit'] as double? ?? 0;
     final directProjectCost = summary['directProjectCost'] as double? ?? 0;
 
+    final receiptsTotal = receipts.fold<double>(0, (s, r) => s + (r['amount'] as num).toDouble());
+    final expensesTotal = expenses.fold<double>(0, (s, r) => s + (r['amount'] as num).toDouble());
+    final diff = receiptsTotal - expensesTotal;
+
     final doc = pw.Document();
     doc.addPage(
       pw.MultiPage(
@@ -193,6 +197,22 @@ class PdfExportService {
                 pw.Text('تاریخ صدور: ${formatJalaliLong(todayJalaliString())}',
                     style: pw.TextStyle(font: _regularFont, fontSize: 9, color: PdfColors.grey600)),
                 pw.SizedBox(height: 14),
+
+                _sectionTitle('دریافتی‌های پروژه'),
+                if (receipts.isNotEmpty) _amountTable(receipts),
+                _row('جمع دریافتی', formatMoney(receiptsTotal), bold: true),
+
+                _sectionTitle('هزینه‌های پروژه'),
+                if (expenses.isNotEmpty) _amountTable(expenses),
+                _row('جمع هزینه‌ها', formatMoney(expensesTotal), bold: true),
+
+                _sectionTitle('اختلاف دریافتی و هزینه'),
+                if (diff >= 0)
+                  _row('مانده مبلغ دریافتی (نزد شما)', formatMoney(diff), bold: true)
+                else
+                  _row('مازاد هزینه بر دریافتی (پرداخت از جیب)', formatMoney(-diff), bold: true),
+
+                _sectionTitle('خلاصه قرارداد'),
                 if (!isFinalized)
                   _row('مبلغ برآوردی فعلی', formatMoney(currentExpected ?? initialEstimate))
                 else ...[
@@ -212,14 +232,6 @@ class PdfExportService {
                         : (currentExpected ?? initialEstimate) - totalReceived),
                     bold: true,
                   ),
-                if (receipts.isNotEmpty) ...[
-                  _sectionTitle('گردش دریافت‌ها'),
-                  _amountTable(receipts),
-                ],
-                if (expenses.isNotEmpty) ...[
-                  _sectionTitle('هزینه‌های پروژه'),
-                  _amountTable(expenses),
-                ],
               ],
             ),
           ),

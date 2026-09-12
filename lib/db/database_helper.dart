@@ -2512,6 +2512,88 @@ class DatabaseHelper {
     ));
   }
 
+  /// اصلاح یک سند «دریافت وجه پروژه» اشتباه (مثلاً چیزی که در واقع باید
+  /// هزینه ثبت می‌شد ولی به‌اشتباه از مسیر دریافت وجه رفت). چون این سند
+  /// سیستمی (source=system) است و برای حفظ یکپارچگی حساب‌ها قابل حذف
+  /// فیزیکی نیست (رجوع به JournalEntryModel.isDeletable)، این متد به‌جای
+  /// حذف، یک سند برگشتِ دقیقاً معکوس (بدهکار↔بستانکار هر سطر عوض می‌شود)
+  /// ثبت می‌کند - سند اصلی دست‌نخورده در تاریخچه باقی می‌ماند و اثرش روی
+  /// مانده‌ها توسط همین سند برگشت خنثی می‌شود.
+  ///
+  /// عمداً فقط روی سندهایی مجاز است که ساختاراً «دریافت وجه پروژه»اند (حداقل
+  /// یک سطر بدهکار به حساب نقد/بانک) - نه بر مبنای متن توضیح (که کاربر
+  /// می‌تواند تغییرش داده باشد). سایر اسناد سیستمی (نهایی‌سازی/تخفیف/اصلاح
+  /// مبلغ نهایی) عمداً رد می‌شوند: برگشت آن‌ها فیلدهای وضعیت پروژه را هم
+  /// می‌طلبد (finalAmount/isFinalized) که این متد تضمینش نمی‌کند.
+  Future<int> reverseProjectReceipt(int originalEntryId, {String? date}) async {
+    final original = await getJournalEntry(originalEntryId);
+    if (original == null) throw Exception('سند یافت نشد.');
+    if (!original.isSystemGenerated) {
+      throw Exception('این سند دستی است و می‌توانید مستقیماً از صفحه سند حذفش کنید.');
+    }
+
+    final accounts = await getAccounts();
+    final accountsById = {for (final a in accounts) a.id!: a};
+    final hasCashDebitLine =
+        original.lines.any((l) => l.debit > 0 && _isCashOrBankById(l.accountId, accountsById));
+    if (!hasCashDebitLine) {
+      throw Exception('این سند «دریافت وجه پروژه» نیست؛ فقط این نوع سند قابل اصلاح خودکار است.');
+    }
+
+    final projectId = original.lines
+        .firstWhere((l) => l.projectId != null, orElse: () => original.lines.first)
+        .projectId;
+    final marker = '(سند اصلی #$originalEntryId)';
+
+    if (projectId != null) {
+      final existing = await getJournalEntries(projectId: projectId);
+      if (existing.any((e) => e.description?.contains(marker) == true)) {
+        throw Exception('این سند قبلاً اصلاح شده است.');
+      }
+
+      // اگر از زمان ثبت این دریافت، وضعیت پروژه طوری تغییر کرده که برگرداندنش
+      // مانده حساب مقصد (پیش‌دریافت/بستانکاری مشتری) را منفی می‌کند (مثلاً
+      // پروژه از آن زمان نهایی و پیش‌دریافتش به‌طور کامل به دریافتنی منتقل
+      // شده)، اصلاح خودکار متوقف می‌شود - این وضعیتی است که یک سند برگشت
+      // ساده نمی‌تواند درستش کند. توجه: مقصد «دریافتنی» عمداً بررسی نمی‌شود،
+      // چون برگشتش فقط طلب را افزایش (بدهکار) می‌کند که هیچ کف صفری ندارد.
+      final advanceAccount = await getCustomerAdvanceAccount();
+      final creditAccount = await getCustomerCreditAccount();
+      for (final l in original.lines) {
+        if (l.credit <= 0) continue;
+        double? currentBalance;
+        if (advanceAccount != null && l.accountId == advanceAccount.id) {
+          currentBalance = await projectAdvanceBalance(projectId);
+        } else if (creditAccount != null && l.accountId == creditAccount.id) {
+          currentBalance = await projectCustomerCreditBalance(projectId);
+        }
+        if (currentBalance != null && currentBalance < l.credit) {
+          throw Exception(
+              'وضعیت این پروژه از زمان ثبت این دریافت تغییر کرده (برای مثال پروژه نهایی و پیش‌دریافتش مصرف شده) و دیگر قابل اصلاح خودکار نیست. برای رفع، یک سند دستی اصلاحی ثبت کنید.');
+        }
+      }
+    }
+
+    final reversalLines = original.lines
+        .map((l) => JournalLineModel(
+              accountId: l.accountId,
+              debit: l.credit,
+              credit: l.debit,
+              projectId: l.projectId,
+              counterpartyId: l.counterpartyId,
+              description: l.description,
+            ))
+        .toList();
+
+    return insertJournalEntry(JournalEntryModel(
+      date: date ?? todayJalaliString(),
+      description: 'اصلاح: برگشت سند دریافت اشتباه $marker',
+      createdAt: todayJalaliString(),
+      source: kJournalSourceSystem,
+      lines: reversalLines,
+    ));
+  }
+
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
   /// طبق تعریف رسمی: Settled فقط یعنی isFinalized + بدون مانده طلب/پیش‌دریافت.

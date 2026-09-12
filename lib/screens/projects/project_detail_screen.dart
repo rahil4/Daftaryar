@@ -35,6 +35,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
   List<JournalEntryModel> _entries = [];
   List<ProjectPriceEventModel> _priceEvents = [];
   Map<String, dynamic>? _summary;
+  Set<int> _cashAccountIds = {};
   bool _loading = true;
   bool _exporting = false;
 
@@ -58,12 +59,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     final entries = await _db.getJournalEntries(projectId: _project.id);
     final summary = await _db.projectFinancialSummary(_project.id!);
     final priceEvents = await _db.getProjectPriceEvents(_project.id!);
+    final cashAccounts = await _db.getCashAccounts();
     setState(() {
       _project = project ?? _project;
       _counterparty = client;
       _entries = entries;
       _summary = summary;
       _priceEvents = priceEvents;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
       _loading = false;
     });
   }
@@ -91,14 +94,27 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
       for (final e in _entries) {
         for (final l in e.lines) {
           if (l.projectId != _project.id) continue;
-          if (l.debit <= 0) continue;
           if (cashAccountIds.contains(l.accountId)) {
-            receipts.add({
-              'date': e.date,
-              'description': e.description ?? 'دریافت وجه',
-              'amount': l.debit,
-            });
-          } else if (accountsById[l.accountId]?.type == kAccountExpense &&
+            if (l.debit > 0) {
+              receipts.add({
+                'date': e.date,
+                'description': e.description ?? 'دریافت وجه',
+                'amount': l.debit,
+              });
+            } else if (l.credit > 0) {
+              // برگشت/اصلاح یک دریافت اشتباه قبلی (رجوع به
+              // DatabaseHelper.reverseProjectReceipt) - عمداً به‌جای حذف
+              // بی‌صدا از صورتحساب، به‌صورت مبلغ منفی در همان فهرست
+              // دریافت‌ها نشان داده می‌شود تا برای مشتری هم روشن باشد که
+              // یک دریافت قبلی اصلاح/لغو شده، نه این‌که رقمی گم شده باشد.
+              receipts.add({
+                'date': e.date,
+                'description': e.description ?? 'اصلاح دریافت',
+                'amount': -l.credit,
+              });
+            }
+          } else if (l.debit > 0 &&
+              accountsById[l.accountId]?.type == kAccountExpense &&
               l.accountId != discountAccount?.id) {
             expenses.add({
               'date': e.date,
@@ -221,6 +237,55 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     if (result == true) _load();
   }
 
+  /// اصلاح یک سند «دریافت وجه» اشتباه (مثلاً چیزی که باید هزینه ثبت
+  /// می‌شد). چون سند دریافت وجه سیستمی است و برای حفظ یکپارچگی حساب‌ها
+  /// قابل حذف نیست، به‌جای حذف یک سند برگشتِ دقیقاً معکوس ثبت می‌شود (سند
+  /// اصلی حذف نمی‌شود، فقط اثرش خنثی می‌گردد؛ رجوع به
+  /// DatabaseHelper.reverseProjectReceipt). بلافاصله بعد، از کاربر می‌پرسد
+  /// این تراکنش در واقع چه بود تا فرم ثبت صحیح باز شود.
+  Future<void> _fixMistakenReceipt(JournalEntryModel entry) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('اصلاح دریافت اشتباه'),
+        content: const Text(
+            'یک سند برگشت، دقیقاً معکوس این دریافت ثبت می‌شود (خودِ سند اصلی حذف نمی‌شود، فقط برای حفظ سوابق در تاریخچه می‌ماند و اثرش خنثی می‌شود). سپس می‌توانید تراکنش صحیح را ثبت کنید. ادامه می‌دهید؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('اصلاح شود')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await _db.reverseProjectReceipt(entry.id!);
+      await _load();
+      if (!mounted) return;
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('تراکنش صحیح چه بود؟'),
+          content: const Text('این تراکنش در واقع باید چگونه ثبت می‌شد؟'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('فعلاً هیچ‌کدام')),
+            TextButton(onPressed: () => Navigator.pop(ctx, 'expense'), child: const Text('ثبت هزینه')),
+            TextButton(onPressed: () => Navigator.pop(ctx, 'receipt'), child: const Text('دریافت وجه')),
+          ],
+        ),
+      );
+      if (choice == 'expense') {
+        await _addExpense();
+      } else if (choice == 'receipt') {
+        await _receivePayment();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString().replaceAll('Exception: ', ''))));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -292,6 +357,8 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
                     onFinalize: _finalize,
                     onAddDiscount: _addDiscount,
                     onAddFinalAdjustment: _addFinalAdjustment,
+                    cashAccountIds: _cashAccountIds,
+                    onFixReceipt: _fixMistakenReceipt,
                   ),
                   ProjectEconomicsScreen(projectId: _project.id!, embedded: true),
                 ],
@@ -321,6 +388,8 @@ class _OverviewTab extends StatelessWidget {
   final VoidCallback onFinalize;
   final VoidCallback onAddDiscount;
   final VoidCallback onAddFinalAdjustment;
+  final Set<int> cashAccountIds;
+  final ValueChanged<JournalEntryModel> onFixReceipt;
 
   const _OverviewTab({
     required this.project,
@@ -336,6 +405,8 @@ class _OverviewTab extends StatelessWidget {
     required this.onFinalize,
     required this.onAddDiscount,
     required this.onAddFinalAdjustment,
+    required this.cashAccountIds,
+    required this.onFixReceipt,
   });
 
   @override
@@ -602,21 +673,41 @@ class _OverviewTab extends StatelessWidget {
                   Text('هنوز سندی برای این پروژه ثبت نشده', style: TextStyle(color: AppColors.textSecondary)),
             )
           else
-            ...entries.map((e) => Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
-                    title: Text(e.description ?? 'سند شماره ${pn(e.id!)}'),
-                    subtitle: Text('${formatJalaliLong(e.date)} · ${formatMoney(e.totalDebit)}'),
-                    trailing: const Icon(Icons.chevron_left),
-                    onTap: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.id!)),
-                      );
-                      onLoad();
-                    },
+            ...entries.map((e) {
+              // سند «دریافت وجه پروژه» سیستمی که هنوز اصلاح نشده - فقط این
+              // نوع سند دکمه «اصلاح دریافت اشتباه» می‌گیرد (رجوع به
+              // DatabaseHelper.reverseProjectReceipt برای شرط دقیق تشخیص و
+              // محافظت‌های آن).
+              final isFixableReceipt = e.isSystemGenerated &&
+                  e.lines.any((l) => l.debit > 0 && cashAccountIds.contains(l.accountId)) &&
+                  !entries.any((other) => other.description?.contains('(سند اصلی #${e.id})') == true);
+              return Card(
+                child: ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined, color: AppColors.brass),
+                  title: Text(e.description ?? 'سند شماره ${pn(e.id!)}'),
+                  subtitle: Text('${formatJalaliLong(e.date)} · ${formatMoney(e.totalDebit)}'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (isFixableReceipt)
+                        IconButton(
+                          icon: const Icon(Icons.build_outlined, color: AppColors.brass, size: 20),
+                          tooltip: 'اصلاح دریافت اشتباه',
+                          onPressed: () => onFixReceipt(e),
+                        ),
+                      const Icon(Icons.chevron_left),
+                    ],
                   ),
-                )),
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.id!)),
+                    );
+                    onLoad();
+                  },
+                ),
+              );
+            }),
         ],
       ),
     );

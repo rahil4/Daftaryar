@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/reloadable.dart';
 import '../../widgets/section_title.dart';
 import 'account_form_screen.dart';
 import 'ledger_screen.dart';
@@ -15,7 +16,7 @@ class AccountsScreen extends StatefulWidget {
   State<AccountsScreen> createState() => _AccountsScreenState();
 }
 
-class _AccountsScreenState extends State<AccountsScreen> {
+class _AccountsScreenState extends State<AccountsScreen> with Reloadable<AccountsScreen> {
   final _db = DatabaseHelper.instance;
   List<AccountModel> _accounts = [];
   bool _loading = true;
@@ -25,6 +26,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
     super.initState();
     _load();
   }
+
+  @override
+  Future<void> reload() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);

@@ -12,12 +12,19 @@ import '../models/project.dart';
 import '../models/project_price_event.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
+import '../utils/formatters.dart';
+import 'backup_crypto.dart';
 
 /// نسخه فعلی فرمت فایل پشتیبان. فقط همین نسخه برای Restore پشتیبانی
 /// می‌شود؛ طبق سیاست این مرحله («سیستم Migration کامل بین نسخه‌ها ساخته
 /// نشود مگر ضروری باشد»)، نسخه‌های دیگر با خطای صریح رد می‌شوند، نه حدس
 /// زده یا به‌زور Import شوند.
 const int kBackupFormatVersion = 5;
+
+/// کلید تنظیمات برای تاریخ آخرین پشتیبان‌گیری موفق - در همان جدول
+/// key-value تنظیمات موجود ذخیره می‌شود (بدون هیچ جدول/ستون جدید)، برای
+/// یادآور پشتیبان‌گیری در داشبورد.
+const String kLastBackupDateSettingKey = 'last_backup_date';
 
 /// استثنای اختصاصی برای خطاهای اعتبارسنجی/بازیابی پشتیبان - پیام آن برای
 /// نمایش مستقیم به کاربر مناسب است.
@@ -28,15 +35,39 @@ class BackupValidationException implements Exception {
   String toString() => message;
 }
 
+/// فایل انتخاب‌شده رمزنگاری‌شده است ولی رمز عبوری داده نشده - سیگنالی برای
+/// لایه UI تا از کاربر رمز عبور بپرسد و importBackupFile را دوباره با آن
+/// فراخوانی کند؛ این استثنا به‌خودی‌خود به معنای خطا/فایل نامعتبر نیست.
+class BackupPasswordRequiredException implements Exception {
+  @override
+  String toString() => 'این فایل پشتیبان رمزنگاری‌شده است.';
+}
+
 class BackupService {
   final _db = DatabaseHelper.instance;
 
-  Future<String> exportToFile() async {
+  /// [password] اختیاری است: اگر داده شود، کل فایل پشتیبان با
+  /// AES-256-GCM رمزنگاری می‌شود (رجوع به BackupCrypto) - چون این فایل
+  /// معمولاً از طریق کانال‌های عمومی (پیامک/ایمیل/فضای ابری) به اشتراک
+  /// گذاشته می‌شود و بدون رمز، کل اطلاعات مالی خام قابل‌خواندن است. فراموش
+  /// کردن این رمز به معنای از دست رفتن کامل و بدون بازگشت آن فایل خاص است
+  /// - هیچ راه دیگری برای رمزگشایی وجود ندارد.
+  Future<String> exportToFile({String? password}) async {
     final data = await collectBackupData();
+    final plainJson = const JsonEncoder.withIndent('  ').convert(data);
+    final content = (password != null && password.isNotEmpty)
+        ? jsonEncode(BackupCrypto.encrypt(plainJson, password))
+        : plainJson;
+
     final dir = await getTemporaryDirectory();
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${dir.path}/daftaryar_backup_$stamp.json');
-    await file.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
+    await file.writeAsString(content);
+
+    // ثبت تاریخ آخرین پشتیبان‌گیری موفق - برای یادآور داشبورد. همین‌جا (نه
+    // پس از تأیید Share) ثبت می‌شود چون گزارش نتیجه Share روی همه پلتفرم‌ها
+    // قابل‌اتکا نیست؛ فایل پشتیبان با موفقیت ساخته شده که خودش هدف اصلی است.
+    await _db.setSetting(kLastBackupDateSettingKey, todayJalaliString());
 
     await Share.shareXFiles([XFile(file.path)], text: 'پشتیبان دفتریار');
     return file.path;
@@ -52,8 +83,27 @@ class BackupService {
   Future<Map<String, dynamic>> collectBackupData() async {
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final projects = await _db.getProjects();
-    final accounts = await _db.getAccounts();
-    final entries = await _db.getJournalEntries();
+    // getAccounts برای نمایش با 'type ASC, code ASC' مرتب می‌شود. زیرحساب‌های
+    // بدون کد (مثلاً «آورده مالک» زیر «سرمایه») در SQLite با code=NULL در
+    // ترتیب صعودی قبل از هر مقدار غیر-NULL می‌آیند - یعنی زیرحساب می‌تواند
+    // در فایل پشتیبان قبل از والدش (که کد دارد، مثل «سرمایه» با کد ۳۰۰۰)
+    // ظاهر شود. بازیابی این لیست را همان‌طور که هست دوباره درج می‌کند، پس
+    // به parentId والدی سند می‌زند که هنوز در دیتابیس تازه ساخته نشده -
+    // FOREIGN KEY constraint failed. دقیقاً همان کلاس باگ اسناد حسابداری
+    // زیر (رجوع به توضیح entries) - ترتیب صدور باید ترتیب واقعی درج (id
+    // صعودی) باشد، که تضمین می‌کند والد همیشه پیش از فرزندش ساخته شده.
+    final accounts = await _db.getAccounts()
+      ..sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
+    // getJournalEntries برای نمایش (جدیدترین اول) با 'date DESC, id DESC'
+    // مرتب می‌شود. اگر همین ترتیب مستقیم در فایل پشتیبان صادر شود، در
+    // بازیابی اتمیک (replaceExisting) اسناد به ترتیب معکوس دوباره درج
+    // می‌شوند - و کنترل Overpayment سطح طرف‌حساب/پروژه که مانده لحظه‌ای
+    // حساب را می‌سنجد، اسناد چندگانه هم‌تاریخ (بسیار رایج) را به‌اشتباه رد
+    // می‌کند، چون سند «دریافت» پیش از سند «شناسایی درآمد» که طلب را ساخته
+    // بازپخش می‌شود. ترتیب صدور باید همان ترتیب واقعی درج (id صعودی) باشد
+    // تا بازیابی، دقیقاً به همان توالی که رخ داده، بازپخش شود.
+    final entries = await _db.getJournalEntries()
+      ..sort((a, b) => (a.id ?? 0).compareTo(b.id ?? 0));
     final allSettings = await _db.getAllSettings();
     // امنیت (اولویت ۳ این مرحله): تنظیمات حساس/امنیتی (pin_hash و هر
     // Setting دیگری که ماهیت قفل دستگاه را کنترل می‌کند) هرگز نباید در
@@ -154,15 +204,24 @@ class BackupService {
   /// (پاک‌سازی + Import) داخل یک Transaction واقعی SQLite انجام می‌شود:
   /// یا کل Backup با موفقیت جایگزین می‌شود، یا در صورت هر خطا، دیتابیس
   /// دقیقاً به‌همان وضعیت پیش از Restore بازمی‌گردد (Rollback خودکار).
-  Future<void> importFromPickedFile({bool replaceExisting = false}) async {
+  Future<void> importFromPickedFile({bool replaceExisting = false, String? password}) async {
+    final file = await pickBackupFile();
+    if (file == null) return;
+    await importBackupFile(file, replaceExisting: replaceExisting, password: password);
+  }
+
+  /// فقط انتخاب فایل (بدون Import) - جدا شده تا مسیر UI بتواند ابتدا فایل
+  /// را انتخاب کند و تنها در صورت رمزنگاری‌شده‌بودنِ آن (خطای
+  /// BackupPasswordRequiredException از importBackupFile)، رمز عبور را از
+  /// کاربر بپرسد و importBackupFile را با همان File دوباره فراخوانی کند -
+  /// بدون این‌که کاربر مجبور شود فایل را دوباره انتخاب کند.
+  Future<File?> pickBackupFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
     );
-    if (result == null || result.files.single.path == null) return;
-
-    final file = File(result.files.single.path!);
-    await importBackupFile(file, replaceExisting: replaceExisting);
+    if (result == null || result.files.single.path == null) return null;
+    return File(result.files.single.path!);
   }
 
   /// هسته قابل‌تست Restore - مستقیم یک File می‌گیرد (نه از طریق FilePicker
@@ -170,13 +229,31 @@ class BackupService {
   /// کرد. تمام منطق واقعی Validation/Atomicity این‌جا متمرکز است؛
   /// "importFromPickedFile" فقط یک Wrapper نازک روی همین متد برای مسیر UI
   /// است - رفتار برای کاربر نهایی هیچ تغییری نکرده است.
-  Future<void> importBackupFile(File file, {bool replaceExisting = false}) async {
+  Future<void> importBackupFile(File file,
+      {bool replaceExisting = false, String? password}) async {
     final content = await file.readAsString();
-    final Map<String, dynamic> data;
+    final Map<String, dynamic> raw;
     try {
-      data = jsonDecode(content) as Map<String, dynamic>;
+      raw = jsonDecode(content) as Map<String, dynamic>;
     } catch (_) {
       throw BackupValidationException('فایل انتخاب‌شده یک JSON معتبر نیست.');
+    }
+
+    // اگر فایل با رمز عبور رمزنگاری شده (envelope با کلید نشان‌گر)، ابتدا
+    // باید رمزگشایی شود؛ بدون رمز عبور، سیگنال BackupPasswordRequiredException
+    // پرتاب می‌شود تا لایه UI آن را از کاربر بپرسد. فایل‌های پشتیبان قدیمی
+    // (بدون رمز) اصلاً این کلید را ندارند و مثل قبل مستقیم پردازش می‌شوند.
+    Map<String, dynamic> data = raw;
+    if (BackupCrypto.isEncryptedEnvelope(raw)) {
+      if (password == null || password.isEmpty) {
+        throw BackupPasswordRequiredException();
+      }
+      final decryptedJson = BackupCrypto.decrypt(raw, password);
+      try {
+        data = jsonDecode(decryptedJson) as Map<String, dynamic>;
+      } catch (_) {
+        throw BackupValidationException('محتوای رمزگشایی‌شده این فایل پشتیبان یک JSON معتبر نیست.');
+      }
     }
 
     // اعتبارسنجی کامل پیش از هرگونه تغییر در دیتابیس - چه در حالت
@@ -250,11 +327,16 @@ class BackupService {
     // حساب‌ها: حساب‌های سیستمی هرگز دوباره ساخته نمی‌شوند - همیشه به حساب
     // سیستمی موجود روی دستگاه مقصد Map می‌شوند (اولویت ۲ این مرحله).
     // اولویت تطبیق: systemKey (شناسه پایدار و صحیح) → در صورت غیاب آن
-    // (فایل پشتیبان بسیار قدیمی)، fallback به نام+نوع.
+    // (فایل پشتیبان بسیار قدیمی)، fallback به نام+نوع. این تطبیق هیچ
+    // وابستگی ترتیبی ندارد (چیزی درج نمی‌شود، فقط Map می‌شود).
     final Map<int, int> accountIdMap = {};
     final existingAccounts = await _db.getAccounts(executor: executor);
-    for (final a in (data['accounts'] as List? ?? [])) {
-      final account = AccountModel.fromMap(Map<String, dynamic>.from(a));
+    final rawAccounts = (data['accounts'] as List? ?? [])
+        .map((a) => AccountModel.fromMap(Map<String, dynamic>.from(a)))
+        .toList();
+
+    final nonSystemAccounts = <AccountModel>[];
+    for (final account in rawAccounts) {
       if (account.isSystem) {
         AccountModel? match;
         if (account.systemKey != null) {
@@ -272,17 +354,55 @@ class BackupService {
           continue;
         }
       }
-      final mappedParentId =
-          account.parentId != null ? (accountIdMap[account.parentId] ?? account.parentId) : null;
-      final newId = await _db.insertAccount(
-        account.copyWith(
-          parentId: mappedParentId,
-          clearParent: mappedParentId == null,
-          isSystem: false,
-        ),
-        executor,
-      );
-      accountIdMap[account.id ?? -1] = newId;
+      nonSystemAccounts.add(account);
+    }
+
+    // چند-پاسی و مقاوم به ترتیب: فایل‌های پشتیبان قدیمی‌تر از رفع این باگ
+    // ممکن است زیرحساب را قبل از والدش فهرست کرده باشند (collectBackupData
+    // قبلاً حساب‌ها را با ترتیب نمایشی type/code صادر می‌کرد که برای
+    // زیرحساب‌های بدون کد والد را بعد از فرزند می‌آورد). به‌جای این‌که به
+    // ترتیب ورودی فایل اعتماد شود (و در نبود Map شدنِ والد، به id قدیمی و
+    // بی‌ربط سند بزند - FOREIGN KEY constraint)، هر پاس فقط حساب‌هایی را
+    // درج می‌کند که والدشان (اگر دارند) از قبل Map شده؛ تا وقتی پیشرفتی
+    // حاصل شود تکرار می‌شود.
+    var remaining = nonSystemAccounts;
+    while (remaining.isNotEmpty) {
+      final nextRemaining = <AccountModel>[];
+      var progressed = false;
+      for (final account in remaining) {
+        final parentUnresolved =
+            account.parentId != null && !accountIdMap.containsKey(account.parentId);
+        if (parentUnresolved) {
+          nextRemaining.add(account);
+          continue;
+        }
+        progressed = true;
+        final mappedParentId =
+            account.parentId != null ? accountIdMap[account.parentId] : null;
+        final newId = await _db.insertAccount(
+          account.copyWith(
+            parentId: mappedParentId,
+            clearParent: mappedParentId == null,
+            isSystem: false,
+          ),
+          executor,
+        );
+        accountIdMap[account.id ?? -1] = newId;
+      }
+      if (!progressed) {
+        // زنجیره غیرقابل‌حل واقعی (parentId اشاره به چیزی که اصلاً در فایل
+        // نیست، نه صرفاً ترتیب اشتباه) - به‌جای شکست کل Restore به‌خاطر
+        // چند رکورد خراب، بدون والد درج می‌شوند.
+        for (final account in nextRemaining) {
+          final newId = await _db.insertAccount(
+            account.copyWith(clearParent: true, isSystem: false),
+            executor,
+          );
+          accountIdMap[account.id ?? -1] = newId;
+        }
+        break;
+      }
+      remaining = nextRemaining;
     }
 
     for (final e in (data['journalEntries'] as List? ?? [])) {

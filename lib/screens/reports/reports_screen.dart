@@ -1,36 +1,75 @@
 import 'package:flutter/material.dart';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../models/cash_receipt_category.dart';
 import '../../models/financial_reports.dart';
-import '../../models/management_dashboard_data.dart';
-import '../../services/management_dashboard_service.dart';
-import '../../utils/dashboard_period.dart';
-import '../dashboard/widgets/dashboard_sections.dart';
-import '../dashboard/widgets/period_selector_widget.dart';
+import '../../models/journal_entry.dart';
+import '../../services/financial_reporting_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
-import '../operational/operational_performance_screen.dart';
-import 'outstanding_receivables_screen.dart';
+import '../../utils/reloadable.dart';
+import '../journal/journal_entry_detail_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
-import '../../widgets/section_title.dart';
-import '../../services/pdf_export_service.dart';
-import '../../services/excel_export_service.dart';
 
 enum _RangeMode { month, fiscalYear, custom }
 
+/// معیار مرتب‌سازی مشتریان در تب «سود مشتریان» - جایگزین صفحه حذف‌شده
+/// «طلب‌های باز»: «سود» دیدگاه سودآوری است، «فوریت پیگیری» همان دیدگاه
+/// قدیمی «پروژه‌های معلق/پیش‌دریافت» (کدام مشتری بیشترین پول معلق - واقعی
+/// یا تخمینی - را دارد)، فقط این‌بار به‌عنوان یک مرتب‌سازی در همین گزارش،
+/// نه یک صفحه جدا.
+enum _CustomerSort { profit, urgency }
+
 class ReportsScreen extends StatefulWidget {
-  const ReportsScreen({super.key});
+  /// کدام تب اول باز شود - برای لینک مستقیم از داشبورد (مثلاً کارت
+  /// «پیش‌دریافت» مستقیم به تب «سود مشتریان» می‌رود).
+  final int initialTabIndex;
+  /// اگر true باشد، تب «سود مشتریان» با مرتب‌سازی «فوریت پیگیری» باز
+  /// می‌شود، نه «سود» (پیش‌فرض) - برای کارت‌های پیش‌دریافت/پروژه در جریان.
+  final bool sortCustomersByUrgency;
+  const ReportsScreen({super.key, this.initialTabIndex = 0, this.sortCustomersByUrgency = false});
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
-class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 5, vsync: this);
+class _ReportsScreenState extends State<ReportsScreen>
+    with SingleTickerProviderStateMixin
+    implements Reloadable<ReportsScreen> {
+  late final TabController _tab =
+      TabController(length: 2, vsync: this, initialIndex: widget.initialTabIndex);
+  final _cashActivityKey = GlobalKey<State<_CashActivityTab>>();
+  final _customerProfitKey = GlobalKey<State<_CustomerProfitTab>>();
+  int _lastTabIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _lastTabIndex = _tab.index;
+    _tab.addListener(_onTabChanged);
+  }
+
+  @override
+  void dispose() {
+    _tab.removeListener(_onTabChanged);
+    _tab.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tab.indexIsChanging || _tab.index == _lastTabIndex) return;
+    _lastTabIndex = _tab.index;
+    reload();
+  }
+
+  @override
+  Future<void> reload() {
+    triggerReload(_tab.index == 0 ? _cashActivityKey : _customerProfitKey);
+    return Future.value();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,12 +77,6 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
       appBar: AppBar(
         title: const Text('گزارش‌ها'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.receipt_long_outlined),
-            tooltip: 'طلب‌های باز',
-            onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const OutstandingReceivablesScreen())),
-          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'تنظیمات',
@@ -56,263 +89,20 @@ class _ReportsScreenState extends State<ReportsScreen> with SingleTickerProvider
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           tabs: const [
-            Tab(text: 'سود و زیان'),
-            Tab(text: 'تراز آزمایشی'),
-            Tab(text: 'تحلیل و روند'),
-            Tab(text: 'عملکرد عملیاتی'),
-            Tab(text: 'تحلیل مدیریتی'),
+            Tab(text: 'دریافت و هزینه'),
+            Tab(text: 'سود مشتریان'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tab,
-        children: const [
-          _ProfitLossTab(),
-          _TrialBalanceTab(),
-          _AnalysisTab(),
-          OperationalPerformanceScreen(embedded: true),
-          _ManagementAnalysisTab(),
+        children: [
+          _CashActivityTab(key: _cashActivityKey),
+          _CustomerProfitTab(
+              key: _customerProfitKey,
+              initialSort: widget.sortCustomersByUrgency ? _CustomerSort.urgency : _CustomerSort.profit),
         ],
       ),
-    );
-  }
-}
-
-/// ---------------- تب سود و زیان: صورت استاندارد سبک سنتی ----------------
-/// تب سود و زیان سنتی (بر مبنای نوع حساب - Income/Expense Chart of Accounts).
-///
-/// طبقه‌بندی Audit مرحله ۲.۱ (Reporting Layer Closure): این تب و توابع
-/// `accountTypeBreakdown` که مصرف می‌کند، **تکرار لایه Metrics/Reporting
-/// نیستند** (Category 2 - محاسبه‌ای که به‌درستی در UI/این لایه باقی می‌ماند).
-/// دلیل: این‌جا خط‌به‌خط بر مبنای **نام هر حساب** در دفتر کل شکسته می‌شود
-/// (مثلاً «درآمد نقشه‌برداری» جدا از «درآمد پیگیری ثبتی»)، در حالی که لایه
-/// Reporting/Metrics فقط مجموع‌های طبقه‌بندی‌شده بر اساس systemKey
-/// (Project Revenue/Direct Cost/Overhead/Office Expense) را می‌دهد، نه
-/// شکست ریز به تفکیک تک‌تک حساب‌ها. این دو یک مفهوم مشترک با دو سطح
-/// جزئیات متفاوت نیستند؛ یک گزارش «تراز حسابداری سنتی» در مقابل یک گزارش
-/// «اقتصاد پروژه» است. جایگزین‌کردن این تب با خروجی Reporting Layer باعث
-/// از‌دست‌رفتن جزئیات تک‌حسابی می‌شد که این تب دقیقاً برایش ساخته شده.
-class _ProfitLossTab extends StatefulWidget {
-  const _ProfitLossTab();
-
-  @override
-  State<_ProfitLossTab> createState() => _ProfitLossTabState();
-}
-
-class _ProfitLossTabState extends State<_ProfitLossTab> {
-  final _db = DatabaseHelper.instance;
-  final _pdf = PdfExportService();
-  final _excelExport = ExcelExportService();
-  _RangeMode _mode = _RangeMode.month;
-  String _fromDate = '';
-  String _toDate = '';
-
-  Map<String, double> _incomeLines = {};
-  Map<String, double> _expenseLines = {};
-  bool _loading = true;
-  bool _exporting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _applyMode(_RangeMode.month);
-  }
-
-  Future<void> _applyMode(_RangeMode mode) async {
-    final today = Jalali.now();
-    List<Jalali> range;
-    if (mode == _RangeMode.month) {
-      range = currentMonthToDateRange(today);
-    } else if (mode == _RangeMode.fiscalYear) {
-      // مورد ۹/۱۰ مرحله ۲ / بند Fiscal Year مرحله ۲.۱: این خط از همان تابع
-      // مرجع سال مالی (currentFiscalYearRange) استفاده می‌کند که
-      // DashboardPeriodResolver.resolve هم داخلاً برای پیش‌نمایش
-      // thisYear/lastYear از آن استفاده می‌کند - یعنی منطق سال مالی
-      // موازی یا دوباره‌سازی‌شده نیست، فقط نقطه ورودی متفاوتی به همان
-      // تابع مشترک است. علت استفاده مستقیم (نه از طریق DashboardPeriodResolver
-      // خودش): این تب سه حالت (این‌ماه/سال‌مالی/سفارشی) دارد که با Enum
-      // DashboardPeriodPreset یک‌به‌یک منطبق نیست؛ عبورش از آن Enum یک
-      // تغییر ساختاری بزرگ‌تر از محدوده این مرحله (Closure، نه Redesign) بود.
-      final fy = await _db.getFiscalYearStart();
-      range = currentFiscalYearRange(fy['month']!, fy['day']!, today);
-    } else {
-      range = currentMonthToDateRange(today); // نقطه شروع پیش‌فرض برای انتخاب دستی
-    }
-    setState(() {
-      _mode = mode;
-      _fromDate = jalaliToString(range[0]);
-      _toDate = jalaliToString(range[1]);
-    });
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    final income = await _db.accountTypeBreakdown(kAccountIncome, fromDate: _fromDate, toDate: _toDate);
-    final expense = await _db.accountTypeBreakdown(kAccountExpense, fromDate: _fromDate, toDate: _toDate);
-    setState(() {
-      _incomeLines = income;
-      _expenseLines = expense;
-      _loading = false;
-    });
-  }
-
-  Future<void> _exportPdf() async {
-    setState(() => _exporting = true);
-    try {
-      await _pdf.exportProfitLoss(
-        fromDate: _fromDate,
-        toDate: _toDate,
-        incomeLines: _incomeLines,
-        expenseLines: _expenseLines,
-      );
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
-  }
-
-  Future<void> _exportExcel() async {
-    setState(() => _exporting = true);
-    try {
-      await _excelExport.exportProfitLoss(
-        fromDate: _fromDate,
-        toDate: _toDate,
-        incomeLines: _incomeLines,
-        expenseLines: _expenseLines,
-      );
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final totalIncome = _incomeLines.values.fold<double>(0, (s, v) => s + v);
-    final totalExpense = _expenseLines.values.fold<double>(0, (s, v) => s + v);
-    final net = totalIncome - totalExpense;
-
-    return BlueprintGridBackground(
-      child: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              children: [
-                _RangeSelector(
-                  mode: _mode,
-                  onChanged: _applyMode,
-                ),
-                if (_mode == _RangeMode.custom) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: JalaliDateField(
-                          label: 'از تاریخ',
-                          value: _fromDate,
-                          onChanged: (v) {
-                            _fromDate = v;
-                            _load();
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: JalaliDateField(
-                          label: 'تا تاریخ',
-                          value: _toDate,
-                          onChanged: (v) {
-                            _toDate = v;
-                            _load();
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 18),
-
-                Container(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: AppColors.gridLine)),
-                  ),
-                  child: Column(
-                    children: [
-                      const Text('صورت سود و زیان',
-                          style: TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                      const SizedBox(height: 4),
-                      Text(
-                        'از ${formatJalaliLong(_fromDate)} تا ${formatJalaliLong(_toDate)}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          TextButton.icon(
-                            onPressed: _exporting ? null : _exportPdf,
-                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                            label: const Text('خروجی PDF', style: TextStyle(fontSize: 12)),
-                          ),
-                          const SizedBox(width: 8),
-                          TextButton.icon(
-                            onPressed: _exporting ? null : _exportExcel,
-                            icon: const Icon(Icons.table_chart_outlined, size: 16),
-                            label: const Text('خروجی اکسل', style: TextStyle(fontSize: 12)),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-                const SectionTitle('درآمدها'),
-                const Divider(color: AppColors.gridLine, height: 1),
-                if (_incomeLines.isEmpty)
-                  const _EmptyLine('درآمدی در این بازه ثبت نشده')
-                else
-                  ..._incomeLines.entries.map((e) => _StatementRow(label: e.key, value: e.value)),
-                _StatementRow(label: 'جمع درآمدها', value: totalIncome, isSubtotal: true),
-
-                const SizedBox(height: 22),
-                const SectionTitle('هزینه‌ها'),
-                const Divider(color: AppColors.gridLine, height: 1),
-                if (_expenseLines.isEmpty)
-                  const _EmptyLine('هزینه‌ای در این بازه ثبت نشده')
-                else
-                  ..._expenseLines.entries.map((e) => _StatementRow(label: e.key, value: e.value)),
-                _StatementRow(label: 'جمع هزینه‌ها', value: totalExpense, isSubtotal: true),
-
-                const SizedBox(height: 22),
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      top: BorderSide(color: AppColors.brass, width: 2),
-                      bottom: BorderSide(color: AppColors.brass, width: 2),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(net >= 0 ? 'سود خالص' : 'زیان خالص',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-                      Text(
-                        formatMoney(net.abs()),
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w800,
-                          color: net >= 0 ? AppColors.positive : AppColors.negative,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
     );
   }
 }
@@ -357,87 +147,357 @@ class _RangeSelector extends StatelessWidget {
   }
 }
 
-/// ردیف یک قلم در صورت سود و زیان؛ اگر جمع‌بندی بخش باشد با خط برنزی مشخص می‌شود
-class _StatementRow extends StatelessWidget {
-  final String label;
-  final double value;
-  final bool isSubtotal;
+/// ---------------- تب دریافت و هزینه: فعالیت نقدی یک بازه ----------------
+/// جایگزین «وضعیت مالی» قبلی. برخلاف صورت سود و زیان (که بر مبنای شناسایی
+/// حسابداری درآمد است)، این تب کاملاً نقدی است: چقدر پول واقعی وارد صندوق/
+/// بانک شده و چقدر خارج شده - بدون درگیرکردن کاربر با تفاوت پیش‌دریافت/
+/// درآمد نهایی‌شده. با زدن روی هرکدام، به تفکیک زیردسته و بعد فهرست تک‌تک
+/// اسناد می‌رود.
+class _CashActivityTab extends StatefulWidget {
+  const _CashActivityTab({super.key});
 
-  const _StatementRow({required this.label, required this.value, this.isSubtotal = false});
+  @override
+  State<_CashActivityTab> createState() => _CashActivityTabState();
+}
+
+class _CashActivityTabState extends State<_CashActivityTab> with Reloadable<_CashActivityTab> {
+  final _db = DatabaseHelper.instance;
+  _RangeMode _mode = _RangeMode.month;
+  String _fromDate = '';
+  String _toDate = '';
+  double _received = 0;
+  double _expense = 0;
+  double _ownerDraw = 0;
+  double _totalCash = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _applyMode(_RangeMode.month);
+  }
+
+  @override
+  Future<void> reload() => _load();
+
+  Future<void> _applyMode(_RangeMode mode) async {
+    final today = Jalali.now();
+    List<Jalali> range;
+    if (mode == _RangeMode.month) {
+      range = currentMonthToDateRange(today);
+    } else if (mode == _RangeMode.fiscalYear) {
+      final fy = await _db.getFiscalYearStart();
+      range = currentFiscalYearRange(fy['month']!, fy['day']!, today);
+    } else {
+      range = currentMonthToDateRange(today);
+    }
+    setState(() {
+      _mode = mode;
+      _fromDate = jalaliToString(range[0]);
+      _toDate = jalaliToString(range[1]);
+    });
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final receiptsBreakdown =
+        await _db.cashReceiptsBreakdown(fromDate: _fromDate, toDate: _toDate);
+    final expenseTotal =
+        await _db.totalAccountTypeBalance(kAccountExpense, fromDate: _fromDate, toDate: _toDate);
+    final ownerDrawBreakdown =
+        await _db.ownerDrawBreakdown(fromDate: _fromDate, toDate: _toDate);
+    final totalCash = await _db.cashBalanceThrough(throughDate: _toDate);
+    setState(() {
+      _received = receiptsBreakdown.values.fold<double>(0, (s, v) => s + v);
+      _expense = expenseTotal;
+      _ownerDraw = ownerDrawBreakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+      _totalCash = totalCash;
+      _loading = false;
+    });
+  }
+
+  void _openReceipts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => _CashReceiptBreakdownScreen(fromDate: _fromDate, toDate: _toDate)),
+    );
+  }
+
+  void _openExpenses() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => _ExpenseBreakdownScreen(fromDate: _fromDate, toDate: _toDate)),
+    );
+  }
+
+  void _openOwnerDraws() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => _OwnerDrawBreakdownScreen(fromDate: _fromDate, toDate: _toDate)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: EdgeInsets.only(top: isSubtotal ? 12 : 10, bottom: 10),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: isSubtotal ? AppColors.brass : AppColors.gridLine,
-            width: isSubtotal ? 1.4 : 1,
+    final net = _received - _expense - _ownerDraw;
+    return BlueprintGridBackground(
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                _RangeSelector(mode: _mode, onChanged: _applyMode),
+                if (_mode == _RangeMode.custom) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: JalaliDateField(
+                          label: 'از تاریخ',
+                          value: _fromDate,
+                          onChanged: (v) {
+                            _fromDate = v;
+                            _load();
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: JalaliDateField(
+                          label: 'تا تاریخ',
+                          value: _toDate,
+                          onChanged: (v) {
+                            _toDate = v;
+                            _load();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 18),
+                Text(
+                  'از ${formatJalaliLong(_fromDate)} تا ${formatJalaliLong(_toDate)}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                _CashSummaryTile(
+                  label: 'دریافتی',
+                  amount: _received,
+                  color: AppColors.positive,
+                  icon: Icons.arrow_downward_rounded,
+                  onTap: _openReceipts,
+                ),
+                const SizedBox(height: 10),
+                _CashSummaryTile(
+                  label: 'هزینه',
+                  amount: _expense,
+                  color: AppColors.negative,
+                  icon: Icons.arrow_upward_rounded,
+                  onTap: _openExpenses,
+                ),
+                if (_ownerDraw != 0) ...[
+                  const SizedBox(height: 10),
+                  _CashSummaryTile(
+                    label: 'برداشت مالک/شرکا',
+                    amount: _ownerDraw,
+                    color: AppColors.negative,
+                    icon: Icons.arrow_upward_rounded,
+                    onTap: _openOwnerDraws,
+                  ),
+                ],
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.brass, width: 1.4),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('مانده این بازه',
+                          style: TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text(
+                        formatMoney(net.abs()),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: net >= 0 ? AppColors.positive : AppColors.negative,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'دریافتی − هزینه − برداشت مالک/شرکا، فقط برای همین بازه',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('موجودی کل صندوق/بانک',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                      Text(formatMoney(_totalCash),
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'موجودی واقعی نقد/بانک تا پایان همین بازه (نه فقط همین بازه؛ شامل مانده‌های قبل هم است).',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class _CashSummaryTile extends StatelessWidget {
+  final String label;
+  final double amount;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _CashSummaryTile({
+    required this.label,
+    required this.amount,
+    required this.color,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: color.withValues(alpha: 0.14),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ),
+              Text(formatMoney(amount),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: color)),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_left, color: AppColors.textSecondary, size: 20),
+            ],
           ),
         ),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: isSubtotal ? AppColors.textPrimary : AppColors.textSecondary,
-              fontWeight: isSubtotal ? FontWeight.w700 : FontWeight.normal,
+    );
+  }
+}
+
+/// یک ردیف زیردسته (منبع دریافتی یا زیرحساب هزینه) با مبلغ و اقدام هنگام لمس
+class _BreakdownRow {
+  final String label;
+  final double amount;
+  final VoidCallback onTap;
+  const _BreakdownRow({required this.label, required this.amount, required this.onTap});
+}
+
+/// نمای مشترک فهرست زیردسته‌ها (چه دریافتی چه هزینه)
+class _BreakdownListView extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final double total;
+  final List<_BreakdownRow> rows;
+  const _BreakdownListView(
+      {required this.title, required this.subtitle, required this.total, required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: BlueprintGridBackground(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(subtitle,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: AppColors.brass, width: 1.4)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('جمع کل',
+                      style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                  Text(formatMoney(total),
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                ],
+              ),
             ),
-          ),
-          Text(
-            formatMoney(value),
-            style: TextStyle(
-              fontSize: isSubtotal ? 15 : 14,
-              fontWeight: isSubtotal ? FontWeight.w800 : FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            if (rows.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('داده‌ای در این بازه وجود ندارد.',
+                    textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+              )
+            else
+              ...rows.map((r) => Card(
+                    child: ListTile(
+                      title: Text(r.label),
+                      trailing: Text(formatMoney(r.amount),
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      onTap: r.onTap,
+                    ),
+                  )),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _EmptyLine extends StatelessWidget {
-  final String text;
-  const _EmptyLine(this.text);
+/// دریافتی یک بازه به تفکیک منبع - زدن روی هر منبع، فهرست اسناد همان منبع را باز می‌کند
+class _CashReceiptBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  const _CashReceiptBreakdownScreen({required this.fromDate, required this.toDate});
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Text(text, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
-    );
-  }
+  State<_CashReceiptBreakdownScreen> createState() => _CashReceiptBreakdownScreenState();
 }
 
-/// ---------------- تب تراز آزمایشی: مانده تجمعی همه حساب‌ها ----------------
-/// تب تراز آزمایشی (Trial Balance).
-///
-/// طبقه‌بندی Audit مرحله ۲.۱: این یک آرتیفکت بنیادی حسابداری دوطرفه است
-/// (اثبات تساوی جمع بدهکار و بستانکار کل دفتر حساب‌ها، تجمعی از ابتدا تا
-/// امروز) - مفهومی کاملاً متفاوت و مستقل از «اقتصاد پروژه/مشتری» که لایه
-/// Metrics/Reporting پوشش می‌دهد. `_db.trialBalance()` تنها و مرجع صحیح
-/// این داده است؛ هیچ سرویس Metrics/Reporting معادلی برایش وجود ندارد یا
-/// باید داشته باشد (Category 2).
-class _TrialBalanceTab extends StatefulWidget {
-  const _TrialBalanceTab();
-
-  @override
-  State<_TrialBalanceTab> createState() => _TrialBalanceTabState();
-}
-
-class _TrialBalanceTabState extends State<_TrialBalanceTab> {
+class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen> {
   final _db = DatabaseHelper.instance;
-  final _pdf = PdfExportService();
-  final _excelExport = ExcelExportService();
-  List<Map<String, dynamic>> _rows = [];
+  Map<CashReceiptCategory, double> _breakdown = {};
+  Set<int> _cashAccountIds = {};
   bool _loading = true;
-  bool _exporting = false;
 
   @override
   void initState() {
@@ -446,46 +506,525 @@ class _TrialBalanceTabState extends State<_TrialBalanceTab> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final rows = await _db.trialBalance();
+    final breakdown =
+        await _db.cashReceiptsBreakdown(fromDate: widget.fromDate, toDate: widget.toDate);
+    final cashAccounts = await _db.getCashAccounts();
     setState(() {
-      _rows = rows;
+      _breakdown = breakdown;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
       _loading = false;
     });
   }
 
-  List<Map<String, dynamic>> get _nonZeroRows => _rows
-      .where((r) => (r['debit'] as double) != 0 || (r['credit'] as double) != 0)
-      .map((r) => {
-            'name': (r['account'] as AccountModel).name,
-            'debit': r['debit'] as double,
-            'credit': r['credit'] as double,
-          })
-      .toList();
+  int _amountOf(JournalEntryModel e) =>
+      e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.debit);
 
-  Future<void> _exportPdf() async {
-    setState(() => _exporting = true);
-    try {
-      await _pdf.exportTrialBalance(rows: _nonZeroRows);
-    } finally {
-      if (mounted) setState(() => _exporting = false);
+  void _openCategory(CashReceiptCategory category) {
+    // دسته «پروژه‌ها» اول به تفکیک مشتری می‌رود (نه مستقیم فهرست تخت اسناد) -
+    // تا کاربر یک‌نگاه ببیند از هر مشتری چقدر دریافت کرده.
+    if (category == CashReceiptCategory.projects) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _CashReceiptCustomerBreakdownScreen(
+              fromDate: widget.fromDate, toDate: widget.toDate),
+        ),
+      );
+      return;
     }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: category.label,
+          loadEntries: () => _db.cashReceiptEntries(
+              category: category, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: _amountOf,
+        ),
+      ),
+    );
   }
 
-  Future<void> _exportExcel() async {
-    setState(() => _exporting = true);
-    try {
-      await _excelExport.exportTrialBalance(_nonZeroRows);
-    } finally {
-      if (mounted) setState(() => _exporting = false);
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final total = _breakdown.values.fold<double>(0, (s, v) => s + v);
+    final rows = CashReceiptCategory.values
+        .where((c) => (_breakdown[c] ?? 0) != 0)
+        .map((c) => _BreakdownRow(
+            label: c.label, amount: _breakdown[c] ?? 0, onTap: () => _openCategory(c)))
+        .toList();
+    return _BreakdownListView(
+      title: 'دریافتی به تفکیک منبع',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
+
+/// دریافتی از مشتریان/پروژه‌ها در یک بازه، به تفکیک هر مشتری - زدن روی هر
+/// مشتری، فهرست اسناد دریافتی همان مشتری را باز می‌کند.
+class _CashReceiptCustomerBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  const _CashReceiptCustomerBreakdownScreen({required this.fromDate, required this.toDate});
+
+  @override
+  State<_CashReceiptCustomerBreakdownScreen> createState() =>
+      _CashReceiptCustomerBreakdownScreenState();
+}
+
+class _CashReceiptCustomerBreakdownScreenState extends State<_CashReceiptCustomerBreakdownScreen> {
+  final _db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _breakdown = [];
+  Set<int> _cashAccountIds = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final breakdown =
+        await _db.cashReceiptsByCustomer(fromDate: widget.fromDate, toDate: widget.toDate);
+    breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final cashAccounts = await _db.getCashAccounts();
+    setState(() {
+      _breakdown = breakdown;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
+      _loading = false;
+    });
+  }
+
+  int _amountOf(JournalEntryModel e) =>
+      e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.debit);
+
+  void _openCustomer(int? counterpartyId, String name) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: name,
+          loadEntries: () => _db.cashReceiptEntriesForCustomer(
+              counterpartyId: counterpartyId, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: _amountOf,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final total = _breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final rows = _breakdown
+        .map((r) => _BreakdownRow(
+              label: r['counterpartyName'] as String,
+              amount: r['total'] as double,
+              onTap: () => _openCustomer(r['counterpartyId'] as int?, r['counterpartyName'] as String),
+            ))
+        .toList();
+    return _BreakdownListView(
+      title: 'دریافتی از مشتریان به تفکیک مشتری',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
+
+/// برداشت مالک/شرکا در یک بازه، به تفکیک هر شریک (حساب سرمایه‌ای که از آن
+/// برداشت شده) - زدن روی هر شریک، فهرست اسناد برداشت همان شریک را باز می‌کند.
+class _OwnerDrawBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  const _OwnerDrawBreakdownScreen({required this.fromDate, required this.toDate});
+
+  @override
+  State<_OwnerDrawBreakdownScreen> createState() => _OwnerDrawBreakdownScreenState();
+}
+
+class _OwnerDrawBreakdownScreenState extends State<_OwnerDrawBreakdownScreen> {
+  final _db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _breakdown = [];
+  Set<int> _cashAccountIds = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final breakdown = await _db.ownerDrawBreakdown(fromDate: widget.fromDate, toDate: widget.toDate);
+    breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final cashAccounts = await _db.getCashAccounts();
+    setState(() {
+      _breakdown = breakdown;
+      _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
+      _loading = false;
+    });
+  }
+
+  int _amountOf(JournalEntryModel e) =>
+      e.lines.where((l) => _cashAccountIds.contains(l.accountId)).fold(0, (s, l) => s + l.credit);
+
+  void _openAccount(AccountModel account) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: account.name,
+          loadEntries: () =>
+              _db.ownerDrawEntries(accountId: account.id!, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: _amountOf,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final total = _breakdown.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final rows = _breakdown
+        .map((r) => _BreakdownRow(
+              label: (r['account'] as AccountModel).name,
+              amount: r['total'] as double,
+              onTap: () => _openAccount(r['account'] as AccountModel),
+            ))
+        .toList();
+    return _BreakdownListView(
+      title: 'برداشت مالک/شرکا به تفکیک شریک',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
+
+/// هزینه یک بازه، به‌صورت سلسله‌مراتبی: اول سرشاخه‌های هزینه (هرکدام مجموع
+/// زیرشاخه‌هایش)، با زدن روی هرکدام یک سطح پایین‌تر می‌رویم، تا به یک برگ
+/// (حساب بدون زیرحساب) برسیم که آنجا فهرست تک‌تک اسناد باز می‌شود. اگر خودِ
+/// یک سرشاخه هم پیش از گرفتن زیرحساب سند مستقیم داشته (طبق قاعده Leaf-Lock
+/// دیگر بعد از آن اجازه ثبت مستقیم ندارد)، آن مبلغ هم به‌صورت یک ردیف جدا
+/// («ثبت مستقیم») نشان داده می‌شود تا مجموع همیشه دقیقاً درست باشد.
+class _ExpenseBreakdownScreen extends StatefulWidget {
+  final String fromDate;
+  final String toDate;
+  final int? parentId;
+  final String? parentAccountName;
+  const _ExpenseBreakdownScreen({
+    required this.fromDate,
+    required this.toDate,
+    this.parentId,
+    this.parentAccountName,
+  });
+
+  @override
+  State<_ExpenseBreakdownScreen> createState() => _ExpenseBreakdownScreenState();
+}
+
+class _ExpenseBreakdownScreenState extends State<_ExpenseBreakdownScreen> {
+  final _db = DatabaseHelper.instance;
+  List<Map<String, dynamic>> _children = [];
+  double? _ownDirect;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final children = await _db.accountChildrenBreakdown(kAccountExpense,
+        parentId: widget.parentId, fromDate: widget.fromDate, toDate: widget.toDate);
+    children.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    double? ownDirect;
+    if (widget.parentId != null) {
+      final bal = await _db.accountBalance(widget.parentId!, fromDate: widget.fromDate, toDate: widget.toDate);
+      ownDirect = bal['balance']! != 0 ? bal['balance'] : null;
+    }
+    setState(() {
+      _children = children;
+      _ownDirect = ownDirect;
+      _loading = false;
+    });
+  }
+
+  void _openTransactions(int accountId, String label) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _TransactionListScreen(
+          title: label,
+          loadEntries: () =>
+              _db.getJournalEntries(accountId: accountId, fromDate: widget.fromDate, toDate: widget.toDate),
+          amountOf: (e) => e.lines.where((l) => l.accountId == accountId).fold(0, (s, l) => s + l.debit),
+        ),
+      ),
+    );
+  }
+
+  void _openChild(AccountModel account, bool hasChildren) {
+    if (hasChildren) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _ExpenseBreakdownScreen(
+            fromDate: widget.fromDate,
+            toDate: widget.toDate,
+            parentId: account.id,
+            parentAccountName: account.name,
+          ),
+        ),
+      );
+    } else {
+      _openTransactions(account.id!, account.name);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalDebit = _rows.fold<double>(0, (s, r) => s + (r['debit'] as double));
-    final totalCredit = _rows.fold<double>(0, (s, r) => s + (r['credit'] as double));
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final childrenSum = _children.fold<double>(0, (s, r) => s + (r['total'] as double));
+    final total = childrenSum + (_ownDirect ?? 0);
+    final rows = <_BreakdownRow>[
+      if (_ownDirect != null)
+        _BreakdownRow(
+          label: 'ثبت مستقیم روی «${widget.parentAccountName}»',
+          amount: _ownDirect!,
+          onTap: () => _openTransactions(widget.parentId!, widget.parentAccountName!),
+        ),
+      ..._children.map((r) => _BreakdownRow(
+            label: (r['account'] as AccountModel).name,
+            amount: r['total'] as double,
+            onTap: () => _openChild(r['account'] as AccountModel, r['hasChildren'] as bool),
+          )),
+    ];
+    return _BreakdownListView(
+      title: widget.parentAccountName ?? 'هزینه به تفکیک زیردسته',
+      subtitle: 'از ${formatJalaliLong(widget.fromDate)} تا ${formatJalaliLong(widget.toDate)}',
+      total: total,
+      rows: rows,
+    );
+  }
+}
 
+/// فهرست تک‌تک اسناد یک زیردسته (چه دریافتی چه هزینه)؛ لمس هر سند به صفحه
+/// جزئیات کامل همان سند (با پیوست‌ها) می‌رود.
+class _TransactionListScreen extends StatefulWidget {
+  final String title;
+  final Future<List<JournalEntryModel>> Function() loadEntries;
+  final int Function(JournalEntryModel entry) amountOf;
+  const _TransactionListScreen(
+      {required this.title, required this.loadEntries, required this.amountOf});
+
+  @override
+  State<_TransactionListScreen> createState() => _TransactionListScreenState();
+}
+
+class _TransactionListScreenState extends State<_TransactionListScreen> {
+  final _db = DatabaseHelper.instance;
+  List<JournalEntryModel> _entries = [];
+  Map<int, String> _projectTitles = {};
+  Map<int, String> _counterpartyNames = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final entries = await widget.loadEntries();
+    final projects = await _db.getProjects();
+    final counterparties = await _db.getCounterparties(includeInactive: true);
+    setState(() {
+      _entries = entries;
+      _projectTitles = {for (final p in projects) if (p.id != null) p.id!: p.title};
+      _counterpartyNames = {for (final c in counterparties) if (c.id != null) c.id!: c.name};
+      _loading = false;
+    });
+  }
+
+  int? _firstNonNull(List<JournalLineModel> lines, int? Function(JournalLineModel) selector) {
+    for (final l in lines) {
+      final v = selector(l);
+      if (v != null) return v;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _entries.fold<int>(0, (s, e) => s + widget.amountOf(e));
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _entries.isEmpty
+                ? const Center(
+                    child: Text('سندی در این بازه یافت نشد.',
+                        style: TextStyle(color: AppColors.textSecondary)))
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceAlt,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('جمع این فهرست', style: TextStyle(fontWeight: FontWeight.w700)),
+                            Text(formatMoney(total.toDouble()),
+                                style: const TextStyle(fontWeight: FontWeight.w800)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ..._entries.map((e) {
+                        final counterpartyId = _firstNonNull(e.lines, (l) => l.counterpartyId);
+                        final projectId = _firstNonNull(e.lines, (l) => l.projectId);
+                        final subtitleParts = <String>[
+                          formatJalaliLong(e.date),
+                          if (counterpartyId != null && _counterpartyNames[counterpartyId] != null)
+                            _counterpartyNames[counterpartyId]!,
+                          if (projectId != null && _projectTitles[projectId] != null)
+                            _projectTitles[projectId]!,
+                        ];
+                        return Card(
+                          child: ListTile(
+                            title: Text(e.description ?? '—'),
+                            subtitle: Text(subtitleParts.join(' · ')),
+                            trailing: Text(formatMoney(widget.amountOf(e).toDouble()),
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.id!)),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+      ),
+    );
+  }
+}
+
+
+/// ---------------- تب سود مشتریان: سود واقعی هر مشتری (نه فقط دریافتی) ----------------
+/// برخلاف تب «دریافت و هزینه» که کاملاً نقدی و مربوط به یک بازه انتخابی
+/// است، این تب حسابداری/تعهدی و Lifetime است: مبلغ نهایی پروژه‌های
+/// Finalize‌شده هر مشتری (netRevenue) منهای هزینه مستقیم همان پروژه‌ها
+/// (directProjectCost) = سود واقعی (Contribution). عمداً بازه‌ای نیست، چون
+/// این نسبت مستقیماً به FinancialReportingService.getAllCustomerReports که
+/// از قبل Lifetime طراحی شده متکی است - رجوع به توضیح خودِ آن سرویس.
+class _CustomerProfitTab extends StatefulWidget {
+  final _CustomerSort initialSort;
+  const _CustomerProfitTab({super.key, this.initialSort = _CustomerSort.profit});
+
+  @override
+  State<_CustomerProfitTab> createState() => _CustomerProfitTabState();
+}
+
+class _CustomerProfitTabState extends State<_CustomerProfitTab> with Reloadable<_CustomerProfitTab> {
+  final _db = DatabaseHelper.instance;
+  final _reporting = FinancialReportingService();
+  late _CustomerSort _sort = widget.initialSort;
+  List<CustomerFinancialReport> _reports = [];
+  Map<int, String> _names = {};
+  // مانده تخمینی (پروژه‌های نهایی‌نشده)، جمع‌شده به تفکیک مشتری - جایگزین
+  // نمای «مانده تخمینی» صفحه حذف‌شده «طلب‌های باز».
+  Map<int, double> _estimatedByCustomer = {};
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  Future<void> reload() => _load();
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final reports = await _reporting.getAllCustomerReports();
+    final counterparties = await _db.getCounterparties(includeInactive: true);
+    final estimatedByProject = await _db.estimatedRemainingForOpenProjects();
+    final projects = await _db.getProjects();
+    final estimatedByCustomer = <int, double>{};
+    for (final p in projects) {
+      final estimated = estimatedByProject[p.id];
+      if (estimated != null && estimated > 0) {
+        estimatedByCustomer[p.counterpartyId] = (estimatedByCustomer[p.counterpartyId] ?? 0) + estimated;
+      }
+    }
+    setState(() {
+      _reports = reports;
+      _names = {for (final c in counterparties) if (c.id != null) c.id!: c.name};
+      _estimatedByCustomer = estimatedByCustomer;
+      _loading = false;
+    });
+    _applySort();
+  }
+
+  /// مجموع مانده طلب واقعی (پروژه‌های نهایی‌شده) و مانده تخمینی (پروژه‌های
+  /// در جریان) این مشتری - معیار «فوریت پیگیری»: هرچه بیشتر، پول بیشتری
+  /// از این مشتری معلق مانده.
+  double _urgencyOf(CustomerFinancialReport r) =>
+      r.receivableBalance + (_estimatedByCustomer[r.counterpartyId] ?? 0);
+
+  void _applySort() {
+    setState(() {
+      if (_sort == _CustomerSort.profit) {
+        _reports.sort((a, b) => (b.projectContribution ?? double.negativeInfinity)
+            .compareTo(a.projectContribution ?? double.negativeInfinity));
+      } else {
+        _reports.sort((a, b) => _urgencyOf(b).compareTo(_urgencyOf(a)));
+      }
+    });
+  }
+
+  void _changeSort(_CustomerSort sort) {
+    _sort = sort;
+    _applySort();
+  }
+
+  void _openCustomer(CustomerFinancialReport report) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _CustomerProjectsScreen(
+          counterpartyId: report.counterpartyId,
+          counterpartyName: _names[report.counterpartyId] ?? 'نامشخص',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return BlueprintGridBackground(
       child: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -494,79 +1033,75 @@ class _TrialBalanceTabState extends State<_TrialBalanceTab> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
-                  const Text('تراز آزمایشی',
+                  const Text('سود مشتریان',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                           fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                   const SizedBox(height: 2),
-                  const Text('مانده تجمعی همه حساب‌ها تا امروز',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                  const SizedBox(height: 10),
+                  const Text(
+                    'دریافتی: کل پول واقعی دریافت‌شده از مشتری تا امروز.'
+                    ' سود: مبلغ نهایی پروژه‌های تکمیل‌شده منهای هزینه مستقیم همان پروژه‌ها - فقط برای پروژه‌های نهایی‌شده محاسبه می‌شود'
+                    ' (پروژه‌های در جریان، حتی با دریافتی، در سود صفر/— نشان داده می‌شوند). کل عمر است، نه یک بازه.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      TextButton.icon(
-                        onPressed: _exporting ? null : _exportPdf,
-                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                        label: const Text('خروجی PDF', style: TextStyle(fontSize: 12)),
-                      ),
+                      _SortChip(
+                          label: 'سود',
+                          selected: _sort == _CustomerSort.profit,
+                          onTap: () => _changeSort(_CustomerSort.profit)),
                       const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: _exporting ? null : _exportExcel,
-                        icon: const Icon(Icons.table_chart_outlined, size: 16),
-                        label: const Text('خروجی اکسل', style: TextStyle(fontSize: 12)),
-                      ),
+                      _SortChip(
+                          label: 'فوریت پیگیری',
+                          selected: _sort == _CustomerSort.urgency,
+                          onTap: () => _changeSort(_CustomerSort.urgency)),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  for (final type in kAccountTypes)
-                    if (_rows.any((r) => (r['account'] as AccountModel).type == type &&
-                        ((r['debit'] as double) != 0 || (r['credit'] as double) != 0))) ...[
-                      SectionTitle(type),
-                      const Divider(color: AppColors.gridLine, height: 1),
-                      for (final row in _rows.where((r) =>
-                          (r['account'] as AccountModel).type == type &&
-                          ((r['debit'] as double) != 0 || (r['credit'] as double) != 0)))
-                        _TrialBalanceRow(
-                          name: (row['account'] as AccountModel).name,
-                          debit: row['debit'] as double,
-                          credit: row['credit'] as double,
+                  const SizedBox(height: 16),
+                  if (_reports.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text('هنوز هیچ پروژه‌ای ثبت نشده.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    ..._reports.map((r) {
+                      final name = _names[r.counterpartyId] ?? 'نامشخص';
+                      final profit = r.projectContribution;
+                      final margin = r.contributionMargin;
+                      final estimated = _estimatedByCustomer[r.counterpartyId] ?? 0;
+                      final color = profit == null
+                          ? AppColors.textSecondary
+                          : (profit >= 0 ? AppColors.positive : AppColors.negative);
+                      final lines = <String>[
+                        'دریافتی: ${formatMoney(r.totalReceived, withSuffix: false)}',
+                        'درآمد خالص: ${formatMoney(r.netRevenue, withSuffix: false)}'
+                            '  ·  هزینه مستقیم: ${formatMoney(r.directProjectCost, withSuffix: false)}',
+                        if (margin != null) 'حاشیه سود: ${margin.toStringAsFixed(1)}٪',
+                        if (r.receivableBalance > 0)
+                          'مانده طلب: ${formatMoney(r.receivableBalance, withSuffix: false)}',
+                        if (estimated > 0)
+                          'در انتظار (تخمینی): ${formatMoney(estimated, withSuffix: false)}',
+                      ];
+                      return Card(
+                        child: ListTile(
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(
+                            lines.join('\n'),
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                          ),
+                          isThreeLine: lines.length > 2,
+                          trailing: Text(
+                            profit != null ? formatMoney(profit, withSuffix: false) : '—',
+                            style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 14),
+                          ),
+                          onTap: () => _openCustomer(r),
                         ),
-                      const SizedBox(height: 18),
-                    ],
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    decoration: const BoxDecoration(
-                      border: Border(
-                        top: BorderSide(color: AppColors.brass, width: 2),
-                        bottom: BorderSide(color: AppColors.brass, width: 2),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('جمع کل بدهکار',
-                                style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                            Text(formatMoney(totalDebit),
-                                style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('جمع کل بستانکار',
-                                style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                            Text(formatMoney(totalCredit),
-                                style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
+                      );
+                    }),
                 ],
               ),
             ),
@@ -574,87 +1109,52 @@ class _TrialBalanceTabState extends State<_TrialBalanceTab> {
   }
 }
 
-class _TrialBalanceRow extends StatelessWidget {
-  final String name;
-  final double debit;
-  final double credit;
-  const _TrialBalanceRow({required this.name, required this.debit, required this.credit});
+/// چیپ کوچک انتخاب معیار مرتب‌سازی - استفاده مشترک بین تب سود مشتریان و
+/// درون‌رفت پروژه‌های هر مشتری.
+class _SortChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SortChip({required this.label, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.gridLine)),
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: AppColors.brass.withValues(alpha: 0.18),
+      labelStyle: TextStyle(
+        color: selected ? AppColors.brass : AppColors.textSecondary,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+        fontSize: 12.5,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(name, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
-          ),
-          Expanded(
-            child: Text(
-              debit != 0 ? formatMoney(debit, withSuffix: false) : '—',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: AppColors.positive, fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              credit != 0 ? formatMoney(credit, withSuffix: false) : '—',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: AppColors.negative, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+      onSelected: (_) => onTap(),
     );
   }
 }
 
-/// ---------------- تب تحلیل و روند ----------------
-/// تب تحلیل و روند (بر مبنای Income/Expense به تفکیک نوع حساب، نه
-/// systemKey پروژه‌محور).
-///
-/// طبقه‌بندی Audit مرحله ۲.۱:
-/// - `monthlyTrend`/`monthOverMonthComparison` (Category 2): این‌ها «کل
-///   درآمد/هزینه بر مبنای نوع حساب Income/Expense» را محاسبه می‌کنند، نه
-///   Net Revenue/Direct Cost/Operating Result طبقه‌بندی‌شده بر اساس
-///   systemKey (که در PeriodFinancialReport است). این دو معنای متفاوتی
-///   دارند (مثلاً «هزینه» این‌جا شامل تخفیف هم می‌شود، در حالی که در
-///   Reporting Layer طبق مورد ۱۵ مرحله ۲، Discount هرگز Direct Cost حساب
-///   نمی‌شود) - طبق قانون «بدون شواهد قطعی، فرمول یکی نشود»، این تفاوت
-///   عمداً دست‌نخورده ماند و همین‌جا مستند شد، نه این‌که حدس زده یا یکی
-///   فرض شود کدام درست‌تر است.
-/// - `avgMonthlyFixedCost`/`avgRevenuePerProject` (Category 2): بر مبنای
-///   حساب‌های نام‌محور خاص (نه systemKey) و روی جمعیت متفاوتی (میانگین
-///   فقط بین پروژه‌های دارای دریافت) محاسبه می‌شوند؛ معادل مستقیمی در
-///   لایه Reporting ندارند.
-/// - فرمول نرخ رشد (`_pctChange`) که تکرار مستقیم فرمول موجود در
-///   `FinancialPeriodComparison.compute` بود (Category 3)، حذف و به همان
-///   منبع مرجع واحد وصل شد؛ منبع داده (thisIncome/prevIncome و...) تغییر
-///   نکرد.
-class _AnalysisTab extends StatefulWidget {
-  const _AnalysisTab();
+/// پروژه‌های یک مشتری با سود/زیان تک‌تک آن‌ها - درون‌رفت از تب سود مشتریان.
+class _CustomerProjectsScreen extends StatefulWidget {
+  final int counterpartyId;
+  final String counterpartyName;
+  const _CustomerProjectsScreen({required this.counterpartyId, required this.counterpartyName});
 
   @override
-  State<_AnalysisTab> createState() => _AnalysisTabState();
+  State<_CustomerProjectsScreen> createState() => _CustomerProjectsScreenState();
 }
 
-class _AnalysisTabState extends State<_AnalysisTab> {
+class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
   final _db = DatabaseHelper.instance;
+  final _reporting = FinancialReportingService();
+  _CustomerSort _sort = _CustomerSort.profit;
+  List<ProjectFinancialReport> _projects = [];
+  // مانده تخمینی پروژه‌های نهایی‌نشده این مشتری - جایگزین نمای «مانده
+  // تخمینی» صفحه حذف‌شده «طلب‌های باز».
+  Map<int, double> _estimatedByProject = {};
+  // تاریخ شروع هر پروژه - فقط برای Tie-break مرتب‌سازی «فوریت» (قدیمی‌تر
+  // جلوتر)، دقیقاً مطابق منطق قبلی «پروژه‌های معلق».
+  Map<int, String> _startDateByProject = {};
   bool _loading = true;
-
-  List<Map<String, dynamic>> _trend = [];
-  Map<String, double> _comparison = {};
-  double _avgFixedCost = 0;
-  double _avgRevenuePerProject = 0;
-
-  static const _monthNamesShort = [
-    'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-    'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
-  ];
 
   @override
   void initState() {
@@ -663,395 +1163,113 @@ class _AnalysisTabState extends State<_AnalysisTab> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final trend = await _db.monthlyTrend(6);
-    final comparison = await _db.monthOverMonthComparison();
-    final avgFixed = await _db.avgMonthlyFixedCost(6);
-    final avgRevenue = await _db.avgRevenuePerProject();
+    final projects = await _reporting.getProjectReports(counterpartyId: widget.counterpartyId);
+    final estimatedByProject = await _db.estimatedRemainingForOpenProjects();
+    final rawProjects = await _db.getProjects(counterpartyId: widget.counterpartyId);
     setState(() {
-      _trend = trend;
-      _comparison = comparison;
-      _avgFixedCost = avgFixed;
-      _avgRevenuePerProject = avgRevenue;
+      _projects = projects;
+      _estimatedByProject = estimatedByProject;
+      _startDateByProject = {for (final p in rawProjects) if (p.id != null) p.id!: p.startDate};
       _loading = false;
     });
+    _applySort();
   }
 
-  /// درصد تغییر - به‌جای بازتولید فرمول رشد در این فایل، از منبع مرجع واحد
-  /// این محاسبه (FinancialPeriodComparison.compute، از لایه Reporting) عبور
-  /// می‌کند تا فرمول فقط در یک‌جا نگه‌داری شود (مرحله ۲.۱ - Authoritative
-  /// Source Rule). داده ورودی (thisIncome/prevIncome و...) همچنان از همین
-  /// صفحه (تعریف سنتی «کل درآمد/هزینه بر اساس نوع حساب») می‌آید - این تغییر
-  /// نمی‌کند، فقط خودِ فرمول ریاضی محاسبه درصد یکی شد.
-  double? _pctChange(double now, double prev) {
-    return FinancialPeriodComparison.compute(metricName: '_', current: now, previous: prev).growthRate;
-  }
+  /// مانده طلب واقعی (نهایی‌شده) + مانده تخمینی (در جریان) - معیار «فوریت».
+  double _urgencyOf(ProjectFinancialReport p) =>
+      p.receivableBalance + (_estimatedByProject[p.projectId] ?? 0);
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final thisIncome = _comparison['thisIncome'] ?? 0;
-    final thisExpense = _comparison['thisExpense'] ?? 0;
-    final thisProfit = _comparison['thisProfit'] ?? 0;
-    final prevIncome = _comparison['prevIncome'] ?? 0;
-    final prevExpense = _comparison['prevExpense'] ?? 0;
-    final prevProfit = _comparison['prevProfit'] ?? 0;
-
-    final expenseRatio = thisIncome == 0 ? null : (thisExpense / thisIncome) * 100;
-    final profitMargin = thisIncome == 0 ? null : (thisProfit / thisIncome) * 100;
-
-    return BlueprintGridBackground(
-      child: RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          children: [
-            const SectionTitle('روند ۶ ماه اخیر'),
-            const SizedBox(height: 10),
-            _MonthlyTrendChart(trend: _trend, monthNames: _monthNamesShort),
-            const SizedBox(height: 10),
-            for (final m in _trend)
-              _TrendRow(
-                label: _monthNamesShort[(m['month'] as int) - 1],
-                income: m['income'] as double,
-                expense: m['expense'] as double,
-                profit: m['profit'] as double,
-              ),
-
-            const SizedBox(height: 24),
-            const SectionTitle('مقایسه با ماه قبل (تا همین روز از ماه)'),
-            const Divider(color: AppColors.gridLine, height: 1),
-            _ComparisonRow(label: 'درآمد', now: thisIncome, prev: prevIncome, pct: _pctChange(thisIncome, prevIncome)),
-            _ComparisonRow(label: 'هزینه', now: thisExpense, prev: prevExpense, pct: _pctChange(thisExpense, prevExpense), lowerIsBetter: true),
-            _ComparisonRow(label: 'سود', now: thisProfit, prev: prevProfit, pct: _pctChange(thisProfit, prevProfit)),
-
-            const SizedBox(height: 24),
-            const SectionTitle('تحلیل هزینه (ماه جاری)'),
-            const Divider(color: AppColors.gridLine, height: 1),
-            _RatioRow(label: 'نسبت هزینه به درآمد', percent: expenseRatio, color: AppColors.negative),
-            _RatioRow(label: 'حاشیه سود', percent: profitMargin, color: AppColors.positive),
-
-            const SizedBox(height: 24),
-            const SectionTitle('شاخص‌های کلیدی (KPI)'),
-            const Divider(color: AppColors.gridLine, height: 1),
-            _KpiRow(label: 'میانگین دریافتی هر پروژه', value: formatMoney(_avgRevenuePerProject)),
-            _KpiRow(
-              label: 'نقطه سربه‌سر ماهانه (تقریبی)',
-              value: formatMoney(_avgFixedCost),
-              hint: 'میانگین هزینه‌های ثابت دفتر در ۶ ماه اخیر — حداقل درآمدی که باید کسب شود',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// نمودار میله‌ای گروهی درآمد/هزینه ۶ ماه اخیر
-class _MonthlyTrendChart extends StatelessWidget {
-  final List<Map<String, dynamic>> trend;
-  final List<String> monthNames;
-  const _MonthlyTrendChart({required this.trend, required this.monthNames});
-
-  @override
-  Widget build(BuildContext context) {
-    if (trend.isEmpty) return const SizedBox.shrink();
-    final maxVal = trend.fold<double>(1, (m, t) {
-      final i = t['income'] as double;
-      final e = t['expense'] as double;
-      return [m, i, e].reduce((a, b) => a > b ? a : b);
-    });
-    final ceiling = maxVal * 1.2;
-
-    return SizedBox(
-      height: 160,
-      child: BarChart(
-        BarChartData(
-          maxY: ceiling,
-          minY: 0,
-          barTouchData: BarTouchData(enabled: false),
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.gridLine, strokeWidth: 1),
-          ),
-          borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  final i = value.toInt();
-                  if (i < 0 || i >= trend.length) return const SizedBox.shrink();
-                  final monthIdx = (trend[i]['month'] as int) - 1;
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(monthNames[monthIdx],
-                        style: const TextStyle(fontSize: 9, color: AppColors.textSecondary)),
-                  );
-                },
-              ),
-            ),
-          ),
-          barGroups: List.generate(trend.length, (i) {
-            final income = trend[i]['income'] as double;
-            final expense = trend[i]['expense'] as double;
-            return BarChartGroupData(
-              x: i,
-              barRods: [
-                BarChartRodData(toY: income, color: AppColors.positive, width: 8, borderRadius: BorderRadius.circular(3)),
-                BarChartRodData(toY: expense, color: AppColors.negative, width: 8, borderRadius: BorderRadius.circular(3)),
-              ],
-              barsSpace: 4,
-            );
-          }),
-        ),
-      ),
-    );
-  }
-}
-
-class _TrendRow extends StatelessWidget {
-  final String label;
-  final double income;
-  final double expense;
-  final double profit;
-  const _TrendRow({required this.label, required this.income, required this.expense, required this.profit});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          SizedBox(width: 56, child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary))),
-          Expanded(
-            child: Text('${formatMoney(income, withSuffix: false)} / ${formatMoney(expense, withSuffix: false)}',
-                style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary), textAlign: TextAlign.center),
-          ),
-          SizedBox(
-            width: 90,
-            child: Text(
-              formatMoney(profit),
-              textAlign: TextAlign.left,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: profit >= 0 ? AppColors.positive : AppColors.negative,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// ردیف مقایسه با ماه قبل، با درصد تغییر و رنگ‌بندی مناسب
-class _ComparisonRow extends StatelessWidget {
-  final String label;
-  final double now;
-  final double prev;
-  final double? pct;
-  final bool lowerIsBetter;
-
-  const _ComparisonRow({
-    required this.label,
-    required this.now,
-    required this.prev,
-    required this.pct,
-    this.lowerIsBetter = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final p = pct;
-    final isGood = p == null ? null : (lowerIsBetter ? p <= 0 : p >= 0);
-    final color = p == null
-        ? AppColors.textSecondary
-        : (p == 0 ? AppColors.textSecondary : (isGood! ? AppColors.positive : AppColors.negative));
-    final arrow = p == null ? '—' : (p > 0 ? '▲' : (p < 0 ? '▼' : '—'));
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.gridLine))),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-          Row(
-            children: [
-              Text(formatMoney(now), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-              const SizedBox(width: 8),
-              Text(p == null ? '—' : '$arrow ${pn(p.abs().toStringAsFixed(0))}٪',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// ردیف نسبت درصدی با نوار افقی ساده
-class _RatioRow extends StatelessWidget {
-  final String label;
-  final double? percent;
-  final Color color;
-  const _RatioRow({required this.label, required this.percent, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final p = percent;
-    final clamped = p == null ? 0.0 : p.clamp(0, 100).toDouble();
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
-              Text(p == null ? '—' : '${pn(p.toStringAsFixed(0))}٪',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: p == null ? AppColors.textSecondary : color)),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: clamped / 100,
-              minHeight: 5,
-              backgroundColor: AppColors.surfaceAlt,
-              valueColor: AlwaysStoppedAnimation(p == null ? AppColors.surfaceAlt : color),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _KpiRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final String? hint;
-  const _KpiRow({required this.label, required this.value, this.hint});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 11),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.gridLine))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
-              Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-            ],
-          ),
-          if (hint != null) ...[
-            const SizedBox(height: 4),
-            Text(hint!, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// تب «تحلیل مدیریتی» - بخش‌هایی که پیش‌تر در داشبورد بودند و برای استفاده
-/// روزمره لازم نیستند: KPIهای تفصیلی دوره، حرکت و نرخ‌های وصول مطالبات،
-/// جریان نقدی تفصیلی، عملکرد پروژه/مشتری، قیمت‌گذاری، تسویه و تشخیص داده.
-/// همه از همان ManagementDashboardService موجود می‌آیند - هیچ محاسبه مالی
-/// جدیدی اینجا انجام نمی‌شود.
-class _ManagementAnalysisTab extends StatefulWidget {
-  const _ManagementAnalysisTab();
-
-  @override
-  State<_ManagementAnalysisTab> createState() => _ManagementAnalysisTabState();
-}
-
-class _ManagementAnalysisTabState extends State<_ManagementAnalysisTab> {
-  final _service = ManagementDashboardService();
-  DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
-  ManagementDashboardData? _data;
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
+  void _applySort() {
     setState(() {
-      _loading = true;
-      _error = null;
+      if (_sort == _CustomerSort.profit) {
+        _projects = _reporting.sortProjectReports(_projects, ProjectReportSort.contribution);
+      } else {
+        _projects.sort((a, b) {
+          final byUrgency = _urgencyOf(b).compareTo(_urgencyOf(a));
+          if (byUrgency != 0) return byUrgency;
+          final aDate = _startDateByProject[a.projectId] ?? '';
+          final bDate = _startDateByProject[b.projectId] ?? '';
+          return aDate.compareTo(bDate); // قدیمی‌تر جلوتر
+        });
+      }
     });
-    try {
-      final data = await _service.buildDashboard(preset: _preset);
-      setState(() {
-        _data = data;
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString().replaceAll('Exception: ', '');
-        _loading = false;
-      });
-    }
+  }
+
+  void _changeSort(_CustomerSort sort) {
+    _sort = sort;
+    _applySort();
   }
 
   @override
   Widget build(BuildContext context) {
-    final data = _data;
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          PeriodSelectorWidget(
-            selected: _preset,
-            onChanged: (p) {
-              setState(() => _preset = p);
-              _load();
-            },
-          ),
-          const SizedBox(height: 16),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 60),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 40),
-              child: Text('خطا در بارگذاری: $_error', style: const TextStyle(color: AppColors.negative)),
-            )
-          else if (data != null) ...[
-            PeriodPerformanceSection(data: data),
-            ReceivableCollectionSection(data: data),
-            CashPositionSection(data: data),
-            ProjectPerformanceSection(data: data),
-            CustomerPerformanceSection(data: data),
-            PricingSection(data: data),
-            SettlementSection(data: data),
-            DiagnosticsSection(data: data),
-            const SizedBox(height: 24),
-          ],
-        ],
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.counterpartyName)),
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _SortChip(
+                          label: 'سود',
+                          selected: _sort == _CustomerSort.profit,
+                          onTap: () => _changeSort(_CustomerSort.profit)),
+                      const SizedBox(width: 8),
+                      _SortChip(
+                          label: 'فوریت',
+                          selected: _sort == _CustomerSort.urgency,
+                          onTap: () => _changeSort(_CustomerSort.urgency)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_projects.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text('این مشتری هنوز پروژه‌ای ندارد.',
+                          textAlign: TextAlign.center, style: TextStyle(color: AppColors.textSecondary)),
+                    )
+                  else
+                    ..._projects.map((p) {
+                      final estimated = _estimatedByProject[p.projectId] ?? 0;
+                      final color = !p.isFinalized
+                          ? AppColors.textSecondary
+                          : (p.projectContribution == null
+                              ? AppColors.textSecondary
+                              : (p.projectContribution! >= 0 ? AppColors.positive : AppColors.negative));
+                      final lines = <String>[
+                        'دریافتی: ${formatMoney(p.totalReceived, withSuffix: false)}',
+                        if (!p.isFinalized)
+                          'نهایی نشده'
+                              '${estimated > 0 ? ' - مانده تخمینی: ${formatMoney(estimated, withSuffix: false)}' : ''}'
+                        else ...[
+                          'درآمد خالص: ${formatMoney(p.netRevenue ?? 0, withSuffix: false)}'
+                              '  ·  هزینه مستقیم: ${formatMoney(p.directProjectCost, withSuffix: false)}',
+                          if (p.receivableBalance > 0)
+                            'مانده طلب: ${formatMoney(p.receivableBalance, withSuffix: false)}',
+                        ],
+                      ];
+                      return Card(
+                        child: ListTile(
+                          title: Text(p.projectName),
+                          subtitle: Text(
+                            lines.join('\n'),
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                          ),
+                          isThreeLine: lines.length > 1,
+                          trailing: Text(
+                            p.isFinalized && p.projectContribution != null
+                                ? formatMoney(p.projectContribution!, withSuffix: false)
+                                : '—',
+                            style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 14),
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              ),
       ),
     );
   }

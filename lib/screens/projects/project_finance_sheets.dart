@@ -19,6 +19,7 @@ Future<bool?> showPriceEventSheet(BuildContext context, ProjectModel project) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _PriceEventSheet(project: project),
   );
@@ -28,6 +29,7 @@ Future<bool?> showFinalizeSheet(BuildContext context, ProjectModel project, doub
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _FinalizeSheet(project: project, suggestedAmount: suggestedAmount),
   );
@@ -37,6 +39,7 @@ Future<bool?> showDiscountSheet(BuildContext context, ProjectModel project) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _DiscountSheet(project: project),
   );
@@ -46,6 +49,7 @@ Future<bool?> showFinalAdjustmentSheet(BuildContext context, ProjectModel projec
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _FinalAdjustmentSheet(project: project),
   );
@@ -57,6 +61,7 @@ Future<bool?> showEditDiscountSheet(BuildContext context, JournalEntryModel entr
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _EditDiscountSheet(entry: entry),
   );
@@ -68,6 +73,7 @@ Future<bool?> showEditFinalAdjustmentSheet(BuildContext context, JournalEntryMod
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _EditFinalAdjustmentSheet(entry: entry),
   );
@@ -78,6 +84,7 @@ Future<bool?> showReceivePaymentSheet(
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _ReceivePaymentSheet(project: project, summary: summary),
   );
@@ -89,6 +96,7 @@ Future<bool?> showEditReceiptSheet(BuildContext context, JournalEntryModel entry
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _EditReceiptSheet(entry: entry),
   );
@@ -101,6 +109,7 @@ Future<bool?> showConvertReceiptToExpenseSheet(BuildContext context, JournalEntr
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
     builder: (ctx) => _ConvertReceiptToExpenseSheet(entry: entry),
   );

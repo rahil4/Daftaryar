@@ -96,7 +96,11 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
           : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                // رجوع به توضیح مشابه در sms_draft_review_screen.dart: بدون
+                // این inset، دکمه ذخیره آخرین آیتم لیست پشت نوار ناوبری
+                // سیستمی گم می‌شود.
+                padding:
+                    EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
                 children: [
                   if (isSystem)
                     const Padding(

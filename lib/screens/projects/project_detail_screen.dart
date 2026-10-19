@@ -558,7 +558,8 @@ class _OverviewTab extends StatelessWidget {
           Row(
             children: [
               _statusChip(isFinalized ? 'نهایی‌شده' : 'در جریان',
-                  isFinalized ? AppColors.brass : AppColors.textSecondary),
+                  isFinalized ? AppColors.brass : AppColors.textSecondary,
+                  stamp: isFinalized),
               const SizedBox(width: 8),
               _statusChip(
                   isSettled ? 'تسویه‌شده' : 'تسویه‌نشده', isSettled ? AppColors.positive : AppColors.negative),
@@ -629,28 +630,24 @@ class _OverviewTab extends StatelessWidget {
                 StatCard(
                   title: 'مانده طلب',
                   value: formatMoney(receivable),
-                  icon: Icons.request_quote_outlined,
-                  valueColor: AppColors.negative,
+                  color: AppColors.negative,
                 ),
               if (customerCredit > 0)
                 StatCard(
                   title: 'مازاد دریافتی (بستانکاری مشتری)',
                   value: formatMoney(customerCredit),
-                  icon: Icons.account_balance_wallet_outlined,
-                  valueColor: AppColors.positive,
+                  color: AppColors.positive,
                 ),
               if (projectContribution != null)
                 StatCard(
                   title: 'سود ناخالص پروژه',
                   value: formatMoney(projectContribution),
-                  icon: Icons.trending_up_rounded,
-                  valueColor: projectContribution >= 0 ? AppColors.positive : AppColors.negative,
+                  color: projectContribution >= 0 ? AppColors.positive : AppColors.negative,
                 ),
               if (projectMargin != null)
                 StatCard(
                   title: 'حاشیه سود',
                   value: '${projectMargin.toStringAsFixed(1)}٪',
-                  icon: Icons.percent_rounded,
                 ),
             ],
           ),
@@ -879,7 +876,25 @@ class _OverviewTab extends StatelessWidget {
     }
   }
 
-  Widget _statusChip(String label, Color color) {
+  /// [stamp]=true فقط برای وضعیت «نهایی‌شده» - شبیه مهر رسمی روی برگه
+  /// (دو حاشیه تودرتو + کمی چرخش)، به‌جای چیپ رنگی معمولی؛ تنها وضعیتی که
+  /// دائمی و برگشت‌ناپذیر است، برای همین تأکید بصری متفاوتی می‌گیرد.
+  Widget _statusChip(String label, Color color, {bool stamp = false}) {
+    if (stamp) {
+      return Transform.rotate(
+        angle: -0.05,
+        child: Container(
+          padding: const EdgeInsets.all(2.5),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(22), border: Border.all(color: color, width: 1.4)),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), border: Border.all(color: color, width: 1.2)),
+            child: Text(label,
+                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.4)),
+          ),
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(

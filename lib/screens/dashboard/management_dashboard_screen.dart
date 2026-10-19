@@ -21,6 +21,7 @@ import '../reports/receivables_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
+import '../../widgets/stat_card.dart';
 import 'widgets/dashboard_sections.dart';
 import 'widgets/period_selector_widget.dart';
 import 'widgets/combo_trend_chart_widget.dart';
@@ -309,8 +310,8 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         Row(
           children: [
             Expanded(
-                child: _SimpleStat(
-                    label: 'پروژه در جریان ›',
+                child: StatCard(
+                    title: 'پروژه در جریان ›',
                     value: pn(data.openProjectsCount),
                     onTap: () => Navigator.push(
                         context,
@@ -318,10 +319,10 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
                             builder: (_) => const ProjectsScreen(onlyOpenFinancially: true))))),
             const SizedBox(width: 8),
             Expanded(
-                child: _SimpleStat(
-                    label: 'پیش‌دریافت ›',
+                child: StatCard(
+                    title: 'پیش‌دریافت ›',
                     value: formatMoneyCompact(data.advanceBalance),
-                    bordered: true,
+                    emphasize: true,
                     color: AppColors.brass,
                     onTap: () => Navigator.push(
                         context,
@@ -419,54 +420,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
   }
 }
 
-/// کارت آماری ساده و فشرده داشبورد - جایگزین KpiCard در چیدمان ساده‌شده،
-/// بدون درصد رشد و بدون تأکید بصری اضافه.
-class _SimpleStat extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color? color;
-  final bool bordered;
-  final VoidCallback? onTap;
-  const _SimpleStat(
-      {required this.label, required this.value, this.color, this.bordered = false, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final body = Padding(
-      padding: const EdgeInsets.all(11),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(value,
-                style: TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w800, color: color ?? AppColors.textPrimary)),
-          ),
-        ],
-      ),
-    );
-
-    return Card(
-      shape: bordered
-          ? RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(color: AppColors.brass, width: 0.8))
-          : null,
-      child: onTap == null
-          ? body
-          : InkWell(borderRadius: BorderRadius.circular(12), onTap: onTap, child: body),
-    );
-  }
-}
-
-/// کارت واحد «مطالبات + مانده تخمینی» - جایگزین دو _SimpleStat جدا که هر
-/// دو به یک مقصد می‌رفتند؛ چون هر دو یک مفهوم‌اند (پول طلبکاری، با درجه
-/// قطعیت متفاوت)، یک کارت با دو ستون منطقی‌تر از دو کارت جدا با ناوبری
-/// تکراری است.
+/// کارت واحد «مطالبات + مانده تخمینی» - جایگزین دو StatCard جدا که هر دو
+/// به یک مقصد می‌رفتند؛ چون هر دو یک مفهوم‌اند (پول طلبکاری، با درجه قطعیت
+/// متفاوت)، یک کارت با دو ستون منطقی‌تر از دو کارت جدا با ناوبری تکراری
+/// است. محتوای هر ستون از همان StatCard.content مشترک می‌آید تا چیدمان
+/// برچسب/مقدار این‌جا و در StatCard یک‌بار پیاده‌سازی شود، نه دوبار.
 class _ReceivablesCard extends StatelessWidget {
   final double receivable;
   final double estimatedRemaining;
@@ -476,39 +434,28 @@ class _ReceivablesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget col(String label, double value) {
-      return Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
-            const SizedBox(height: 4),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: AlignmentDirectional.centerStart,
-              child: Text(formatMoneyCompact(value),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.brass)),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Card(
-      shape: RoundedRectangleBorder(
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: AppColors.brass, width: 0.8),
+        border: Border.all(color: AppColors.brass, width: 0.8),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(11),
+          padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              col('مطالبات ›', receivable),
-              Container(width: 1, height: 34, margin: const EdgeInsets.symmetric(horizontal: 10), color: AppColors.gridLine),
-              col('مانده تخمینی ›', estimatedRemaining),
+              Expanded(
+                  child: StatCard.content(
+                      title: 'مطالبات ›', value: formatMoneyCompact(receivable), color: AppColors.brass)),
+              Container(width: 1, height: 34, margin: const EdgeInsets.symmetric(horizontal: 12), color: AppColors.gridLine),
+              Expanded(
+                  child: StatCard.content(
+                      title: 'مانده تخمینی ›',
+                      value: formatMoneyCompact(estimatedRemaining),
+                      color: AppColors.brass)),
             ],
           ),
         ),

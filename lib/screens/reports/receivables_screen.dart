@@ -99,7 +99,6 @@ class _ReceivablesScreenState extends State<ReceivablesScreen> {
                           child: StatCard(
                             title: 'مطالبات',
                             value: formatMoneyCompact(totalReceivable),
-                            icon: Icons.receipt_long_outlined,
                             color: AppColors.negative,
                           ),
                         ),
@@ -108,7 +107,6 @@ class _ReceivablesScreenState extends State<ReceivablesScreen> {
                           child: StatCard(
                             title: 'مانده تخمینی',
                             value: formatMoneyCompact(totalEstimated),
-                            icon: Icons.hourglass_bottom_outlined,
                             color: AppColors.brass,
                           ),
                         ),

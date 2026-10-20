@@ -180,9 +180,22 @@ class ManagementDashboardData {
   // Trend Charts
   final List<TrendPoint> revenueTrend;
 
-  /// روند مجموع دریافتی‌های نقدی (از مشتریان + سایر) - جریان نقد ورودی،
-  /// نه درآمد شناسایی‌شده؛ این دو عمداً جدا نگه داشته می‌شوند.
+  /// روند مجموع هزینه‌های تعهدی (هزینه مستقیم پروژه + سربار پروژه‌ها +
+  /// هزینه‌های دفتر) - هم‌مبنا با revenueTrend (هر دو تعهدی).
+  final List<TrendPoint> expenseTrend;
+
+  /// روند دریافتی نقدی (customerReceipts + otherCashInflows هر Bucket) -
+  /// عمداً مبنایش با revenueTrend/expenseTrend فرق دارد (نقدی، نه تعهدی).
+  /// طبق درخواست صریح کاربر برای نمایش هر سه کنار هم در نمودار داشبورد؛
+  /// هر جا این عدد مصرف می‌شود باید همیشه با برچسب/رنگ مجزا از دو سری
+  /// تعهدی نمایش داده شود تا این تفاوت مبنا گم نشود.
   final List<TrendPoint> receiptsTrend;
+
+  /// زیرنویس زیر محور افقی نمودار روند - سطح هفته: «هفته ۵ | ۲۰ تا ۲۷
+  /// اردیبهشت ۱۴۰۵»، سطح ماه: «شهریور ۱۴۰۵»، سطح فصل/سال: «سال ۱۴۰۵».
+  /// فقط در حالت نادر بازه سفارشی/سال مالی که از مرز سال تقویمی عبور
+  /// می‌کند (سطح فصل/سال) می‌تواند null باشد.
+  final String? trendCaption;
   final List<TrendPoint> operatingResultTrend;
   final List<TrendPoint> cashFlowTrend;
   final List<TrendPoint> contributionMarginTrend;
@@ -244,7 +257,9 @@ class ManagementDashboardData {
     required this.totalNegativeAdjustments,
     required this.netAdjustments,
     required this.revenueTrend,
+    required this.expenseTrend,
     required this.receiptsTrend,
+    this.trendCaption,
     required this.operatingResultTrend,
     required this.cashFlowTrend,
     required this.contributionMarginTrend,

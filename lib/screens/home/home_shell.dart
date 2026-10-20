@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../utils/reloadable.dart';
 import '../accounting/accounting_screen.dart';
 import '../dashboard/management_dashboard_screen.dart';
 import '../projects/projects_screen.dart';
@@ -19,12 +20,24 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
-  final _screens = const [
-    ManagementDashboardScreen(),
-    AccountingScreen(),
-    ProjectsScreen(),
-    ReportsScreen(),
+  final _dashboardKey = GlobalKey<State<ManagementDashboardScreen>>();
+  final _accountingKey = GlobalKey<State<AccountingScreen>>();
+  final _projectsKey = GlobalKey<State<ProjectsScreen>>();
+  final _reportsKey = GlobalKey<State<ReportsScreen>>();
+
+  late final _screens = [
+    ManagementDashboardScreen(key: _dashboardKey),
+    AccountingScreen(key: _accountingKey),
+    ProjectsScreen(key: _projectsKey),
+    ReportsScreen(key: _reportsKey),
   ];
+
+  late final _keys = [_dashboardKey, _accountingKey, _projectsKey, _reportsKey];
+
+  void _onTap(int i) {
+    setState(() => _index = i);
+    triggerReload(_keys[i]);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +45,7 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
+        onTap: _onTap,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.dashboard_outlined), label: 'داشبورد'),
           BottomNavigationBarItem(icon: Icon(Icons.menu_book_outlined), label: 'حسابداری'),

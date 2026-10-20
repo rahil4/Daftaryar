@@ -8,6 +8,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:daftaryar/db/database_helper.dart';
 import 'package:daftaryar/services/data_health_service.dart';
 import 'package:daftaryar/models/account.dart';
+import 'package:daftaryar/models/attachment.dart';
 import 'package:daftaryar/models/counterparty.dart';
 import 'package:daftaryar/models/journal_entry.dart';
 import 'package:daftaryar/models/project.dart';
@@ -695,6 +696,74 @@ void main() {
     });
   });
 
+  // این‌ها مسیر واقعی onUpgrade(oldVersion: 5) را (که فقط روی دستگاه یک
+  // کاربر واقعیِ نسخه قبلی اجرا می‌شود، نه در تست) شبیه‌سازی نمی‌کنند؛ چون
+  // خودِ Migration فقط یک CREATE TABLE خالص است (بدون هیچ ALTER/UPDATE روی
+  // جدول موجودی)، آن‌چه واقعاً برای سلامت داده مالی اهمیت دارد این‌جا تست
+  // می‌شود: استفاده از جدول/متدهای جدید پیوست در کنار داده مالی واقعی هیچ
+  // اثری روی آن نمی‌گذارد + سلامت ساختاری بعدش سبز می‌ماند.
+  group('Migration نسخه ۶ — جدول attachments (پیوست عکس/رسید)', () {
+    test('درج/خواندن/حذف پیوست هیچ اثری روی اثر انگشت داده مالی موجود ندارد', () async {
+      final cpId = await createCounterparty('مشتری تست پیوست');
+      final projectId = await createProject(cpId, agreedAmount: 50000000);
+      await db.finalizeProject(projectId: projectId, finalAmount: 50000000, date: '1404/02/01');
+      final cash = (await db.getCashAccounts()).first;
+      await db.receiveProjectPayment(
+          projectId: projectId, cashAccountId: cash.id!, amount: 20000000, date: '1404/02/05');
+
+      final entries = await db.getJournalEntries(projectId: projectId);
+      final entryId = entries.first.id!;
+
+      final before = await db.dataFingerprint();
+
+      final attId = await db.insertAttachment(AttachmentModel(
+        entryId: entryId,
+        filePath: '/tmp/fake_receipt.jpg',
+        createdAt: '1404/02/05',
+      ));
+      final fetched = await db.getAttachments(entryId);
+      expect(fetched.length, 1);
+      expect(fetched.first.filePath, '/tmp/fake_receipt.jpg');
+
+      await db.deleteAttachment(attId);
+      expect(await db.getAttachments(entryId), isEmpty);
+
+      final after = await db.dataFingerprint();
+      expect(after, before,
+          reason: 'اثر انگشت داده مالی نباید با درج/حذف پیوست تغییر کند.\n'
+              'پیش: $before\nپس: $after');
+
+      final health = await DataHealthService(db).run();
+      expect(health.isHealthy, true,
+          reason: 'وجود جدول پیوست‌ها نباید سلامت ساختاری را بشکند. مشکلات: '
+              '${health.issues.map((i) => i.title).join(" | ")}');
+    });
+
+    test('حذف سند، پیوست‌های آن را هم به‌صورت Cascade حذف می‌کند (بدون رکورد یتیم)', () async {
+      await db.createManualJournal(JournalEntryModel(
+        date: '1404/02/01',
+        description: 'سند دستی تست',
+        createdAt: '1404/02/01',
+        lines: [
+          JournalLineModel(accountId: (await db.getCashAccounts()).first.id!, debit: 1000000),
+          JournalLineModel(
+              accountId: (await db.getAccounts(type: kAccountIncome)).first.id!, credit: 1000000),
+        ],
+      ));
+      final entries = await db.getJournalEntries();
+      final entryId = entries.first.id!;
+
+      await db.insertAttachment(
+          AttachmentModel(entryId: entryId, filePath: '/tmp/a.jpg', createdAt: '1404/02/01'));
+      expect(await db.getAttachments(entryId), hasLength(1));
+
+      await db.deleteJournalEntry(entryId);
+
+      expect(await db.getAttachments(entryId), isEmpty,
+          reason: 'حذف سند باید پیوست‌های وابسته را هم پاک کند (ON DELETE CASCADE)، نه رکورد یتیم بگذارد');
+    });
+  });
+
   group('قرارداد پایداری (STABILITY.md)', () {
     test('نسخه دیتابیس بدون گفت‌وگوی صریح بالا نمی‌رود', () async {
       // این تست عمداً به یک عدد ثابت گره خورده است. اگر کسی (چه انسان، چه
@@ -705,7 +774,13 @@ void main() {
       // پروژه در «حالت تثبیت» است؛ رجوع کنید به STABILITY.md.
       // اگر واقعاً یک Migration لازم است: STABILITY.md را بخوانید، مراحل
       // چهارگانه را انجام دهید، و سپس این عدد را به‌روز کنید.
-      const expectedSchemaVersion = 5;
+      //
+      // نسخه ۶ آگاهانه و پس از گفت‌وگوی صریح انجام شد: جدول «attachments»
+      // (پیوست عکس/رسید به سند) - فقط یک جدول کاملاً جدید و خالی، بدون هیچ
+      // تغییری در جدول/ستون موجود؛ رجوع کنید به تست‌های Migration در همین
+      // فایل که صحت این ادعا را روی یک دیتابیس شبیه‌سازی‌شده پیش از
+      // Migration تأیید می‌کنند.
+      const expectedSchemaVersion = 6;
 
       final raw = await db.database;
       final actual = await raw.getVersion();

@@ -160,7 +160,12 @@ class _SmsDraftReviewScreenState extends State<SmsDraftReviewScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              // پایین‌ترین padding فقط ۱۶ ثابت نیست؛ روی گوشی‌هایی با نوار
+              // ناوبری حرکتی/دکمه‌ای، دکمه‌های «تأیید و ثبت»/«رد کردن» که
+              // آخرین آیتم این لیست‌اند، پشت همان نوار سیستمی می‌افتند و
+              // لمس‌پذیر نمی‌مانند - برای همین باید safe-area پایین صفحه
+              // هم به padding اضافه شود.
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
               children: [
                 if (widget.draft.sender != null && widget.draft.sender!.isNotEmpty)
                   Padding(

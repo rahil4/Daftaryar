@@ -3,18 +3,23 @@ import 'package:flutter/material.dart';
 import '../../db/database_helper.dart';
 import '../../models/project.dart';
 import '../../theme/app_theme.dart';
+import '../../utils/reloadable.dart';
 import 'project_form_screen.dart';
 import 'project_detail_screen.dart';
 import '../counterparties/counterparties_screen.dart';
 
 class ProjectsScreen extends StatefulWidget {
-  const ProjectsScreen({super.key});
+  /// اگر true باشد، فقط پروژه‌های مالی «در جریان» (نهایی‌نشده) نشان داده
+  /// می‌شوند - این یک بعد کاملاً جدا از فیلتر وضعیت عملیاتی (kProjectStatuses)
+  /// است؛ از داشبورد (کارت «پروژه در جریان») صدا زده می‌شود.
+  final bool onlyOpenFinancially;
+  const ProjectsScreen({super.key, this.onlyOpenFinancially = false});
 
   @override
   State<ProjectsScreen> createState() => _ProjectsScreenState();
 }
 
-class _ProjectsScreenState extends State<ProjectsScreen> {
+class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<ProjectsScreen> {
   final _db = DatabaseHelper.instance;
   List<ProjectModel> _projects = [];
   Map<int, String> _counterpartyNames = {};
@@ -28,15 +33,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     _load();
   }
 
+  @override
+  Future<void> reload() => _load();
+
   Future<void> _load() async {
     setState(() => _loading = true);
     final projects = await _db.getProjects(query: _query);
     final counterparties = await _db.getCounterparties(includeInactive: true);
     final names = {for (final c in counterparties) c.id!: c.name};
     setState(() {
-      _projects = _statusFilter == null
+      var filtered = _statusFilter == null
           ? projects
           : projects.where((p) => p.status == _statusFilter).toList();
+      if (widget.onlyOpenFinancially) {
+        filtered = filtered.where((p) => !p.isFinalized).toList();
+      }
+      _projects = filtered;
       _counterpartyNames = names;
       _loading = false;
     });
@@ -46,7 +58,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('پروژه‌ها'),
+        title: Text(widget.onlyOpenFinancially ? 'پروژه‌ها · در جریان' : 'پروژه‌ها'),
         actions: [
           IconButton(
             icon: const Icon(Icons.people_alt_outlined),
@@ -66,7 +78,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
               child: TextField(
                 decoration: const InputDecoration(
-                  hintText: 'جستجوی عنوان پروژه...',
+                  hintText: 'جستجوی عنوان پروژه یا نام مشتری...',
                   prefixIcon: Icon(Icons.search, size: 20),
                 ),
                 onChanged: (v) {

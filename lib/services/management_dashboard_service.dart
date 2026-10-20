@@ -147,24 +147,32 @@ class ManagementDashboardService {
 
     // ---------- روند ماهانه (Period-Based، نه Lifetime) ----------
     List<TrendPoint> revenueTrend = [];
+    List<TrendPoint> expenseTrend = [];
     List<TrendPoint> receiptsTrend = [];
     List<TrendPoint> operatingResultTrend = [];
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
+    String? trendCaption;
     if (includeTrend) {
-      // یک «روند» ذاتاً به چند نقطه نیاز دارد. تقسیم بازه‌های کوتاه (مثل
-      // «امروز» یا «این ماه») فقط یک Bucket تولید می‌کند که نموداری با یک
-      // نقطهٔ تنها می‌سازد - عملاً بی‌فایده. در آن حالت به‌جایش ۶ ماه اخیر
-      // نمایش داده می‌شود تا نمودار واقعاً یک روند نشان دهد.
-      var buckets = DashboardPeriodResolver.monthlyBuckets(range.fromDate, range.toDate);
-      if (buckets.length < 2) {
-        buckets = DashboardPeriodResolver.lastNMonths(6);
-      }
-      for (final bucket in buckets) {
+      // محور افقی نمودار روند باید دقیقاً با واحد تقویمی بازه انتخابی
+      // هم‌راستا باشد (نه یک تقسیم دلخواه بر مبنای طول خام روز): هفته/این‌هفته
+      // → ۷ روز شنبه تا جمعه، این‌ماه/ماه‌قبل → روزهای همان ماه، فصل/سال →
+      // ماه‌های همان بازه. buildAxisPlan این تناظر را طبق preset (یا برای
+      // بازه سفارشی، طول واقعی بازه) تعیین می‌کند.
+      final axisPlan = DashboardPeriodResolver.buildAxisPlan(preset, range.fromDate, range.toDate);
+      trendCaption = axisPlan.caption;
+      for (final bucket in axisPlan.buckets) {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);
         revenueTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netRevenue));
-        receiptsTrend.add(TrendPoint(label: bucket.label, value: bucketReport.totalInflows));
+        expenseTrend.add(TrendPoint(
+            label: bucket.label,
+            value: bucketReport.directProjectCost +
+                bucketReport.projectOverhead +
+                bucketReport.officeExpense));
+        receiptsTrend.add(TrendPoint(
+            label: bucket.label,
+            value: bucketReport.customerReceipts + bucketReport.otherCashInflows));
         operatingResultTrend.add(TrendPoint(label: bucket.label, value: bucketReport.operatingResult));
         cashFlowTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netCashChange));
         final margin = bucketReport.netRevenue != 0
@@ -246,7 +254,9 @@ class ManagementDashboardService {
       totalNegativeAdjustments: totalNegativeAdj,
       netAdjustments: totalPositiveAdj - totalNegativeAdj,
       revenueTrend: revenueTrend,
+      expenseTrend: expenseTrend,
       receiptsTrend: receiptsTrend,
+      trendCaption: trendCaption,
       operatingResultTrend: operatingResultTrend,
       cashFlowTrend: cashFlowTrend,
       contributionMarginTrend: marginTrend,

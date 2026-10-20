@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
+import '../../services/backup_crypto.dart';
 import '../../services/backup_service.dart';
 import '../../services/security_service.dart';
 import '../../services/sms_listener_service.dart';
@@ -146,16 +147,121 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  /// دیالوگ اختیاری رمز عبور پیش از تهیه پشتیبان - چون این فایل معمولاً از
+  /// طریق کانال‌های عمومی (پیامک/ایمیل) به اشتراک گذاشته می‌شود. کاربر
+  /// می‌تواند «بدون رمز» را بزند و رد شود (رفتار پیش‌فرض قبلی، بدون تغییر).
+  /// برمی‌گرداند: null یعنی انصراف کامل، رشته خالی یعنی «بدون رمز».
+  Future<String?> _askExportPassword() async {
+    final controller = TextEditingController();
+    final confirmController = TextEditingController();
+    String? error;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('رمزگذاری فایل پشتیبان'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'اختیاری: با تعیین رمز عبور، فایل پشتیبان رمزنگاری می‌شود. '
+                'توجه: اگر این رمز را فراموش کنید، هیچ راهی برای بازیابی آن فایل خاص وجود نخواهد داشت.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'رمز عبور (اختیاری)'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: confirmController,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'تکرار رمز عبور'),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 8),
+                Text(error!, style: const TextStyle(color: AppColors.negative, fontSize: 12)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('بدون رمز'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (controller.text.isEmpty) {
+                  setDialogState(() => error = 'رمز عبور را وارد کنید یا «بدون رمز» را بزنید.');
+                  return;
+                }
+                if (controller.text != confirmController.text) {
+                  setDialogState(() => error = 'تکرار رمز عبور با رمز عبور یکسان نیست.');
+                  return;
+                }
+                Navigator.pop(ctx, controller.text);
+              },
+              child: const Text('رمزگذاری و ادامه'),
+            ),
+          ],
+        ),
+      ),
+    );
+    return result;
+  }
+
   Future<void> _export() async {
+    final password = await _askExportPassword();
+    if (password == null) return; // انصراف کامل
+
     setState(() => _busy = true);
     try {
-      await _backup.exportToFile();
-      _snack('فایل پشتیبان ساخته و برای اشتراک‌گذاری آماده شد.');
+      await _backup.exportToFile(password: password.isEmpty ? null : password);
+      _snack(password.isEmpty
+          ? 'فایل پشتیبان ساخته و برای اشتراک‌گذاری آماده شد.'
+          : 'فایل پشتیبان رمزنگاری‌شده ساخته و برای اشتراک‌گذاری آماده شد.');
     } catch (e) {
       _snack('خطا در تهیه پشتیبان: $e');
     } finally {
       setState(() => _busy = false);
     }
+  }
+
+  /// یک بار از کاربر رمز عبور فایل پشتیبان رمزنگاری‌شده را می‌پرسد.
+  /// null یعنی انصراف کامل.
+  Future<String?> _askImportPassword({String? error}) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('این فایل پشتیبان رمزنگاری‌شده است'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'رمز عبور'),
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 8),
+              Text(error, style: const TextStyle(color: AppColors.negative, fontSize: 12)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text),
+            child: const Text('تأیید'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _import({required bool replace}) async {
@@ -176,8 +282,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     setState(() => _busy = true);
     try {
-      await _backup.importFromPickedFile(replaceExisting: replace);
-      _snack('بازیابی با موفقیت انجام شد.');
+      final file = await _backup.pickBackupFile();
+      if (file == null) return;
+
+      String? password;
+      String? passwordError;
+      while (true) {
+        try {
+          await _backup.importBackupFile(file, replaceExisting: replace, password: password);
+          _snack('بازیابی با موفقیت انجام شد.');
+          break;
+        } on BackupPasswordRequiredException {
+          password = await _askImportPassword(error: passwordError);
+          if (password == null) return; // کاربر انصراف داد
+        } on BackupPasswordException catch (e) {
+          passwordError = e.message;
+          password = await _askImportPassword(error: passwordError);
+          if (password == null) return;
+        }
+      }
     } catch (e) {
       _snack('خطا در بازیابی: $e');
     } finally {

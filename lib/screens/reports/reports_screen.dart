@@ -13,6 +13,7 @@ import '../../utils/reloadable.dart';
 import '../journal/journal_entry_detail_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../widgets/jalali_date_field.dart';
+import 'widgets/operational_performance_tab.dart';
 
 enum _RangeMode { month, fiscalYear, custom }
 
@@ -40,9 +41,10 @@ class _ReportsScreenState extends State<ReportsScreen>
     with SingleTickerProviderStateMixin
     implements Reloadable<ReportsScreen> {
   late final TabController _tab =
-      TabController(length: 2, vsync: this, initialIndex: widget.initialTabIndex);
+      TabController(length: 3, vsync: this, initialIndex: widget.initialTabIndex);
   final _cashActivityKey = GlobalKey<State<_CashActivityTab>>();
   final _customerProfitKey = GlobalKey<State<_CustomerProfitTab>>();
+  final _operationalPerformanceKey = GlobalKey<State<OperationalPerformanceTab>>();
   int _lastTabIndex = 0;
 
   @override
@@ -67,7 +69,12 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   @override
   Future<void> reload() {
-    triggerReload(_tab.index == 0 ? _cashActivityKey : _customerProfitKey);
+    final key = switch (_tab.index) {
+      0 => _cashActivityKey,
+      1 => _customerProfitKey,
+      _ => _operationalPerformanceKey,
+    };
+    triggerReload(key);
     return Future.value();
   }
 
@@ -91,6 +98,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           tabs: const [
             Tab(text: 'دریافت و هزینه'),
             Tab(text: 'سود مشتریان'),
+            Tab(text: 'عملکرد عملیاتی'),
           ],
         ),
       ),
@@ -101,6 +109,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           _CustomerProfitTab(
               key: _customerProfitKey,
               initialSort: widget.sortCustomersByUrgency ? _CustomerSort.urgency : _CustomerSort.profit),
+          OperationalPerformanceTab(key: _operationalPerformanceKey),
         ],
       ),
     );

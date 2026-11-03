@@ -5,6 +5,7 @@ import '../../models/account.dart';
 import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
+import '../../services/project_workflow_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
@@ -39,6 +40,7 @@ class QuickReceiptScreen extends StatefulWidget {
 class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
   final _formKey = GlobalKey<FormState>();
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
 
   final _amount = TextEditingController();
   final _description = TextEditingController();
@@ -137,7 +139,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
           setState(() => _saving = false);
           return;
         }
-        await _db.receiveProjectPayment(
+        await _workflow.receiveProjectPayment(
           projectId: _projectId!,
           cashAccountId: _cashAccountId!,
           amount: amount.toDouble(),

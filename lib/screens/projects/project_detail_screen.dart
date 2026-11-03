@@ -6,6 +6,7 @@ import '../../models/counterparty.dart';
 import '../../models/project.dart';
 import '../../models/journal_entry.dart';
 import '../../models/project_price_event.dart';
+import '../../services/project_workflow_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/stat_card.dart';
@@ -30,6 +31,7 @@ class ProjectDetailScreen extends StatefulWidget {
 class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTickerProviderStateMixin {
   late final TabController _tab = TabController(length: 2, vsync: this);
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _pdf = PdfExportService();
   late ProjectModel _project;
   CounterpartyModel? _counterparty;
@@ -232,7 +234,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     );
     if (confirm != true) return;
     try {
-      await _db.reverseProjectReceipt(entry.id!);
+      await _workflow.reverseProjectReceipt(entry.id!);
       await _load();
       if (!mounted) return;
       final choice = await showDialog<String>(
@@ -292,7 +294,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     );
     if (confirm != true) return;
     try {
-      await _db.reverseProjectDiscount(entry.id!);
+      await _workflow.reverseProjectDiscount(entry.id!);
       await _load();
       if (!mounted) return;
       await _addDiscount();
@@ -321,7 +323,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen> with SingleTi
     );
     if (confirm != true) return;
     try {
-      await _db.reverseFinalAdjustment(entry.id!);
+      await _workflow.reverseFinalAdjustment(entry.id!);
       await _load();
       if (!mounted) return;
       await _addFinalAdjustment();

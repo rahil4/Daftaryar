@@ -5,6 +5,7 @@ import '../../models/account.dart';
 import '../../models/journal_entry.dart';
 import '../../models/project.dart';
 import '../../models/project_price_event.dart';
+import '../../services/project_workflow_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../widgets/jalali_date_field.dart';
@@ -197,7 +198,7 @@ class _FinalizeSheet extends StatefulWidget {
 }
 
 class _FinalizeSheetState extends State<_FinalizeSheet> {
-  final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   late final _amount =
       TextEditingController(text: formatMoney(widget.suggestedAmount, withSuffix: false));
   final _note = TextEditingController();
@@ -209,7 +210,7 @@ class _FinalizeSheetState extends State<_FinalizeSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.finalizeProject(
+      await _workflow.finalizeProject(
         projectId: widget.project.id!,
         finalAmount: amount,
         date: _date,
@@ -268,7 +269,7 @@ class _DiscountSheet extends StatefulWidget {
 }
 
 class _DiscountSheetState extends State<_DiscountSheet> {
-  final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _amount = TextEditingController();
   final _reason = TextEditingController();
   String _date = todayJalaliString();
@@ -279,7 +280,7 @@ class _DiscountSheetState extends State<_DiscountSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.recordProjectDiscount(
+      await _workflow.recordProjectDiscount(
         projectId: widget.project.id!,
         amount: amount,
         reason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
@@ -333,7 +334,7 @@ class _FinalAdjustmentSheet extends StatefulWidget {
 }
 
 class _FinalAdjustmentSheetState extends State<_FinalAdjustmentSheet> {
-  final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _amount = TextEditingController();
   final _reason = TextEditingController();
   String _direction = 'increase';
@@ -345,7 +346,7 @@ class _FinalAdjustmentSheetState extends State<_FinalAdjustmentSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.recordFinalAdjustment(
+      await _workflow.recordFinalAdjustment(
         projectId: widget.project.id!,
         amount: _direction == 'increase' ? amount : -amount,
         reason: _reason.text.trim().isEmpty ? null : _reason.text.trim(),
@@ -411,6 +412,7 @@ class _EditDiscountSheet extends StatefulWidget {
 
 class _EditDiscountSheetState extends State<_EditDiscountSheet> {
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _amount = TextEditingController();
   final _reason = TextEditingController();
   String _date = todayJalaliString();
@@ -441,7 +443,7 @@ class _EditDiscountSheetState extends State<_EditDiscountSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.updateProjectDiscount(
+      await _workflow.updateProjectDiscount(
         entryId: widget.entry.id!,
         amount: amount,
         date: _date,
@@ -501,6 +503,7 @@ class _EditFinalAdjustmentSheet extends StatefulWidget {
 
 class _EditFinalAdjustmentSheetState extends State<_EditFinalAdjustmentSheet> {
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _amount = TextEditingController();
   final _reason = TextEditingController();
   String _direction = 'increase';
@@ -534,7 +537,7 @@ class _EditFinalAdjustmentSheetState extends State<_EditFinalAdjustmentSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.updateFinalAdjustment(
+      await _workflow.updateFinalAdjustment(
         entryId: widget.entry.id!,
         amount: _direction == 'increase' ? amount : -amount,
         date: _date,
@@ -602,6 +605,7 @@ class _ReceivePaymentSheet extends StatefulWidget {
 
 class _ReceivePaymentSheetState extends State<_ReceivePaymentSheet> {
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   final _amount = TextEditingController();
   final _description = TextEditingController();
   String _date = todayJalaliString();
@@ -631,7 +635,7 @@ class _ReceivePaymentSheetState extends State<_ReceivePaymentSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.receiveProjectPayment(
+      await _workflow.receiveProjectPayment(
         projectId: widget.project.id!,
         cashAccountId: _cashAccountId!,
         amount: amount,
@@ -715,6 +719,7 @@ class _EditReceiptSheet extends StatefulWidget {
 
 class _EditReceiptSheetState extends State<_EditReceiptSheet> {
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   late final JournalLineModel _cashLine = widget.entry.lines.firstWhere((l) => l.debit > 0);
   late final _amount =
       TextEditingController(text: formatMoney(_cashLine.debit.toDouble(), withSuffix: false));
@@ -746,7 +751,7 @@ class _EditReceiptSheetState extends State<_EditReceiptSheet> {
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.updateProjectReceipt(
+      await _workflow.updateProjectReceipt(
         entryId: widget.entry.id!,
         cashAccountId: _cashAccountId!,
         amount: amount,
@@ -823,6 +828,7 @@ class _ConvertReceiptToExpenseSheet extends StatefulWidget {
 
 class _ConvertReceiptToExpenseSheetState extends State<_ConvertReceiptToExpenseSheet> {
   final _db = DatabaseHelper.instance;
+  final _workflow = ProjectWorkflowService(DatabaseHelper.instance);
   late final JournalLineModel _cashLine = widget.entry.lines.firstWhere((l) => l.debit > 0);
   late final _amount =
       TextEditingController(text: formatMoney(_cashLine.debit.toDouble(), withSuffix: false));
@@ -859,7 +865,7 @@ class _ConvertReceiptToExpenseSheetState extends State<_ConvertReceiptToExpenseS
     if (amount <= 0) return;
     setState(() => _saving = true);
     try {
-      await _db.convertReceiptToExpense(
+      await _workflow.convertReceiptToExpense(
         entryId: widget.entry.id!,
         expenseAccountId: _expenseAccountId!,
         cashAccountId: _cashAccountId!,

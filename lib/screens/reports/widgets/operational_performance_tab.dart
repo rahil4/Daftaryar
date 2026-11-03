@@ -76,26 +76,28 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-        children: [
-          PeriodSelectorWidget(selected: _preset, onChanged: _onPresetChanged),
-          const SizedBox(height: 16),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.only(top: 60),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 40),
-              child: Center(child: Text(_error!, style: const TextStyle(color: AppColors.negative))),
-            )
-          else if (_data != null)
-            ..._buildSections(_data!),
-        ],
+    return BlueprintGridBackground(
+      child: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          children: [
+            PeriodSelectorWidget(selected: _preset, onChanged: _onPresetChanged),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 60),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 40),
+                child: Center(child: Text(_error!, style: const TextStyle(color: AppColors.negative))),
+              )
+            else if (_data != null)
+              ..._buildSections(_data!),
+          ],
+        ),
       ),
     );
   }
@@ -204,7 +206,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
   Widget _sectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(top: 20, bottom: 8),
-      child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+      child: Text(title, style: AppTextStyles.sectionTitle),
     );
   }
 

@@ -263,9 +263,10 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : filtered.isEmpty
-                  ? const Center(
-                      child: Text('سندی با این فیلترها یافت نشد',
-                          style: TextStyle(color: AppColors.textSecondary)))
+                  ? Center(
+                      child: Text(
+                          _hasActiveFilters ? 'سندی با این فیلترها یافت نشد' : 'هنوز سندی ثبت نشده است',
+                          style: const TextStyle(color: AppColors.textSecondary)))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView(

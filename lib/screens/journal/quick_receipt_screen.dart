@@ -182,9 +182,10 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('ثبت دریافت / درآمد')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
               key: _formKey,
               child: ListView(
                 padding:
@@ -297,6 +298,7 @@ class _QuickReceiptScreenState extends State<QuickReceiptScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

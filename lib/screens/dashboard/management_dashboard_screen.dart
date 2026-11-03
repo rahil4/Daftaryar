@@ -172,8 +172,14 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
                 const SizedBox(height: 10),
                 _PendingSmsBanner(count: _pendingSmsDrafts, onTap: _load),
               ],
-              if (_daysSinceLastBackup == null ||
-                  _daysSinceLastBackup! >= kBackupReminderThresholdDays) ...[
+              // یادآور پشتیبان‌گیری فقط بعد از رد شدن از مرحله کاربر تازه
+              // نمایش داده می‌شود؛ وگرنه برای کاربری که هنوز حتی اولین
+              // طرف‌حساب/پروژه‌اش را ثبت نکرده، همزمان با راهنمای شروع کار
+              // نشان داده می‌شد - توصیه بی‌موقعی («داده‌ات را پشتیبان بگیر»)
+              // درباره داده‌ای که هنوز وجود ندارد.
+              if (!_isNewUser &&
+                  (_daysSinceLastBackup == null ||
+                      _daysSinceLastBackup! >= kBackupReminderThresholdDays)) ...[
                 const SizedBox(height: 10),
                 _BackupReminderBanner(daysSince: _daysSinceLastBackup, onTap: _load),
               ],

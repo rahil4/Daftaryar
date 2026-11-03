@@ -22,6 +22,21 @@ class AppColors {
 /// نام خانواده فونت محلی که در assets/fonts باندل شده (بدون نیاز به اینترنت)
 const String kAppFontFamily = 'Vazirmatn';
 
+/// مقیاس تایپوگرافی مشترک - چند سایز/وزن نام‌گذاری‌شده به‌جای مقادیر دستی
+/// پراکنده (در حال حاضر نزدیک به ۱۸ مقدار متفاوت fontSize در کل برنامه، از
+/// ۸.۵ تا ۲۲، بدون هیچ الگوی مشترک). این کلاس فقط پایه را اضافه می‌کند؛
+/// جایگزینی تدریجی مقادیر دستی موجود با این‌ها یک گام جداست تا ریسک تغییر
+/// بصری ناخواسته در صفحاتی که در این محیط قابل تست بصری نیستند، به یک‌باره
+/// به کل برنامه تحمیل نشود.
+class AppTextStyles {
+  static const caption =
+      TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary);
+  static const label = TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600);
+  static const body = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500);
+  static const sectionTitle = TextStyle(fontSize: 15, fontWeight: FontWeight.w800);
+  static const pageHeading = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
+}
+
 class AppTheme {
   static ThemeData get theme {
     const fontFamily = kAppFontFamily;

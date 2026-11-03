@@ -157,9 +157,10 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
     final isEdit = widget.existing != null;
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? 'ویرایش پروژه' : 'پروژه جدید')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
               key: _formKey,
               child: ListView(
                 padding:
@@ -278,6 +279,7 @@ class _ProjectFormScreenState extends State<ProjectFormScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

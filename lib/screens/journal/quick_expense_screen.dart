@@ -186,9 +186,10 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('ثبت هزینه / پرداخت')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
               key: _formKey,
               child: ListView(
                 padding:
@@ -305,6 +306,7 @@ class _QuickExpenseScreenState extends State<QuickExpenseScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

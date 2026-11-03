@@ -123,9 +123,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<Project
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _projects.isEmpty
-                      ? const Center(
-                          child: Text('پروژه‌ای یافت نشد',
-                              style: TextStyle(color: AppColors.textSecondary)))
+                      ? Center(
+                          child: Text(
+                              (_query.isNotEmpty ||
+                                      _statusFilter != null ||
+                                      widget.onlyOpenFinancially)
+                                  ? 'نتیجه‌ای برای این جستجو/فیلتر یافت نشد'
+                                  : 'هنوز پروژه‌ای ثبت نشده است',
+                              style: const TextStyle(color: AppColors.textSecondary)))
                       : ListView.builder(
                           padding: const EdgeInsets.all(12),
                           itemCount: _projects.length,

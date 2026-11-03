@@ -6,7 +6,7 @@ import '../../../theme/app_theme.dart';
 Widget _sectionTitle(String title) {
   return Padding(
     padding: const EdgeInsets.only(top: 20, bottom: 8),
-    child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+    child: Text(title, style: AppTextStyles.sectionTitle),
   );
 }
 

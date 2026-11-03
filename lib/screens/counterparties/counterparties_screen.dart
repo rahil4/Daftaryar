@@ -75,9 +75,12 @@ class _CounterpartiesScreenState extends State<CounterpartiesScreen> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _counterparties.isEmpty
-                      ? const Center(
-                          child: Text('هنوز طرف حسابی ثبت نشده است',
-                              style: TextStyle(color: AppColors.textSecondary)))
+                      ? Center(
+                          child: Text(
+                              _query.isNotEmpty
+                                  ? 'نتیجه‌ای برای این جستجو یافت نشد'
+                                  : 'هنوز طرف حسابی ثبت نشده است',
+                              style: const TextStyle(color: AppColors.textSecondary)))
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           itemCount: _counterparties.length,

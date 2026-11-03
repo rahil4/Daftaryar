@@ -145,9 +145,10 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
     final balanced = _totalDebit == _totalCredit && _totalDebit > 0;
     return Scaffold(
       appBar: AppBar(title: const Text('سند حسابداری جدید')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
               children: [
                 JalaliDateField(
@@ -214,6 +215,7 @@ class _JournalFormScreenState extends State<JournalFormScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 

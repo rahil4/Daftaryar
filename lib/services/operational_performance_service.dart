@@ -56,8 +56,11 @@ class OperationalPerformanceService {
     bool includeTrend = true,
   }) async {
     final warnings = <String>[];
-    final allProjects = await _db.getProjects();
-    final allReports = await _reporting.getProjectReports();
+    // شاخص‌های همه پروژه‌ها یک‌بار و دسته‌ای بارگذاری و بین همه بخش‌های این
+    // گزارش مشترک می‌شوند.
+    final snapshot = await _reporting.loadSnapshot();
+    final allProjects = snapshot.projects;
+    final allReports = await _reporting.getProjectReports(snapshot: snapshot);
     final reportById = {for (final r in allReports) r.projectId: r};
 
     // ---------- Activity Overview ----------
@@ -139,10 +142,11 @@ class OperationalPerformanceService {
         finalizedInPeriod.isNotEmpty ? (lossCount / finalizedInPeriod.length) * 100 : null;
 
     // ---------- Customer Concentration (Lifetime - محدودیت مستند) ----------
-    final top1 = await _reporting.getTopCustomersRevenueShare(1);
-    final top3 = await _reporting.getTopCustomersRevenueShare(3);
-    final top5 = await _reporting.getTopCustomersRevenueShare(5);
-    warnings.add('شاخص‌های تمرکز مشتری (Top1/Top3/Top5) بر مبنای کل عمر داده‌ها (Lifetime) محاسبه شده‌اند، نه محدود به بازه انتخابی.');
+    final customerReports = await _reporting.getAllCustomerReports(snapshot: snapshot);
+    final top1 = await _reporting.getTopCustomersRevenueShare(1, customerReports: customerReports);
+    final top3 = await _reporting.getTopCustomersRevenueShare(3, customerReports: customerReports);
+    final top5 = await _reporting.getTopCustomersRevenueShare(5, customerReports: customerReports);
+    warnings.add('شاخص‌های تمرکز مشتری (سهم ۱، ۳ و ۵ مشتری برتر) بر مبنای کل دوره فعالیت محاسبه شده‌اند، نه محدود به بازه انتخابی.');
 
     // ---------- Pricing & Discount (ProjectPriceEvent.date) ----------
     final priceEventsInPeriod =
@@ -249,7 +253,8 @@ class OperationalPerformanceService {
     }
 
     // ---------- Diagnostics & Alerts ----------
-    final diagnostics = await _reporting.getDiagnostics(fromDate: period.fromDate, toDate: period.toDate);
+    final diagnostics = await _reporting.getDiagnostics(
+        fromDate: period.fromDate, toDate: period.toDate, snapshot: snapshot);
     final alerts = _buildAlerts(
       lossCount: lossCount,
       marginChangePoints: marginChangePoints,
@@ -330,7 +335,7 @@ class OperationalPerformanceService {
     if (lossCount > 0) {
       alerts.add(ManagementAlert(
         title: 'پروژه‌های زیان‌ده',
-        message: '$lossCount پروژه زیان‌ده در این بازه Finalize شده است',
+        message: '$lossCount پروژه زیان‌ده در این بازه نهایی شده است',
         severity: ManagementAlertSeverity.warning,
       ));
     }
@@ -344,7 +349,7 @@ class OperationalPerformanceService {
     if (diagnostics.revenueLedgerMismatchCount > 0) {
       alerts.add(ManagementAlert(
         title: 'ناسازگاری تطبیق درآمد',
-        message: 'ناسازگاری بین درآمد محاسبه‌شده و Ledger شناسایی شد',
+        message: 'ناسازگاری بین درآمد محاسبه‌شده و دفتر شناسایی شد',
         severity: ManagementAlertSeverity.error,
       ));
     }

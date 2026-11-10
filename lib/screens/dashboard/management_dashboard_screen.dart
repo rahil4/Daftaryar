@@ -53,6 +53,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
   final _db = DatabaseHelper.instance;
   final _healthService = DataHealthService();
   DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
+  String _customFrom = defaultCustomPeriodRange().from;
+  String _customTo = defaultCustomPeriodRange().to;
+  // شماره آخرین بارگذاری: اگر کاربر پیش از تمام‌شدن یک بارگذاری، بازه را
+  // عوض کند، نتیجه دیرتر-رسیده بارگذاری قدیمی نباید روی نتیجه جدید بنشیند.
+  int _loadToken = 0;
   ManagementDashboardData? _data;
   bool _loading = true;
   String? _error;
@@ -71,6 +76,7 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
   Future<void> reload() => _load();
 
   Future<void> _load() async {
+    final token = ++_loadToken;
     setState(() {
       _loading = true;
       _error = null;
@@ -92,7 +98,9 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
     final projects = await _db.getProjects();
     final isNewUser = counterparties.isEmpty && projects.isEmpty;
     try {
-      final data = await _service.buildDashboard(preset: _preset);
+      final data = await _service.buildDashboard(
+          preset: _preset, customFrom: _customFrom, customTo: _customTo);
+      if (!mounted || token != _loadToken) return;
       setState(() {
         _data = data;
         _pendingSmsDrafts = pendingDrafts;
@@ -102,8 +110,11 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         _loading = false;
       });
     } catch (e) {
+      if (!mounted || token != _loadToken) return;
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
+        // اعداد قبلی کنار پیام خطا نمی‌مانند: معلوم نیست هنوز معتبرند.
+        _data = null;
         _pendingSmsDrafts = pendingDrafts;
         _health = health;
         _daysSinceLastBackup = daysSinceBackup;
@@ -184,7 +195,17 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
                 _BackupReminderBanner(daysSince: _daysSinceLastBackup, onTap: _load),
               ],
               const SizedBox(height: 16),
-              if (_loading)
+              // هنگام تازه‌سازی، داده قبلی روی صفحه می‌ماند و فقط یک نوار
+              // باریک پیشرفت بالای آن می‌آید؛ چرخنده تمام‌صفحه فقط برای اولین
+              // بارگذاری است که هنوز چیزی برای نمایش نیست.
+              if (_data != null) ...[
+                SizedBox(
+                  height: 2,
+                  child: _loading ? const LinearProgressIndicator(minHeight: 2) : null,
+                ),
+                const SizedBox(height: 6),
+                _buildContent(_data!),
+              ] else if (_loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 60),
                   child: Center(child: CircularProgressIndicator()),
@@ -194,11 +215,7 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
                   padding: const EdgeInsets.symmetric(vertical: 40),
                   child: Text('خطا در بارگذاری داشبورد: $_error',
                       style: const TextStyle(color: AppColors.negative)),
-                )
-              else if (_data != null)
-                _buildContent(_data!)
-              else
-                const SizedBox.shrink(),
+                ),
             ],
           ),
         ),
@@ -251,6 +268,15 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
           selected: _preset,
           onChanged: (p) {
             setState(() => _preset = p);
+            _load();
+          },
+          customFrom: _customFrom,
+          customTo: _customTo,
+          onCustomRangeChanged: (from, to) {
+            setState(() {
+              _customFrom = from;
+              _customTo = to;
+            });
             _load();
           },
         ),

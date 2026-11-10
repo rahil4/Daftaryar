@@ -13,12 +13,10 @@ import 'financial_reporting_service.dart';
 /// FinancialMetricsService → DatabaseHelper/Ledger.
 class ManagementDashboardService {
   final DatabaseHelper _db;
-  final FinancialMetricsService _metrics;
   final FinancialReportingService _reporting;
 
   ManagementDashboardService({DatabaseHelper? db, FinancialMetricsService? metrics, FinancialReportingService? reporting})
       : _db = db ?? DatabaseHelper.instance,
-        _metrics = metrics ?? FinancialMetricsService(db),
         _reporting = reporting ?? FinancialReportingService(db: db, metrics: metrics);
 
   Future<ManagementDashboardData> buildDashboard({
@@ -89,7 +87,10 @@ class ManagementDashboardService {
     }
 
     // ---------- پروژه‌ها (Lifetime - مستقل از Period انتخاب‌شده) ----------
-    final allProjectReports = await _reporting.getProjectReports();
+    // شاخص‌های همه پروژه‌ها فقط یک‌بار (و دسته‌ای) بارگذاری می‌شوند و بین
+    // گزارش پروژه‌ها، مشتریان، قیمت‌گذاری و تشخیص‌ها مشترک‌اند.
+    final snapshot = await _reporting.loadSnapshot();
+    final allProjectReports = await _reporting.getProjectReports(snapshot: snapshot);
     final worst = _reporting.getWorstProjects(allProjectReports, ProjectReportSort.contribution);
     final best = _reporting.getBestProjects(allProjectReports, ProjectReportSort.contribution);
     final outstanding = allProjectReports.where((p) => p.receivableBalance > 0).toList()
@@ -105,8 +106,9 @@ class ManagementDashboardService {
     final unsettledCount = finalizedCount - settledCount;
 
     // ---------- مشتریان ----------
-    final customers = await _reporting.getAllCustomerReports(sortBy: CustomerReportSort.netRevenue);
-    final top5Share = await _reporting.getTopCustomersRevenueShare(5);
+    final customers = await _reporting.getAllCustomerReports(
+        sortBy: CustomerReportSort.netRevenue, snapshot: snapshot);
+    final top5Share = await _reporting.getTopCustomersRevenueShare(5, customerReports: customers);
 
     // ---------- قیمت‌گذاری و اصلاحات (جمع روی پروژه‌های Finalized، Lifetime) ----------
     double totalInitial = 0, totalFinal = 0, totalAdditions = 0, totalReductions = 0;
@@ -118,11 +120,11 @@ class ManagementDashboardService {
         totalFinal += p.finalAmount ?? 0;
         if (p.priceIncreaseRate != null) priceIncreaseRates.add(p.priceIncreaseRate!);
       }
-      final m = await _metrics.getProjectMetrics(p.projectId);
+      final m = snapshot.metricsById[p.projectId]!;
       totalAdditions += m.priceAdditions;
       totalReductions += m.priceReductions;
 
-      final adj = await _reporting.getAdjustmentAnalysis(p.projectId);
+      final adj = await _reporting.getAdjustmentAnalysis(p.projectId, snapshot: snapshot);
       totalPositiveAdj += adj['totalPositiveAdjustments']!;
       totalNegativeAdj += adj['totalNegativeAdjustments']!;
     }
@@ -183,7 +185,8 @@ class ManagementDashboardService {
     }
 
     // ---------- Diagnostics و هشدارها ----------
-    final diagnostics = await _reporting.getDiagnostics(fromDate: range.fromDate, toDate: range.toDate);
+    final diagnostics = await _reporting.getDiagnostics(
+        fromDate: range.fromDate, toDate: range.toDate, snapshot: snapshot);
     final alerts = _buildAlerts(
       lossProjectsCount: lossProjects.length,
       outstandingProjectsCount: outstanding.length,
@@ -299,7 +302,7 @@ class ManagementDashboardService {
     if (diagnostics.revenueLedgerMismatchCount > 0) {
       alerts.add(ManagementAlert(
         title: 'ناسازگاری تطبیق درآمد',
-        message: 'ناسازگاری بین درآمد محاسبه‌شده و Ledger شناسایی شد',
+        message: 'ناسازگاری بین درآمد محاسبه‌شده و دفتر شناسایی شد',
         severity: ManagementAlertSeverity.error,
       ));
     }

@@ -39,6 +39,26 @@ class MissingControlAccountException implements Exception {
       '(شناسه فنی: $systemKey)';
 }
 
+/// خروجی projectLedgerAggregates: مانده‌های سطح پروژه، به تفکیک شناسه
+/// پروژه. نبودِ یک شناسه در هر نگاشت یعنی مقدار صفر.
+class ProjectLedgerAggregates {
+  final Map<int, double> received;
+  final Map<int, double> receivable;
+  final Map<int, double> advance;
+  final Map<int, double> customerCredit;
+  final Map<int, double> revenueLedger;
+  final Map<int, double> directCost;
+
+  const ProjectLedgerAggregates({
+    required this.received,
+    required this.receivable,
+    required this.advance,
+    required this.customerCredit,
+    required this.revenueLedger,
+    required this.directCost,
+  });
+}
+
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -818,12 +838,21 @@ class DatabaseHelper {
     }
     final maps = await db.query('projects',
         where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'id DESC');
-    final result = <ProjectModel>[];
-    for (final m in maps) {
-      final types = await _typesForProject(db, m['id'] as int);
-      result.add(ProjectModel.fromMap(m, projectTypes: types));
+    if (maps.isEmpty) return [];
+    // انواع همه پروژه‌ها در یک کوئری (به‌جای یک کوئری به‌ازای هر پروژه) -
+    // همان Join و همان ترتیب (نام نوع، صعودی) که _typesForProject دارد.
+    final typeRows = await db.rawQuery('''
+      SELECT a.projectId as projectId, t.name as name FROM project_types t
+      JOIN project_type_assignments a ON a.typeId = t.id
+      ORDER BY t.name ASC
+    ''');
+    final typesByProject = <int, List<String>>{};
+    for (final r in typeRows) {
+      (typesByProject[r['projectId'] as int] ??= []).add(r['name'] as String);
     }
-    return result;
+    return maps
+        .map((m) => ProjectModel.fromMap(m, projectTypes: typesByProject[m['id'] as int] ?? const []))
+        .toList();
   }
 
   Future<ProjectModel?> getProject(int id, [DatabaseExecutor? executor]) async {
@@ -1431,6 +1460,79 @@ class DatabaseHelper {
   Future<double> projectRevenueLedgerBalance(int projectId) async {
     return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyProjectRevenue),
         debitNormal: false);
+  }
+
+  /// مانده‌های سطح پروژه برای **همه** پروژه‌ها در تعداد ثابتی کوئری (سه
+  /// کوئری، مستقل از تعداد پروژه). هیچ قاعده مالی جدیدی اینجا تعریف
+  /// نمی‌شود: هر مقدار دقیقاً همان تعریف متد تک‌پروژه‌ای متناظرش را دارد
+  /// (projectFinancials['received']، projectReceivableBalance،
+  /// projectAdvanceBalance، projectCustomerCreditBalance،
+  /// projectRevenueLedgerBalance، projectDirectCost) - فقط با GROUP BY
+  /// projectId به‌جای WHERE projectId = ?. پروژه‌ای که هیچ سطری ندارد در
+  /// نگاشت‌ها نمی‌آید و مقدارش صفر است (معادل COALESCE نسخه تک‌پروژه‌ای).
+  /// برابری عددی این دو مسیر با تست تضمین می‌شود.
+  Future<ProjectLedgerAggregates> projectLedgerAggregates() async {
+    final db = await database;
+    final cashAccounts = await _requireCashAccounts();
+    final ar = await _requireControlAccount(kSystemKeyReceivable);
+    final advance = await _requireControlAccount(kSystemKeyCustomerAdvance);
+    final credit = await _requireControlAccount(kSystemKeyCustomerCredit);
+    final revenue = await _requireControlAccount(kSystemKeyProjectRevenue);
+    final discountAccount = await getServiceDiscountAccount();
+
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final receivedRows = await db.rawQuery('''
+      SELECT projectId, COALESCE(SUM(debit),0) as total
+      FROM journal_lines
+      WHERE projectId IS NOT NULL AND accountId IN ($placeholders)
+      GROUP BY projectId
+    ''', cashAccounts.map((a) => a.id).toList());
+
+    final controlRows = await db.rawQuery('''
+      SELECT projectId, accountId, COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines
+      WHERE projectId IS NOT NULL AND accountId IN (?, ?, ?, ?)
+      GROUP BY projectId, accountId
+    ''', [ar.id, advance.id, credit.id, revenue.id]);
+
+    final directCostRows = await db.rawQuery('''
+      SELECT l.projectId as projectId,
+             COALESCE(SUM(l.debit),0) - COALESCE(SUM(l.credit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE l.projectId IS NOT NULL AND a.type = ? AND (a.id != ? OR ? IS NULL)
+      GROUP BY l.projectId
+    ''', [kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id]);
+
+    final receivable = <int, double>{};
+    final advanceMap = <int, double>{};
+    final creditMap = <int, double>{};
+    final revenueMap = <int, double>{};
+    for (final r in controlRows) {
+      final projectId = r['projectId'] as int;
+      final accountId = r['accountId'] as int;
+      final d = (r['d'] as num).toDouble();
+      final c = (r['c'] as num).toDouble();
+      if (accountId == ar.id) {
+        receivable[projectId] = d - c; // بدهکارطبیعی
+      } else if (accountId == advance.id) {
+        advanceMap[projectId] = c - d;
+      } else if (accountId == credit.id) {
+        creditMap[projectId] = c - d;
+      } else if (accountId == revenue.id) {
+        revenueMap[projectId] = c - d;
+      }
+    }
+
+    return ProjectLedgerAggregates(
+      received: {for (final r in receivedRows) r['projectId'] as int: (r['total'] as num).toDouble()},
+      receivable: receivable,
+      advance: advanceMap,
+      customerCredit: creditMap,
+      revenueLedger: revenueMap,
+      directCost: {
+        for (final r in directCostRows) r['projectId'] as int: (r['total'] as num).toDouble()
+      },
+    );
   }
 
   /// آیا این حساب یا یکی از والدینش (تا هر عمقی) صندوق/بانک است؟ با این

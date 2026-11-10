@@ -15,7 +15,7 @@ import '../../dashboard/widgets/trend_chart_widget.dart';
 const Map<String, String> _kComparisonLabels = {
   'revenue': 'درآمد',
   'contribution': 'سود ناخالص',
-  'projectVolume': 'تعداد پروژه Finalize‌شده',
+  'projectVolume': 'تعداد پروژه نهایی‌شده',
   'periodReceiptToRevenueRatio': 'نسبت دریافتی به درآمد',
   'receivable': 'مانده مطالبات',
 };
@@ -34,9 +34,13 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
     implements Reloadable<OperationalPerformanceTab> {
   final _service = OperationalPerformanceService();
   DashboardPeriodPreset _preset = DashboardPeriodPreset.thisMonth;
+  String _customFrom = defaultCustomPeriodRange().from;
+  String _customTo = defaultCustomPeriodRange().to;
   OperationalPerformanceData? _data;
   bool _loading = true;
   String? _error;
+  // نتیجه دیرتر-رسیده یک بارگذاری قدیمی نباید روی نتیجه جدید بنشیند.
+  int _loadToken = 0;
 
   @override
   void initState() {
@@ -48,22 +52,26 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
   Future<void> reload() => _load();
 
   Future<void> _load() async {
+    final token = ++_loadToken;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final period = await _service.resolvePeriod(_preset);
+      final period =
+          await _service.resolvePeriod(_preset, customFrom: _customFrom, customTo: _customTo);
       final data = await _service.buildOperationalPerformance(period: period);
-      if (!mounted) return;
+      if (!mounted || token != _loadToken) return;
       setState(() {
         _data = data;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || token != _loadToken) return;
       setState(() {
         _error = e.toString().replaceAll('Exception: ', '');
+        // اعداد قبلی کنار پیام خطا نمی‌مانند: معلوم نیست هنوز معتبرند.
+        _data = null;
         _loading = false;
       });
     }
@@ -82,9 +90,30 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            PeriodSelectorWidget(selected: _preset, onChanged: _onPresetChanged),
-            const SizedBox(height: 16),
-            if (_loading)
+            PeriodSelectorWidget(
+              selected: _preset,
+              onChanged: _onPresetChanged,
+              customFrom: _customFrom,
+              customTo: _customTo,
+              onCustomRangeChanged: (from, to) {
+                setState(() {
+                  _customFrom = from;
+                  _customTo = to;
+                });
+                _load();
+              },
+            ),
+            const SizedBox(height: 14),
+            // هنگام تازه‌سازی، داده قبلی می‌ماند و فقط یک نوار باریک پیشرفت
+            // می‌آید؛ چرخنده فقط برای اولین بارگذاری است.
+            if (_data != null) ...[
+              SizedBox(
+                height: 2,
+                child: _loading ? const LinearProgressIndicator(minHeight: 2) : null,
+              ),
+              const SizedBox(height: 6),
+              ..._buildSections(_data!),
+            ] else if (_loading)
               const Padding(
                 padding: EdgeInsets.only(top: 60),
                 child: Center(child: CircularProgressIndicator()),
@@ -93,9 +122,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
               Padding(
                 padding: const EdgeInsets.only(top: 40),
                 child: Center(child: Text(_error!, style: const TextStyle(color: AppColors.negative))),
-              )
-            else if (_data != null)
-              ..._buildSections(_data!),
+              ),
           ],
         ),
       ),
@@ -108,11 +135,11 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
       _sectionTitle('فعالیت پروژه‌ها در این بازه'),
       _grid([
         StatCard(title: 'پروژه جدید', value: pn(d.newProjectCount)),
-        StatCard(title: 'Finalize‌شده', value: pn(d.finalizedProjectCount)),
+        StatCard(title: 'نهایی‌شده', value: pn(d.finalizedProjectCount)),
         StatCard(title: 'در جریان (وضعیت فعلی)', value: pn(d.openProjectCount)),
         StatCard(title: 'لغو‌شده', value: pn(d.cancelledProjectCount)),
       ]),
-      _sectionTitle('عملکرد مالی بازه (پروژه‌های Finalize‌شده)'),
+      _sectionTitle('عملکرد مالی بازه (پروژه‌های نهایی‌شده)'),
       _grid([
         StatCard(title: 'درآمد', value: formatMoney(d.finalizedRevenue), color: AppColors.positive),
         StatCard(title: 'هزینه مستقیم', value: formatMoney(d.finalizedDirectCost), color: AppColors.negative),
@@ -136,7 +163,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
           ),
         ),
       ],
-      _sectionTitle('پراکندگی سودآوری پروژه‌های Finalize‌شده'),
+      _sectionTitle('پراکندگی سودآوری پروژه‌های نهایی‌شده'),
       _grid([
         StatCard(title: 'زیان‌ده', value: pn(d.lossProjectCount), color: AppColors.negative),
         StatCard(title: 'حاشیه کم', value: pn(d.lowMarginProjectCount), color: AppColors.brass),
@@ -181,7 +208,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
         const SizedBox(height: 12),
         TrendChartWidget(title: 'سود ناخالص', points: d.contributionTrend, color: AppColors.teal),
         const SizedBox(height: 12),
-        TrendChartWidget(title: 'تعداد پروژه Finalize‌شده', points: d.projectVolumeTrend, color: AppColors.info),
+        TrendChartWidget(title: 'تعداد پروژه نهایی‌شده', points: d.projectVolumeTrend, color: AppColors.info),
         const SizedBox(height: 12),
         TrendChartWidget(title: 'مانده مطالبات', points: d.receivableTrend, color: AppColors.negative),
       ],
@@ -282,7 +309,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
       ));
     }
 
-    addRow('ناسازگاری درآمد محاسبه‌شده با Ledger', diag.revenueLedgerMismatchCount);
+    addRow('ناسازگاری درآمد محاسبه‌شده با دفتر', diag.revenueLedgerMismatchCount);
     addRow('مانده منفی مطالبات', diag.negativeARCount);
     addRow('مانده منفی پیش‌دریافت', diag.negativeAdvanceCount);
     addRow('مانده منفی اعتبار مشتری', diag.negativeCustomerCreditCount);

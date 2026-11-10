@@ -10,6 +10,24 @@ import '../models/project_price_event.dart';
 /// JournalLine) می‌خواند و شاخص‌ها را در لحظه محاسبه می‌کند. برای مانده‌های
 /// پایه (AR/Advance/CustomerCredit/...) همیشه از توابع موجود در
 /// DatabaseHelper استفاده می‌کند، نه فرمول موازی.
+/// نتیجه یک‌بار بارگذاری دسته‌ای شاخص‌های همه پروژه‌ها - بین همه
+/// گزارش‌های یک بارگذاری (پروژه‌ها، مشتریان، تشخیص‌ها) به اشتراک گذاشته
+/// می‌شود تا هر پروژه فقط یک‌بار محاسبه شود. هیچ‌چیز ذخیره/Cache ماندگار
+/// نمی‌شود؛ عمر این شیء فقط همان یک بارگذاری است.
+class ProjectMetricsSnapshot {
+  final List<ProjectModel> projects; // همان ترتیب getProjects (جدیدترین اول)
+  final Map<int, ProjectFinancialMetrics> metricsById;
+  final Map<int, List<ProjectPriceEventModel>> eventsByProject;
+  final Map<int, double> revenueLedgerByProject;
+
+  const ProjectMetricsSnapshot({
+    required this.projects,
+    required this.metricsById,
+    required this.eventsByProject,
+    required this.revenueLedgerByProject,
+  });
+}
+
 class FinancialMetricsService {
   final DatabaseHelper _db;
   FinancialMetricsService([DatabaseHelper? db]) : _db = db ?? DatabaseHelper.instance;
@@ -27,6 +45,32 @@ class FinancialMetricsService {
   Future<ProjectFinancialMetrics> _computeProjectMetrics(ProjectModel project) async {
     final projectId = project.id!;
     final events = await _db.getProjectPriceEvents(projectId);
+    final cashFlow = await _db.projectFinancials(projectId); // received واقعی نقدی، نه Revenue
+    return _buildProjectMetrics(
+      project,
+      events,
+      totalReceived: cashFlow['received']!,
+      advanceBalance: await _db.projectAdvanceBalance(projectId),
+      receivableBalance: await _db.projectReceivableBalance(projectId),
+      customerCredit: await _db.projectCustomerCreditBalance(projectId),
+      directProjectCost: await _db.projectDirectCost(projectId),
+    );
+  }
+
+  /// تنها محل فرمول شاخص‌های پروژه - بدون هیچ دسترسی به دیتابیس. هم مسیر
+  /// تک‌پروژه‌ای (_computeProjectMetrics) و هم مسیر دسته‌ای (loadSnapshot)
+  /// مقادیر پایه را به همین تابع می‌دهند، پس دو فرمول موازی وجود ندارد؛
+  /// فقط شیوه خواندن مقادیر پایه از Ledger فرق می‌کند.
+  ProjectFinancialMetrics _buildProjectMetrics(
+    ProjectModel project,
+    List<ProjectPriceEventModel> events, {
+    required double totalReceived,
+    required double advanceBalance,
+    required double receivableBalance,
+    required double customerCredit,
+    required double directProjectCost,
+  }) {
+    final projectId = project.id!;
 
     final priceAdditions = events
         .where((e) => e.type == kPriceEventAddition)
@@ -50,14 +94,6 @@ class FinancialMetricsService {
     final grossRevenue = project.isFinalized ? effectiveFinalAmount : null;
     final netRevenue = grossRevenue != null ? grossRevenue - discountAmount : null;
 
-    final cashFlow = await _db.projectFinancials(projectId); // received واقعی نقدی، نه Revenue
-    final totalReceived = cashFlow['received']!;
-    final advanceBalance = await _db.projectAdvanceBalance(projectId);
-    final receivableBalance = await _db.projectReceivableBalance(projectId);
-    final customerCredit = await _db.projectCustomerCreditBalance(projectId);
-
-    final directProjectCost = await _db.projectDirectCost(projectId);
-
     final projectContribution = netRevenue != null ? netRevenue - directProjectCost : null;
     final contributionMargin = (netRevenue != null && netRevenue != 0)
         ? (projectContribution! / netRevenue) * 100
@@ -75,7 +111,9 @@ class FinancialMetricsService {
         ? ((finalAmount - project.agreedAmount) / project.agreedAmount) * 100
         : null;
 
-    final isSettled = await _db.isProjectSettled(projectId);
+    // همان تعریف DatabaseHelper.isProjectSettled: نهایی‌شده + بدون مانده
+    // طلب/پیش‌دریافت.
+    final isSettled = project.isFinalized && advanceBalance == 0 && receivableBalance == 0;
 
     return ProjectFinancialMetrics(
       projectId: projectId,
@@ -104,6 +142,42 @@ class FinancialMetricsService {
       isSettled: isSettled,
       status: project.status,
       finalizedDate: project.finalizedDate,
+    );
+  }
+
+  /// شاخص‌های همه پروژه‌ها در تعداد ثابتی کوئری (مستقل از تعداد پروژه)،
+  /// برای گزارش‌هایی که به کل پروژه‌ها نیاز دارند (داشبورد، عملکرد عملیاتی،
+  /// سود مشتریان). مسیر تک‌پروژه‌ای برای هر پروژه چندین کوئری جدا می‌زند و
+  /// وقتی برای همه پروژه‌ها (و چند بار در یک بارگذاری) تکرار می‌شد، زمان
+  /// بارگذاری را با تعداد پروژه خطی بالا می‌برد. فرمول‌ها همان
+  /// _buildProjectMetrics هستند.
+  Future<ProjectMetricsSnapshot> loadSnapshot() async {
+    final projects = await _db.getProjects();
+    final aggregates = await _db.projectLedgerAggregates();
+    final allEvents = await _db.getAllPriceEventsInRange();
+    final eventsByProject = <int, List<ProjectPriceEventModel>>{};
+    for (final e in allEvents) {
+      (eventsByProject[e.projectId] ??= []).add(e);
+    }
+
+    final metricsById = <int, ProjectFinancialMetrics>{};
+    for (final p in projects) {
+      final id = p.id!;
+      metricsById[id] = _buildProjectMetrics(
+        p,
+        eventsByProject[id] ?? const [],
+        totalReceived: aggregates.received[id] ?? 0,
+        advanceBalance: aggregates.advance[id] ?? 0,
+        receivableBalance: aggregates.receivable[id] ?? 0,
+        customerCredit: aggregates.customerCredit[id] ?? 0,
+        directProjectCost: aggregates.directCost[id] ?? 0,
+      );
+    }
+    return ProjectMetricsSnapshot(
+      projects: projects,
+      metricsById: metricsById,
+      eventsByProject: eventsByProject,
+      revenueLedgerByProject: aggregates.revenueLedger,
     );
   }
 
@@ -169,15 +243,21 @@ class FinancialMetricsService {
   /// - directProjectCostAllProjects (فیلد جدید) هزینه واقعی صرف‌شده روی
   ///   تمام پروژه‌های این مشتری را - شامل پروژه‌های در جریان (WIP) - جداگانه
   ///   و با نام صریح گزارش می‌کند، تا این اطلاعات از بین نرود.
-  Future<CustomerFinancialMetrics> getCustomerMetrics(int counterpartyId) async {
-    final allProjects = await _db.getProjects(counterpartyId: counterpartyId);
+  ///
+  /// [snapshot] اختیاری: اگر داده شود، شاخص‌های پروژه از همان نتیجه دسته‌ای
+  /// خوانده می‌شوند (به‌جای محاسبه دوباره برای هر پروژه).
+  Future<CustomerFinancialMetrics> getCustomerMetrics(int counterpartyId,
+      {ProjectMetricsSnapshot? snapshot}) async {
+    final allProjects = snapshot != null
+        ? snapshot.projects.where((p) => p.counterpartyId == counterpartyId).toList()
+        : await _db.getProjects(counterpartyId: counterpartyId);
     final finalizedProjects = allProjects.where((p) => p.isFinalized).toList();
 
     double grossRevenue = 0;
     double discountAmount = 0;
     double directProjectCost = 0;
     for (final p in finalizedProjects) {
-      final m = await _computeProjectMetrics(p);
+      final m = snapshot?.metricsById[p.id!] ?? await _computeProjectMetrics(p);
       grossRevenue += m.grossRevenue ?? 0;
       discountAmount += m.discountAmount;
       directProjectCost += m.directProjectCost;
@@ -191,7 +271,8 @@ class FinancialMetricsService {
 
     double directProjectCostAllProjects = 0;
     for (final p in allProjects) {
-      directProjectCostAllProjects += await _db.projectDirectCost(p.id!);
+      directProjectCostAllProjects +=
+          snapshot?.metricsById[p.id!]?.directProjectCost ?? await _db.projectDirectCost(p.id!);
     }
 
     final projectContribution = netRevenue - directProjectCost;

@@ -572,7 +572,15 @@ class _QuickActionButton extends StatelessWidget {
           children: [
             Icon(icon, size: 17, color: color),
             const SizedBox(width: 7),
-            Text(label, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: color)),
+            // در صفحه باریک یا با فونت بزرگ سیستم، برچسب کوچک می‌شود به‌جای
+            // این‌که از دکمه بیرون بزند.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(label,
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: color)),
+              ),
+            ),
           ],
         ),
       ),

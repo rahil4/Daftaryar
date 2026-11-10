@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
@@ -19,6 +21,9 @@ class _CounterpartiesScreenState extends State<CounterpartiesScreen> {
   bool _loading = true;
   bool _showInactive = false;
   String _query = '';
+  Timer? _searchDebounce;
+  // نتیجه دیرتر-رسیده یک جستجوی قدیمی نباید روی نتیجه جستجوی جدید بنشیند.
+  int _loadToken = 0;
 
   @override
   void initState() {
@@ -26,9 +31,24 @@ class _CounterpartiesScreenState extends State<CounterpartiesScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
+
+  /// جستجو با مکث کوتاه پس از آخرین حرف اجرا می‌شود، نه با هر حرف.
+  void _onQueryChanged(String value) {
+    _query = value;
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), _load);
+  }
+
   Future<void> _load() async {
+    final token = ++_loadToken;
     setState(() => _loading = true);
     final list = await _db.getCounterparties(query: _query, includeInactive: _showInactive);
+    if (!mounted || token != _loadToken) return;
     setState(() {
       _counterparties = list;
       _loading = false;
@@ -49,10 +69,7 @@ class _CounterpartiesScreenState extends State<CounterpartiesScreen> {
                   hintText: 'جستجوی نام یا شماره تماس...',
                   prefixIcon: Icon(Icons.search, size: 20),
                 ),
-                onChanged: (v) {
-                  _query = v;
-                  _load();
-                },
+                onChanged: _onQueryChanged,
               ),
             ),
             Padding(

@@ -1860,6 +1860,8 @@ class DatabaseHelper {
     'pin_salt',
     'lock_enabled',
     'biometric_enabled',
+    'pin_failed_attempts',
+    'pin_lockout_until',
   ];
 
   Future<void> setAllSettings(Map<String, String> settings, [DatabaseExecutor? executor]) async {

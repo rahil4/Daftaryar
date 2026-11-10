@@ -5,12 +5,40 @@ import 'package:local_auth/local_auth.dart';
 
 import '../db/database_helper.dart';
 
+/// نتیجه یک تلاش ورود با پین (SecurityService.attemptUnlock).
+class PinAttemptResult {
+  final bool success;
+
+  /// اگر بزرگ‌تر از صفر باشد، ورود با پین تا پایان این مدت بسته است (چه
+  /// به‌خاطر همین تلاش ناموفق، چه چون از قبل بسته بوده).
+  final Duration lockout;
+
+  /// تعداد تلاش باقی‌مانده تا قفل موقت بعدی؛ فقط برای تلاش ناموفقی که هنوز
+  /// به قفل موقت نرسیده معنا دارد.
+  final int attemptsLeft;
+
+  const PinAttemptResult({required this.success, required this.lockout, required this.attemptsLeft});
+
+  bool get isLockedOut => lockout > Duration.zero;
+}
+
 /// مدیریت قفل امنیتی برنامه: پین (هش‌شده با Salt ذخیره می‌شود) و ورود با اثر انگشت/بیومتریک
 class SecurityService {
   final _db = DatabaseHelper.instance;
   final _localAuth = LocalAuthentication();
 
   static const int _stretchRounds = 10000;
+
+  /// پین ۴ رقمی فقط ۱۰٬۰۰۰ حالت دارد؛ بدون محدودیت تلاش، حدس‌زدن آن با
+  /// دست هم شدنی است. بعد از هر [kPinAttemptsPerRound] تلاش ناموفق پیاپی،
+  /// ورود با پین موقتاً بسته می‌شود و مدتش هر بار دو برابر می‌شود (تا سقف
+  /// [kMaxPinLockout]). شمارنده در تنظیمات ذخیره می‌شود تا با بستن و
+  /// بازکردن برنامه صفر نشود، و فقط با ورود موفق صفر می‌شود.
+  static const int kPinAttemptsPerRound = 5;
+  static const Duration kBasePinLockout = Duration(seconds: 30);
+  static const Duration kMaxPinLockout = Duration(minutes: 30);
+  static const String _failedAttemptsKey = 'pin_failed_attempts';
+  static const String _lockoutUntilKey = 'pin_lockout_until';
 
   String _generateSalt() {
     final rand = Random.secure();
@@ -59,6 +87,58 @@ class SecurityService {
       return true;
     }
     return stored == _hash(pin, salt);
+  }
+
+  static Duration _lockoutForRound(int round) {
+    var seconds = kBasePinLockout.inSeconds;
+    for (var i = 1; i < round && seconds < kMaxPinLockout.inSeconds; i++) {
+      seconds *= 2;
+    }
+    return Duration(seconds: seconds > kMaxPinLockout.inSeconds ? kMaxPinLockout.inSeconds : seconds);
+  }
+
+  /// مدت باقی‌مانده قفل موقت ورود با پین (صفر یعنی باز است).
+  Future<Duration> pinLockoutRemaining({DateTime? now}) async {
+    final untilMs = int.tryParse(await _db.getSetting(_lockoutUntilKey) ?? '');
+    if (untilMs == null) return Duration.zero;
+    final remaining =
+        DateTime.fromMillisecondsSinceEpoch(untilMs).difference(now ?? DateTime.now());
+    if (remaining <= Duration.zero) return Duration.zero;
+    // اگر ساعت دستگاه عقب کشیده شده باشد، قفل هرگز از سقف خودش طولانی‌تر
+    // نمی‌شود.
+    return remaining > kMaxPinLockout ? kMaxPinLockout : remaining;
+  }
+
+  /// تلاش ورود با پین، با محدودیت تعداد تلاش. صفحه قفل باید از این متد
+  /// استفاده کند، نه مستقیم از verifyPin. در مدت قفل موقت، پین اصلاً بررسی
+  /// نمی‌شود (حتی پین درست)، و آن تلاش هم شمرده نمی‌شود.
+  Future<PinAttemptResult> attemptUnlock(String pin, {DateTime? now}) async {
+    final current = now ?? DateTime.now();
+    final remaining = await pinLockoutRemaining(now: current);
+    if (remaining > Duration.zero) {
+      return PinAttemptResult(success: false, lockout: remaining, attemptsLeft: 0);
+    }
+
+    if (await verifyPin(pin)) {
+      await _db.setSetting(_failedAttemptsKey, '0');
+      await _db.setSetting(_lockoutUntilKey, '0');
+      return const PinAttemptResult(
+          success: true, lockout: Duration.zero, attemptsLeft: kPinAttemptsPerRound);
+    }
+
+    final failed = (int.tryParse(await _db.getSetting(_failedAttemptsKey) ?? '') ?? 0) + 1;
+    await _db.setSetting(_failedAttemptsKey, '$failed');
+    if (failed % kPinAttemptsPerRound == 0) {
+      final lockout = _lockoutForRound(failed ~/ kPinAttemptsPerRound);
+      await _db.setSetting(
+          _lockoutUntilKey, '${current.add(lockout).millisecondsSinceEpoch}');
+      return PinAttemptResult(success: false, lockout: lockout, attemptsLeft: 0);
+    }
+    return PinAttemptResult(
+      success: false,
+      lockout: Duration.zero,
+      attemptsLeft: kPinAttemptsPerRound - failed % kPinAttemptsPerRound,
+    );
   }
 
   Future<void> disableLock() async {

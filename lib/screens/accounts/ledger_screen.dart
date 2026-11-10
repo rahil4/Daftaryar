@@ -33,6 +33,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
     final lines = await _db.getLedgerLines(widget.account.id!);
     final bal = await _db.accountBalance(widget.account.id!);
     final projects = await _db.getProjects();
+    if (!mounted) return;
     setState(() {
       _lines = lines;
       _debit = bal['debit']!;

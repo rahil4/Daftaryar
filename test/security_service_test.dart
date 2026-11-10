@@ -80,4 +80,103 @@ void main() {
       expect(DatabaseHelper.kSecuritySettingKeys.contains('pin_salt'), true);
     });
   });
+  group('SecurityService — محدودیت تلاش ورود با پین', () {
+    final t0 = DateTime(2026, 1, 1, 12);
+
+    Future<PinAttemptResult> wrong(DateTime at) => security.attemptUnlock('0000', now: at);
+
+    test('پین درست بدون هیچ تلاش ناموفقی، ورود موفق است', () async {
+      await security.setPin('1234');
+      final result = await security.attemptUnlock('1234', now: t0);
+      expect(result.success, true);
+      expect(result.isLockedOut, false);
+    });
+
+    test('تلاش‌های ناموفق شمرده می‌شوند و تعداد باقی‌مانده کم می‌شود', () async {
+      await security.setPin('1234');
+      for (var i = 1; i < SecurityService.kPinAttemptsPerRound; i++) {
+        final result = await wrong(t0);
+        expect(result.success, false);
+        expect(result.isLockedOut, false);
+        expect(result.attemptsLeft, SecurityService.kPinAttemptsPerRound - i);
+      }
+    });
+
+    test('پس از پنجمین تلاش ناموفق، ورود با پین موقتاً بسته می‌شود - حتی برای پین درست', () async {
+      await security.setPin('1234');
+      PinAttemptResult? last;
+      for (var i = 0; i < SecurityService.kPinAttemptsPerRound; i++) {
+        last = await wrong(t0);
+      }
+      expect(last!.lockout, SecurityService.kBasePinLockout);
+
+      final duringLockout =
+          await security.attemptUnlock('1234', now: t0.add(const Duration(seconds: 10)));
+      expect(duringLockout.success, false);
+      expect(duringLockout.lockout, const Duration(seconds: 20));
+
+      final afterLockout = await security.attemptUnlock('1234',
+          now: t0.add(SecurityService.kBasePinLockout + const Duration(seconds: 1)));
+      expect(afterLockout.success, true);
+    });
+
+    test('تلاش در مدت قفل موقت شمرده نمی‌شود', () async {
+      await security.setPin('1234');
+      for (var i = 0; i < SecurityService.kPinAttemptsPerRound; i++) {
+        await wrong(t0);
+      }
+      await wrong(t0.add(const Duration(seconds: 5)));
+      await wrong(t0.add(const Duration(seconds: 6)));
+
+      // بلافاصله بعد از پایان قفل، یک تلاش ناموفق دیگر باید «۴ تلاش باقی‌مانده»
+      // بدهد، نه این‌که به‌خاطر شمرده‌شدن تلاش‌های دوره قفل، دوباره قفل شود.
+      final next = await wrong(t0.add(const Duration(seconds: 31)));
+      expect(next.isLockedOut, false);
+      expect(next.attemptsLeft, SecurityService.kPinAttemptsPerRound - 1);
+    });
+
+    test('مدت قفل موقت در هر دور دو برابر می‌شود و از سقف بیشتر نمی‌شود', () async {
+      await security.setPin('1234');
+      var now = t0;
+      final lockouts = <Duration>[];
+      for (var round = 0; round < 9; round++) {
+        PinAttemptResult? last;
+        for (var i = 0; i < SecurityService.kPinAttemptsPerRound; i++) {
+          last = await wrong(now);
+        }
+        lockouts.add(last!.lockout);
+        now = now.add(last.lockout + const Duration(seconds: 1));
+      }
+      expect(lockouts.take(3).toList(),
+          const [Duration(seconds: 30), Duration(seconds: 60), Duration(seconds: 120)]);
+      expect(lockouts.last, SecurityService.kMaxPinLockout);
+      expect(lockouts.every((d) => d <= SecurityService.kMaxPinLockout), true);
+    });
+
+    test('ورود موفق شمارنده را صفر می‌کند', () async {
+      await security.setPin('1234');
+      for (var i = 0; i < SecurityService.kPinAttemptsPerRound - 1; i++) {
+        await wrong(t0);
+      }
+      expect((await security.attemptUnlock('1234', now: t0)).success, true);
+
+      final next = await wrong(t0);
+      expect(next.isLockedOut, false);
+      expect(next.attemptsLeft, SecurityService.kPinAttemptsPerRound - 1);
+    });
+
+    test('عقب‌کشیدن ساعت دستگاه قفل موقت را از سقف طولانی‌تر نمی‌کند', () async {
+      await security.setPin('1234');
+      for (var i = 0; i < SecurityService.kPinAttemptsPerRound; i++) {
+        await wrong(t0);
+      }
+      final remaining =
+          await security.pinLockoutRemaining(now: t0.subtract(const Duration(days: 30)));
+      expect(remaining, SecurityService.kMaxPinLockout);
+    });
+
+    test('شمارنده‌های تلاش از پشتیبان/بازیابی کنار گذاشته می‌شوند', () {
+      expect(DatabaseHelper.kSecuritySettingKeys, containsAll(['pin_failed_attempts', 'pin_lockout_until']));
+    });
+  });
 }

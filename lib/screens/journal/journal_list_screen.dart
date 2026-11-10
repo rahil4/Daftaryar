@@ -54,6 +54,7 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
     );
     final accounts = await _db.getAccounts();
     final projects = await _db.getProjects();
+    if (!mounted) return;
     setState(() {
       _entries = entries;
       _accountsById = {for (final a in accounts) a.id!: a};
@@ -167,7 +168,7 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
         ),
       ),
     );
-    if (applied == false) {
+    if (applied == false && mounted) {
       setState(() {
         _fromDate = null;
         _toDate = null;

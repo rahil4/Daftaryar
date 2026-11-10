@@ -30,6 +30,7 @@ class _ProjectMetricsDebugScreenState extends State<ProjectMetricsDebugScreen> {
   Future<void> _load() async {
     final metrics = await _service.getProjectMetrics(widget.projectId);
     final reconciliation = await _service.reconcileProject(widget.projectId);
+    if (!mounted) return;
     setState(() {
       _metrics = metrics;
       _reconciliation = reconciliation;

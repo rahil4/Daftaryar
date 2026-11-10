@@ -200,6 +200,7 @@ class _CashActivityTabState extends State<_CashActivityTab> with Reloadable<_Cas
     } else {
       range = currentMonthToDateRange(today);
     }
+    if (!mounted) return;
     setState(() {
       _mode = mode;
       _fromDate = jalaliToString(range[0]);
@@ -217,6 +218,7 @@ class _CashActivityTabState extends State<_CashActivityTab> with Reloadable<_Cas
     final ownerDrawBreakdown =
         await _db.ownerDrawBreakdown(fromDate: _fromDate, toDate: _toDate);
     final totalCash = await _db.cashBalanceThrough(throughDate: _toDate);
+    if (!mounted) return;
     setState(() {
       _received = receiptsBreakdown.values.fold<double>(0, (s, v) => s + v);
       _expense = expenseTotal;
@@ -518,6 +520,7 @@ class _CashReceiptBreakdownScreenState extends State<_CashReceiptBreakdownScreen
     final breakdown =
         await _db.cashReceiptsBreakdown(fromDate: widget.fromDate, toDate: widget.toDate);
     final cashAccounts = await _db.getCashAccounts();
+    if (!mounted) return;
     setState(() {
       _breakdown = breakdown;
       _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
@@ -603,6 +606,7 @@ class _CashReceiptCustomerBreakdownScreenState extends State<_CashReceiptCustome
         await _db.cashReceiptsByCustomer(fromDate: widget.fromDate, toDate: widget.toDate);
     breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
     final cashAccounts = await _db.getCashAccounts();
+    if (!mounted) return;
     setState(() {
       _breakdown = breakdown;
       _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
@@ -676,6 +680,7 @@ class _OwnerDrawBreakdownScreenState extends State<_OwnerDrawBreakdownScreen> {
     final breakdown = await _db.ownerDrawBreakdown(fromDate: widget.fromDate, toDate: widget.toDate);
     breakdown.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
     final cashAccounts = await _db.getCashAccounts();
+    if (!mounted) return;
     setState(() {
       _breakdown = breakdown;
       _cashAccountIds = cashAccounts.map((a) => a.id!).toSet();
@@ -765,6 +770,7 @@ class _ExpenseBreakdownScreenState extends State<_ExpenseBreakdownScreen> {
       final bal = await _db.accountBalance(widget.parentId!, fromDate: widget.fromDate, toDate: widget.toDate);
       ownDirect = bal['balance']! != 0 ? bal['balance'] : null;
     }
+    if (!mounted) return;
     setState(() {
       _children = children;
       _ownDirect = ownDirect;
@@ -863,6 +869,7 @@ class _TransactionListScreenState extends State<_TransactionListScreen> {
     final entries = await widget.loadEntries();
     final projects = await _db.getProjects();
     final counterparties = await _db.getCounterparties(includeInactive: true);
+    if (!mounted) return;
     setState(() {
       _entries = entries;
       _projectTitles = {for (final p in projects) if (p.id != null) p.id!: p.title};
@@ -989,6 +996,7 @@ class _CustomerProfitTabState extends State<_CustomerProfitTab> with Reloadable<
         estimatedByCustomer[p.counterpartyId] = (estimatedByCustomer[p.counterpartyId] ?? 0) + estimated;
       }
     }
+    if (!mounted) return;
     setState(() {
       _reports = reports;
       _names = {for (final c in counterparties) if (c.id != null) c.id!: c.name};
@@ -1175,6 +1183,7 @@ class _CustomerProjectsScreenState extends State<_CustomerProjectsScreen> {
     final projects = await _reporting.getProjectReports(counterpartyId: widget.counterpartyId);
     final estimatedByProject = await _db.estimatedRemainingForOpenProjects();
     final rawProjects = await _db.getProjects(counterpartyId: widget.counterpartyId);
+    if (!mounted) return;
     setState(() {
       _projects = projects;
       _estimatedByProject = estimatedByProject;

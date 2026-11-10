@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../services/security_service.dart';
@@ -18,16 +20,58 @@ class _LockScreenState extends State<LockScreen> {
   String _entered = '';
   String? _error;
   bool _checkingBiometric = false;
+  // ثانیه‌های باقی‌مانده قفل موقت پس از چند تلاش ناموفق؛ صفر یعنی باز.
+  int _lockoutSeconds = 0;
+  Timer? _lockoutTimer;
 
   @override
   void initState() {
     super.initState();
+    _restoreLockout();
     _tryBiometricAtStart();
+  }
+
+  @override
+  void dispose() {
+    _lockoutTimer?.cancel();
+    super.dispose();
+  }
+
+  /// اگر برنامه وسط یک قفل موقت بسته و دوباره باز شده، شمارش ادامه پیدا
+  /// می‌کند.
+  Future<void> _restoreLockout() async {
+    final remaining = await _security.pinLockoutRemaining();
+    if (!mounted || remaining <= Duration.zero) return;
+    _startLockout(remaining);
+  }
+
+  void _startLockout(Duration duration) {
+    _lockoutTimer?.cancel();
+    setState(() {
+      _lockoutSeconds = duration.inSeconds < 1 ? 1 : duration.inSeconds;
+      _entered = '';
+      _error = null;
+    });
+    _lockoutTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _lockoutSeconds--);
+      if (_lockoutSeconds <= 0) timer.cancel();
+    });
+  }
+
+  String get _lockoutMessage {
+    final minutes = _lockoutSeconds ~/ 60;
+    final seconds = _lockoutSeconds % 60;
+    final time = minutes > 0 ? '${pn(minutes)} دقیقه و ${pn(seconds)} ثانیه' : '${pn(seconds)} ثانیه';
+    return 'تلاش ناموفق زیاد بود؛ $time دیگر دوباره امتحان کنید';
   }
 
   Future<void> _tryBiometricAtStart() async {
     final enabled = await _security.isBiometricEnabled();
-    if (!enabled) return;
+    if (!enabled || !mounted) return;
     setState(() => _checkingBiometric = true);
     final ok = await _security.authenticateWithBiometrics();
     if (!mounted) return;
@@ -36,18 +80,21 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _onDigit(String d) async {
-    if (_entered.length >= 6) return;
+    if (_lockoutSeconds > 0 || _entered.length >= 4) return;
     setState(() {
       _entered += d;
       _error = null;
     });
     if (_entered.length == 4) {
-      final ok = await _security.verifyPin(_entered);
-      if (ok) {
+      final result = await _security.attemptUnlock(_entered);
+      if (!mounted) return;
+      if (result.success) {
         widget.onUnlocked();
+      } else if (result.isLockedOut) {
+        _startLockout(result.lockout);
       } else {
         setState(() {
-          _error = 'پین اشتباه است';
+          _error = 'پین اشتباه است؛ ${pn(result.attemptsLeft)} تلاش دیگر باقی مانده';
           _entered = '';
         });
       }
@@ -55,7 +102,7 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   void _onBackspace() {
-    if (_entered.isEmpty) return;
+    if (_lockoutSeconds > 0 || _entered.isEmpty) return;
     setState(() => _entered = _entered.substring(0, _entered.length - 1));
   }
 
@@ -93,11 +140,13 @@ class _LockScreenState extends State<LockScreen> {
               ),
               const SizedBox(height: 14),
               SizedBox(
-                height: 18,
+                height: 38, // جا برای پیام دوخطی قفل موقت
                 child: _checkingBiometric
                     ? const Text('در حال تأیید اثر انگشت...',
                         style: TextStyle(fontSize: 12, color: AppColors.textSecondary))
-                    : Text(_error ?? '',
+                    : Text(_lockoutSeconds > 0 ? _lockoutMessage : (_error ?? ''),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
                         style: const TextStyle(fontSize: 12, color: AppColors.negative)),
               ),
               const Spacer(),
@@ -106,7 +155,7 @@ class _LockScreenState extends State<LockScreen> {
                 onBackspace: _onBackspace,
                 onBiometric: () async {
                   final ok = await _security.authenticateWithBiometrics();
-                  if (ok) widget.onUnlocked();
+                  if (ok && mounted) widget.onUnlocked();
                 },
                 showBiometric: true,
               ),

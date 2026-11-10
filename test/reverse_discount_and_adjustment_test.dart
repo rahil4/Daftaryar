@@ -190,4 +190,58 @@ void main() {
       expect(() => db.reverseFinalAdjustment(adjustmentEntry.id!), throwsA(isA<Exception>()));
     });
   });
+
+  // برگشت تخفیف/اصلاح مبلغ نهایی دو چیز می‌نویسد: سند برگشت حسابداری و
+  // رویداد قیمتِ خنثی‌کننده. اگر دومی شکست بخورد، اولی هم نباید بماند؛ وگرنه
+  // دفتر برگشت خورده ولی «تخفیف کل»/«اصلاحات نهایی» پروژه هنوز مقدار قبلی را
+  // نشان می‌دهد. شکست مرحله دوم با پنهان‌کردن موقت جدول رویدادها شبیه‌سازی
+  // می‌شود.
+  group('اتمیک بودن برگشت', () {
+    Future<void> withHiddenPriceEventsTable(Future<void> Function() body) async {
+      final raw = await db.database;
+      await raw.execute('ALTER TABLE project_price_events RENAME TO project_price_events_hidden');
+      try {
+        await body();
+      } finally {
+        await raw.execute('ALTER TABLE project_price_events_hidden RENAME TO project_price_events');
+      }
+    }
+
+    test('اگر ثبت رویداد قیمت شکست بخورد، سند برگشت تخفیف هم ثبت نمی‌شود', () async {
+      final cpId = await createCounterparty('مشتری تست');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/02/01');
+      await db.recordProjectDiscount(projectId: projectId, amount: 1000000, date: '1404/02/02');
+      final discountEntry =
+          (await db.getJournalEntries(projectId: projectId)).firstWhere((e) => e.description == 'تخفیف نهایی پروژه');
+      final entryCountBefore = (await db.getJournalEntries(projectId: projectId)).length;
+      final arBefore = await db.projectReceivableBalance(projectId);
+
+      await withHiddenPriceEventsTable(() async {
+        await expectLater(db.reverseProjectDiscount(discountEntry.id!), throwsA(anything));
+      });
+
+      expect((await db.getJournalEntries(projectId: projectId)).length, entryCountBefore);
+      expect(await db.projectReceivableBalance(projectId), arBefore);
+      expect((await db.projectFinancialSummary(projectId))['discount'], 1000000);
+    });
+
+    test('اگر ثبت رویداد قیمت شکست بخورد، سند برگشت اصلاح مبلغ نهایی هم ثبت نمی‌شود', () async {
+      final cpId = await createCounterparty('مشتری تست');
+      final projectId = await createProject(cpId);
+      await db.finalizeProject(projectId: projectId, finalAmount: 10000000, date: '1404/02/01');
+      await db.recordFinalAdjustment(projectId: projectId, amount: 2000000, date: '1404/02/02');
+      final adjustmentEntry = (await db.getJournalEntries(projectId: projectId))
+          .firstWhere((e) => e.description == 'اصلاح مبلغ نهایی پروژه');
+      final entryCountBefore = (await db.getJournalEntries(projectId: projectId)).length;
+      final arBefore = await db.projectReceivableBalance(projectId);
+
+      await withHiddenPriceEventsTable(() async {
+        await expectLater(db.reverseFinalAdjustment(adjustmentEntry.id!), throwsA(anything));
+      });
+
+      expect((await db.getJournalEntries(projectId: projectId)).length, entryCountBefore);
+      expect(await db.projectReceivableBalance(projectId), arBefore);
+    });
+  });
 }

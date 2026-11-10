@@ -34,6 +34,7 @@ class _ProjectEconomicsScreenState extends State<ProjectEconomicsScreen> {
     final analysis = await _service.getProjectEconomicAnalysis(widget.projectId);
     final factors = await _service.getProjectProfitabilityFactors(widget.projectId);
     final benchmark = await _service.getBenchmark();
+    if (!mounted) return;
     setState(() {
       _analysis = analysis;
       _factors = factors;

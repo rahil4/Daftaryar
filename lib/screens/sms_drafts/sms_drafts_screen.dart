@@ -27,6 +27,7 @@ class _SmsDraftsScreenState extends State<SmsDraftsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final list = await _db.getSmsDrafts();
+    if (!mounted) return;
     setState(() {
       _drafts = list;
       _loading = false;

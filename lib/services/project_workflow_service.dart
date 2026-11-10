@@ -662,26 +662,35 @@ class ProjectWorkflowService {
               description: l.description,
             ))
         .toList();
-    final newEntryId = await _db.insertJournalEntry(JournalEntryModel(
-      date: todayJalaliString(),
-      description: 'اصلاح: برگشت سند تخفیف اشتباه $marker',
-      createdAt: todayJalaliString(),
-      source: kJournalSourceSystem,
-      lines: reversalLines,
-    ));
-    if (projectId != null) {
-      // رویداد اصلی با amount منفی ثبت شده بود (recordProjectDiscount)؛
-      // رویداد خنثی‌کننده با همان مقدار ولی مثبت، جمع را دقیقاً به حالت
-      // قبل برمی‌گرداند.
-      await _db.addProjectPriceEvent(
-        projectId: projectId,
-        type: kPriceEventDiscount,
-        amount: discountLine.debit.toDouble(),
-        reason: 'برگشت تخفیف اشتباه $marker',
-        date: todayJalaliString(),
-      );
-    }
-    return newEntryId;
+    // سند برگشت و رویداد قیمتِ خنثی‌کننده در یک تراکنش: یا هر دو ثبت
+    // می‌شوند یا هیچ‌کدام - وگرنه دفتر برگشت می‌خورد ولی «تخفیف کل» پروژه
+    // مقدار قبلی را نشان می‌دهد.
+    final db = await _db.database;
+    return db.transaction((txn) async {
+      final newEntryId = await _db.insertJournalEntry(
+          JournalEntryModel(
+            date: todayJalaliString(),
+            description: 'اصلاح: برگشت سند تخفیف اشتباه $marker',
+            createdAt: todayJalaliString(),
+            source: kJournalSourceSystem,
+            lines: reversalLines,
+          ),
+          txn);
+      if (projectId != null) {
+        // رویداد اصلی با amount منفی ثبت شده بود (recordProjectDiscount)؛
+        // رویداد خنثی‌کننده با همان مقدار ولی مثبت، جمع را دقیقاً به حالت
+        // قبل برمی‌گرداند.
+        await _db.addProjectPriceEvent(
+          projectId: projectId,
+          type: kPriceEventDiscount,
+          amount: discountLine.debit.toDouble(),
+          reason: 'برگشت تخفیف اشتباه $marker',
+          date: todayJalaliString(),
+          executor: txn,
+        );
+      }
+      return newEntryId;
+    });
   }
 
   /// اصلاح یک سند «اصلاح مبلغ نهایی» اشتباه با ثبت یک سند برگشتِ دقیقاً
@@ -738,23 +747,31 @@ class ProjectWorkflowService {
               description: l.description,
             ))
         .toList();
-    final newEntryId = await _db.insertJournalEntry(JournalEntryModel(
-      date: todayJalaliString(),
-      description: 'اصلاح: برگشت سند اصلاح مبلغ نهایی اشتباه $marker',
-      createdAt: todayJalaliString(),
-      source: kJournalSourceSystem,
-      lines: reversalLines,
-    ));
-    if (projectId != null) {
-      await _db.addProjectPriceEvent(
-        projectId: projectId,
-        type: kPriceEventFinalAdjustment,
-        amount: -signedAmount,
-        reason: 'برگشت اصلاح مبلغ نهایی اشتباه $marker',
-        date: todayJalaliString(),
-      );
-    }
-    return newEntryId;
+    // مثل reverseProjectDiscount: سند برگشت و رویداد قیمتِ خنثی‌کننده در یک
+    // تراکنش ثبت می‌شوند.
+    final db = await _db.database;
+    return db.transaction((txn) async {
+      final newEntryId = await _db.insertJournalEntry(
+          JournalEntryModel(
+            date: todayJalaliString(),
+            description: 'اصلاح: برگشت سند اصلاح مبلغ نهایی اشتباه $marker',
+            createdAt: todayJalaliString(),
+            source: kJournalSourceSystem,
+            lines: reversalLines,
+          ),
+          txn);
+      if (projectId != null) {
+        await _db.addProjectPriceEvent(
+          projectId: projectId,
+          type: kPriceEventFinalAdjustment,
+          amount: -signedAmount,
+          reason: 'برگشت اصلاح مبلغ نهایی اشتباه $marker',
+          date: todayJalaliString(),
+          executor: txn,
+        );
+      }
+      return newEntryId;
+    });
   }
 
   /// ویرایش مستقیم مبلغ/تاریخ/دلیل یک سند «تخفیف» موجود - بدون ساختن سند

@@ -9,7 +9,7 @@ import '../../../utils/dashboard_period.dart';
 import '../../../utils/formatters.dart';
 import '../../../utils/reloadable.dart';
 import '../../../widgets/stat_card.dart';
-import '../../dashboard/widgets/period_selector_widget.dart';
+import '../../../widgets/period_segmented_control.dart';
 import '../../dashboard/widgets/trend_chart_widget.dart';
 
 const Map<String, String> _kComparisonLabels = {
@@ -90,7 +90,7 @@ class _OperationalPerformanceTabState extends State<OperationalPerformanceTab>
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            PeriodSelectorWidget(
+            PeriodSegmentedControl(
               selected: _preset,
               onChanged: _onPresetChanged,
               customFrom: _customFrom,

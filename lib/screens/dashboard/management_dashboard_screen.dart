@@ -23,7 +23,7 @@ import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
 import '../../widgets/stat_card.dart';
 import 'widgets/dashboard_sections.dart';
-import 'widgets/period_selector_widget.dart';
+import '../../widgets/period_segmented_control.dart';
 import 'widgets/combo_trend_chart_widget.dart';
 
 /// اگر بیش از این تعداد روز از آخرین پشتیبان‌گیری موفق گذشته باشد (یا
@@ -264,7 +264,7 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
         const SizedBox(height: 18),
 
         // ---------- انتخاب‌گر بازه ----------
-        PeriodSelectorWidget(
+        PeriodSegmentedControl(
           selected: _preset,
           onChanged: (p) {
             setState(() => _preset = p);

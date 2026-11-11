@@ -27,9 +27,16 @@ class DaftaryarApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       builder: (context, child) {
-        return Directionality(
-          textDirection: TextDirection.rtl,
-          child: child ?? const SizedBox.shrink(),
+        // اندازه فونت سیستم فقط در یک بازه محدود اثر می‌کند: کارت‌های آماری
+        // و جدول‌های برنامه ابعاد ثابت دارند و با فونت خیلی بزرگ سیستم، متن
+        // از کادر بیرون می‌زد یا بریده می‌شد.
+        return MediaQuery.withClampedTextScaling(
+          minScaleFactor: 0.9,
+          maxScaleFactor: 1.2,
+          child: Directionality(
+            textDirection: TextDirection.rtl,
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       home: const AppRoot(),

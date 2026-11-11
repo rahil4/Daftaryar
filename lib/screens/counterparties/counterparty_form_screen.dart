@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/counterparty.dart';
+import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 
 class CounterpartyFormScreen extends StatefulWidget {
@@ -133,12 +134,14 @@ class _CounterpartyFormScreenState extends State<CounterpartyFormScreen> {
     final isEdit = widget.existing != null;
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? 'ویرایش طرف حساب' : 'طرف حساب جدید')),
-      body: _loadingRoles
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
+      body: BlueprintGridBackground(
+        child: _loadingRoles
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding:
+                    EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
                 children: [
                   TextFormField(
                     controller: _name,
@@ -216,6 +219,7 @@ class _CounterpartyFormScreenState extends State<CounterpartyFormScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

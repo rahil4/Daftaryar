@@ -2,12 +2,15 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:shamsi_date/shamsi_date.dart';
 
+import '../models/attachment.dart';
+import '../models/cash_receipt_category.dart';
 import '../models/counterparty.dart';
 import '../models/project.dart';
 import '../models/project_price_event.dart';
 import '../models/account.dart';
 import '../models/journal_entry.dart';
 import '../models/sms_draft.dart';
+import '../services/project_workflow_service.dart';
 import '../utils/formatters.dart';
 
 /// خطای نبود حساب کنترلی سیستمی.
@@ -36,6 +39,26 @@ class MissingControlAccountException implements Exception {
       '(شناسه فنی: $systemKey)';
 }
 
+/// خروجی projectLedgerAggregates: مانده‌های سطح پروژه، به تفکیک شناسه
+/// پروژه. نبودِ یک شناسه در هر نگاشت یعنی مقدار صفر.
+class ProjectLedgerAggregates {
+  final Map<int, double> received;
+  final Map<int, double> receivable;
+  final Map<int, double> advance;
+  final Map<int, double> customerCredit;
+  final Map<int, double> revenueLedger;
+  final Map<int, double> directCost;
+
+  const ProjectLedgerAggregates({
+    required this.received,
+    required this.receivable,
+    required this.advance,
+    required this.customerCredit,
+    required this.revenueLedger,
+    required this.directCost,
+  });
+}
+
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -53,7 +76,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'daftaryar_v9.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: (db) async {
@@ -196,6 +219,25 @@ class DatabaseHelper {
         );
       }
     }
+    if (oldVersion < 6) {
+      // پیوست عکس/رسید به سند - فقط یک جدول جدید و کاملاً خالی؛ هیچ جدول
+      // یا ستون موجودی تغییر نمی‌کند، پس هیچ داده مالی موجودی متأثر
+      // نمی‌شود (کم‌ریسک‌ترین نوع تغییر Schema).
+      await _createAttachmentsTable(db);
+    }
+  }
+
+  Future<void> _createAttachmentsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entryId INTEGER NOT NULL,
+        filePath TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (entryId) REFERENCES journal_entries (id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_attachments_entryId ON attachments (entryId)');
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -375,6 +417,8 @@ class DatabaseHelper {
         createdAt TEXT NOT NULL
       )
     ''');
+
+    await _createAttachmentsTable(db);
 
     await _seedDefaultAccounts(db);
   }
@@ -765,6 +809,8 @@ class DatabaseHelper {
     return db.delete('projects', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// جست‌وجوی پروژه‌ها - هم روی عنوان پروژه، هم روی نام طرف‌حساب (کارفرما).
+  /// چون کاربر معمولاً اسم مشتری را به‌خاطر می‌آورد نه عنوان دقیق پروژه.
   Future<List<ProjectModel>> getProjects({int? counterpartyId, String? query}) async {
     final db = await database;
     String? where;
@@ -774,17 +820,39 @@ class DatabaseHelper {
       args.add(counterpartyId);
     }
     if (query != null && query.isNotEmpty) {
-      where = where == null ? 'title LIKE ?' : '$where AND title LIKE ?';
-      args.add('%$query%');
+      final matchingCounterparties =
+          await db.query('counterparties', columns: ['id'], where: 'name LIKE ?', whereArgs: ['%$query%']);
+      String searchClause;
+      List<Object?> searchArgs;
+      if (matchingCounterparties.isEmpty) {
+        searchClause = 'title LIKE ?';
+        searchArgs = ['%$query%'];
+      } else {
+        final ids = matchingCounterparties.map((r) => r['id'] as int).toList();
+        final placeholders = List.filled(ids.length, '?').join(',');
+        searchClause = '(title LIKE ? OR counterpartyId IN ($placeholders))';
+        searchArgs = ['%$query%', ...ids];
+      }
+      where = where == null ? searchClause : '$where AND $searchClause';
+      args.addAll(searchArgs);
     }
     final maps = await db.query('projects',
         where: where, whereArgs: args.isEmpty ? null : args, orderBy: 'id DESC');
-    final result = <ProjectModel>[];
-    for (final m in maps) {
-      final types = await _typesForProject(db, m['id'] as int);
-      result.add(ProjectModel.fromMap(m, projectTypes: types));
+    if (maps.isEmpty) return [];
+    // انواع همه پروژه‌ها در یک کوئری (به‌جای یک کوئری به‌ازای هر پروژه) -
+    // همان Join و همان ترتیب (نام نوع، صعودی) که _typesForProject دارد.
+    final typeRows = await db.rawQuery('''
+      SELECT a.projectId as projectId, t.name as name FROM project_types t
+      JOIN project_type_assignments a ON a.typeId = t.id
+      ORDER BY t.name ASC
+    ''');
+    final typesByProject = <int, List<String>>{};
+    for (final r in typeRows) {
+      (typesByProject[r['projectId'] as int] ??= []).add(r['name'] as String);
     }
-    return result;
+    return maps
+        .map((m) => ProjectModel.fromMap(m, projectTypes: typesByProject[m['id'] as int] ?? const []))
+        .toList();
   }
 
   Future<ProjectModel?> getProject(int id, [DatabaseExecutor? executor]) async {
@@ -889,7 +957,7 @@ class DatabaseHelper {
   /// طرف‌حساب و سطح پروژه) را بررسی می‌کند و در صورت نقض Exception می‌دهد؛
   /// هیچ نوشتنی در دیتابیس انجام نمی‌دهد. با executor اختیاری، می‌تواند از
   /// داخل یک تراکنش بازِ دیگر (مثل finalizeProject) صدا زده شود.
-  Future<void> _validateJournalEntry(JournalEntryModel entry, [DatabaseExecutor? executor]) async {
+  Future<void> validateJournalEntry(JournalEntryModel entry, [DatabaseExecutor? executor]) async {
     // قانون ۴: حداقل دو سطر
     if (entry.lines.length < 2) {
       throw Exception('سند حسابداری باید حداقل دو سطر داشته باشد.');
@@ -1010,9 +1078,9 @@ class DatabaseHelper {
   }
 
   /// درج خام هدر سند و سطرهایش - بدون هیچ اعتبارسنجی (باید قبلش با
-  /// _validateJournalEntry بررسی شده باشد). executor باید یک Transaction باز
+  /// validateJournalEntry بررسی شده باشد). executor باید یک Transaction باز
   /// باشد تا اتمیک بودن واقعی چند سند/عملیات مرتبط تضمین شود.
-  Future<int> _writeJournalEntryRaw(DatabaseExecutor executor, JournalEntryModel entry) async {
+  Future<int> writeJournalEntryRaw(DatabaseExecutor executor, JournalEntryModel entry) async {
     final entryId = await executor.insert('journal_entries', entry.toMap()..remove('id'));
     for (final line in entry.lines) {
       final map = line.toMap()
@@ -1028,18 +1096,18 @@ class DatabaseHelper {
   /// (فرم سریع، سند دستی، بازیابی پشتیبان، پیش‌نویس پیامکی) نتواند آن‌ها را
   /// دور بزند.
   Future<int> insertJournalEntry(JournalEntryModel entry, [DatabaseExecutor? executor]) async {
-    await _validateJournalEntry(entry, executor);
+    await validateJournalEntry(entry, executor);
     if (executor != null) {
       // یک تراکنش والد (مثلاً Restore اتمیک) از قبل باز است؛ نباید تراکنش
       // تودرتوی جدید باز کنیم (باعث Deadlock در sqflite می‌شود) - مستقیم
       // با همان executor بنویس.
-      return _writeJournalEntryRaw(executor, entry);
+      return writeJournalEntryRaw(executor, entry);
     }
     // ثبت اتمیک: هدر سند و همه سطرهایش در یک تراکنش دیتابیس - در صورت بروز
     // هر خطا (مثلاً نقض یکی از CHECK constraint های سطح دیتابیس)، کل عملیات
     // rollback می‌شود و نه هدر ناقص باقی می‌ماند و نه سطر یتیم.
     final db = await database;
-    return db.transaction((txn) => _writeJournalEntryRaw(txn, entry));
+    return db.transaction((txn) => writeJournalEntryRaw(txn, entry));
   }
 
   /// wrapper صریح برای ثبت سند دستی/فرم سریع معمولی - صرف‌نظر از این‌که
@@ -1059,11 +1127,12 @@ class DatabaseHelper {
 
   /// wrapper صریح برای ثبت سند سیستمی - صرف‌نظر از source ورودی، همیشه
   /// kJournalSourceSystem را enforce می‌کند. برای Workflowهای مالی
-  /// ساختاریافته (Finalization/Discount/Final Adjustment/Project Payment)
-  /// که خودشان با _validateJournalEntry/_writeJournalEntryRaw داخل یک
-  /// Transaction عمل می‌کنند، همین enforcement مستقیماً روی JournalEntryModel
-  /// ساخته‌شده اعمال شده (رجوع به finalizeProject و مشابه)؛ این wrapper برای
-  /// مسیرهای احتمالی آینده‌ای است که مستقیم از insertJournalEntry عبور کنند.
+  /// ساختاریافته (Finalization/Discount/Final Adjustment/Project Payment -
+  /// اکنون در [ProjectWorkflowService]) که خودشان با
+  /// validateJournalEntry/writeJournalEntryRaw داخل یک Transaction عمل
+  /// می‌کنند، همین enforcement مستقیماً روی JournalEntryModel ساخته‌شده اعمال
+  /// شده (رجوع به finalizeProject و مشابه)؛ این wrapper برای مسیرهای احتمالی
+  /// آینده‌ای است که مستقیم از insertJournalEntry عبور کنند.
   Future<int> createSystemJournal(JournalEntryModel entry) {
     return insertJournalEntry(JournalEntryModel(
       date: entry.date,
@@ -1148,6 +1217,33 @@ class DatabaseHelper {
     return JournalEntryModel.fromMap(maps.first, lines: lines);
   }
 
+  // ---------------- پیوست‌های سند (عکس/رسید) ----------------
+  // فقط داده مرجع/نمایشی - در هیچ محاسبه مالی مصرف نمی‌شود.
+
+  Future<int> insertAttachment(AttachmentModel a) async {
+    final db = await database;
+    return db.insert('attachments', a.toMap()..remove('id'));
+  }
+
+  Future<List<AttachmentModel>> getAttachments(int entryId) async {
+    final db = await database;
+    final maps =
+        await db.query('attachments', where: 'entryId = ?', whereArgs: [entryId], orderBy: 'id ASC');
+    return maps.map((m) => AttachmentModel.fromMap(m)).toList();
+  }
+
+  Future<AttachmentModel?> getAttachment(int id) async {
+    final db = await database;
+    final maps = await db.query('attachments', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return AttachmentModel.fromMap(maps.first);
+  }
+
+  Future<void> deleteAttachment(int id) async {
+    final db = await database;
+    await db.delete('attachments', where: 'id = ?', whereArgs: [id]);
+  }
+
   /// سطرهای دفتر یک حساب به همراه تاریخ و شرح سند، برای نمایش دفتر معین/کل
   Future<List<Map<String, dynamic>>> getLedgerLines(int accountId,
       {String? fromDate, String? toDate}) async {
@@ -1163,7 +1259,7 @@ class DatabaseHelper {
       args.add(toDate);
     }
     return db.rawQuery('''
-      SELECT l.id as lineId, l.debit, l.credit, l.description as lineDescription,
+      SELECT l.id as lineId, l.accountId as accountId, l.debit, l.credit, l.description as lineDescription,
              e.id as entryId, e.date, e.description as entryDescription, l.projectId
       FROM journal_lines l
       JOIN journal_entries e ON e.id = l.entryId
@@ -1319,44 +1415,6 @@ class DatabaseHelper {
   Future<AccountModel?> getServiceDiscountAccount([DatabaseExecutor? executor]) =>
       _accountBySystemKey(kSystemKeyServiceDiscount, executor);
 
-  /// ساخت سطرهای بستانکار برای اعمال مبلغی به AR یک پروژه مشخص، با محافظت
-  /// در برابر Overpayment: اگر مبلغ از مانده فعلی AR همان پروژه بیشتر باشد
-  /// (مثلاً چون پیش‌دریافت یا دریافت مستقیم بیشتر از طلب واقعی بوده)، فقط
-  /// به‌اندازه مانده به AR اعمال می‌شود و مازاد به‌جای منفی‌کردن AR، به حساب
-  /// «بستانکاری مشتری (مازاد دریافتی)» می‌رود - ماهیت این مازاد را کاربر
-  /// بعداً به‌صورت صریح مشخص می‌کند، سیستم آن را حدس نمی‌زند.
-  Future<List<JournalLineModel>> _creditArWithOverflowGuard({
-    required int projectId,
-    required int counterpartyId,
-    required int arAccountId,
-    required double amount,
-    DatabaseExecutor? executor,
-  }) async {
-    final currentAr = await projectReceivableBalance(projectId, executor);
-    final toAr = amount <= currentAr ? amount : currentAr;
-    final excess = amount - toAr;
-    final lines = <JournalLineModel>[];
-    if (toAr > 0) {
-      lines.add(JournalLineModel(
-          accountId: arAccountId,
-          credit: toAr.round(),
-          projectId: projectId,
-          counterpartyId: counterpartyId));
-    }
-    if (excess > 0) {
-      final creditAccount = await getCustomerCreditAccount(executor);
-      if (creditAccount == null) {
-        throw Exception('حساب «بستانکاری مشتری» برای ثبت مازاد دریافتی یافت نشد.');
-      }
-      lines.add(JournalLineModel(
-          accountId: creditAccount.id!,
-          credit: excess.round(),
-          projectId: projectId,
-          counterpartyId: counterpartyId));
-    }
-    return lines;
-  }
-
   /// مانده یک حساب کنترلی (AR/Advance/...) برای یک پروژه مشخص - مستقیم از
   /// Ledger، با فیلتر projectId (نه counterpartyId) چون هدف مانده مختص همین
   /// پروژه است، نه کل طرف حساب.
@@ -1402,6 +1460,79 @@ class DatabaseHelper {
   Future<double> projectRevenueLedgerBalance(int projectId) async {
     return _projectControlAccountBalance(projectId, await _requireControlAccount(kSystemKeyProjectRevenue),
         debitNormal: false);
+  }
+
+  /// مانده‌های سطح پروژه برای **همه** پروژه‌ها در تعداد ثابتی کوئری (سه
+  /// کوئری، مستقل از تعداد پروژه). هیچ قاعده مالی جدیدی اینجا تعریف
+  /// نمی‌شود: هر مقدار دقیقاً همان تعریف متد تک‌پروژه‌ای متناظرش را دارد
+  /// (projectFinancials['received']، projectReceivableBalance،
+  /// projectAdvanceBalance، projectCustomerCreditBalance،
+  /// projectRevenueLedgerBalance، projectDirectCost) - فقط با GROUP BY
+  /// projectId به‌جای WHERE projectId = ?. پروژه‌ای که هیچ سطری ندارد در
+  /// نگاشت‌ها نمی‌آید و مقدارش صفر است (معادل COALESCE نسخه تک‌پروژه‌ای).
+  /// برابری عددی این دو مسیر با تست تضمین می‌شود.
+  Future<ProjectLedgerAggregates> projectLedgerAggregates() async {
+    final db = await database;
+    final cashAccounts = await _requireCashAccounts();
+    final ar = await _requireControlAccount(kSystemKeyReceivable);
+    final advance = await _requireControlAccount(kSystemKeyCustomerAdvance);
+    final credit = await _requireControlAccount(kSystemKeyCustomerCredit);
+    final revenue = await _requireControlAccount(kSystemKeyProjectRevenue);
+    final discountAccount = await getServiceDiscountAccount();
+
+    final placeholders = List.filled(cashAccounts.length, '?').join(',');
+    final receivedRows = await db.rawQuery('''
+      SELECT projectId, COALESCE(SUM(debit),0) as total
+      FROM journal_lines
+      WHERE projectId IS NOT NULL AND accountId IN ($placeholders)
+      GROUP BY projectId
+    ''', cashAccounts.map((a) => a.id).toList());
+
+    final controlRows = await db.rawQuery('''
+      SELECT projectId, accountId, COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c
+      FROM journal_lines
+      WHERE projectId IS NOT NULL AND accountId IN (?, ?, ?, ?)
+      GROUP BY projectId, accountId
+    ''', [ar.id, advance.id, credit.id, revenue.id]);
+
+    final directCostRows = await db.rawQuery('''
+      SELECT l.projectId as projectId,
+             COALESCE(SUM(l.debit),0) - COALESCE(SUM(l.credit),0) as total
+      FROM journal_lines l JOIN accounts a ON a.id = l.accountId
+      WHERE l.projectId IS NOT NULL AND a.type = ? AND (a.id != ? OR ? IS NULL)
+      GROUP BY l.projectId
+    ''', [kAccountExpense, discountAccount?.id ?? -1, discountAccount?.id]);
+
+    final receivable = <int, double>{};
+    final advanceMap = <int, double>{};
+    final creditMap = <int, double>{};
+    final revenueMap = <int, double>{};
+    for (final r in controlRows) {
+      final projectId = r['projectId'] as int;
+      final accountId = r['accountId'] as int;
+      final d = (r['d'] as num).toDouble();
+      final c = (r['c'] as num).toDouble();
+      if (accountId == ar.id) {
+        receivable[projectId] = d - c; // بدهکارطبیعی
+      } else if (accountId == advance.id) {
+        advanceMap[projectId] = c - d;
+      } else if (accountId == credit.id) {
+        creditMap[projectId] = c - d;
+      } else if (accountId == revenue.id) {
+        revenueMap[projectId] = c - d;
+      }
+    }
+
+    return ProjectLedgerAggregates(
+      received: {for (final r in receivedRows) r['projectId'] as int: (r['total'] as num).toDouble()},
+      receivable: receivable,
+      advance: advanceMap,
+      customerCredit: creditMap,
+      revenueLedger: revenueMap,
+      directCost: {
+        for (final r in directCostRows) r['projectId'] as int: (r['total'] as num).toDouble()
+      },
+    );
   }
 
   /// آیا این حساب یا یکی از والدینش (تا هر عمقی) صندوق/بانک است؟ با این
@@ -1606,6 +1737,44 @@ class DatabaseHelper {
     return breakdown;
   }
 
+  /// مانده یک حساب به‌همراه همه زیرحساب‌هایش (بازگشتی) - سرشاخه = مجموع
+  /// زیرشاخه‌ها تا برگ‌ها، دقیقاً مطابق ساختار واقعی دفتر حساب‌ها. برای
+  /// گزارش سلسله‌مراتبی «دریافت و هزینه» (سرشاخه → زیرشاخه → ... → برگ).
+  Future<double> accountBalanceWithDescendants(int accountId, {String? fromDate, String? toDate}) async {
+    final own = await accountBalance(accountId, fromDate: fromDate, toDate: toDate);
+    double total = own['balance']!;
+    final account = await getAccount(accountId);
+    if (account == null) return total;
+    final siblings = await getAccounts(type: account.type);
+    for (final child in siblings.where((a) => a.parentId == accountId)) {
+      total += await accountBalanceWithDescendants(child.id!, fromDate: fromDate, toDate: toDate);
+    }
+    return total;
+  }
+
+  /// زیرشاخه‌های مستقیم یک حساب (یا سرشاخه‌های یک نوع، اگر parentId=null)،
+  /// هرکدام با مانده رول‌آپ‌شده (خودش + همه زیرشاخه‌هایش) - برای نمایش
+  /// سلسله‌مراتبی گزارش «دریافت و هزینه»: کاربر از سرشاخه شروع می‌کند و با
+  /// زدن روی هر ردیف که hasChildren دارد، یک سطح پایین‌تر می‌رود، تا به برگ‌ها برسد.
+  Future<List<Map<String, dynamic>>> accountChildrenBreakdown(
+    String type, {
+    int? parentId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final all = await getAccounts(type: type);
+    final children = all.where((a) => a.parentId == parentId);
+    final result = <Map<String, dynamic>>[];
+    for (final acc in children) {
+      final total = await accountBalanceWithDescendants(acc.id!, fromDate: fromDate, toDate: toDate);
+      final hasChildren = all.any((a) => a.parentId == acc.id);
+      if (total != 0) {
+        result.add({'account': acc, 'total': total, 'hasChildren': hasChildren});
+      }
+    }
+    return result;
+  }
+
   /// موجودی بانک‌ها به تفکیک زیرحساب: اگر حساب «بانک» زیرحساب داشته باشد
   /// (مثلاً بانک ملی، بانک صادرات)، هرکدام جداگانه برگردانده می‌شود؛
   /// در غیر این صورت خود حساب «بانک» به‌عنوان یک ردیف برگردانده می‌شود.
@@ -1686,7 +1855,14 @@ class DatabaseHelper {
   /// به هر دلیلی (فایل پشتیبان قدیمی یا دستکاری‌شده) در ورودی Restore
   /// حضور داشته باشند، به‌صورت دفاعی این‌جا هم نادیده گرفته می‌شوند تا
   /// Restore هرگز نتواند قفل امنیتی فعلی دستگاه مقصد را تغییر دهد.
-  static const List<String> kSecuritySettingKeys = ['pin_hash', 'lock_enabled', 'biometric_enabled'];
+  static const List<String> kSecuritySettingKeys = [
+    'pin_hash',
+    'pin_salt',
+    'lock_enabled',
+    'biometric_enabled',
+    'pin_failed_attempts',
+    'pin_lockout_until',
+  ];
 
   Future<void> setAllSettings(Map<String, String> settings, [DatabaseExecutor? executor]) async {
     for (final entry in settings.entries) {
@@ -2126,288 +2302,108 @@ class DatabaseHelper {
     return sum.abs();
   }
 
-  /// نهایی‌سازی پروژه (Finalization): مبلغ نهایی ثبت می‌شود (هرگز overwrite
-  /// نمی‌شود)، درآمد پروژه شناسایی می‌شود، و مانده پیش‌دریافت موجود این پروژه
-  /// به‌طور خودکار به حساب دریافتنی منتقل می‌شود.
-  /// نهایی‌سازی پروژه - کاملاً Atomic از طریق یک Transaction واقعی دیتابیس
-  /// (نه الگوی جبرانیِ قبلی که با delete دستی rollback می‌کرد). اگر هر
-  /// مرحله (اعتبارسنجی سند دوم، یا حتی بروزرسانی نهایی پروژه) شکست بخورد،
-  /// SQLite کل تراکنش را rollback می‌کند و هیچ سند یا تغییری باقی نمی‌ماند.
+  /// نهایی‌سازی پروژه (Finalization)، ثبت تخفیف/اصلاح مبلغ نهایی، دریافت/
+  /// برگشت/ویرایش/تبدیل رسید پروژه - پیاده‌سازی واقعی این ۱۱ متد در
+  /// [ProjectWorkflowService] است (lib/services/project_workflow_service.dart)؛
+  /// این‌ها فقط یک Facade پایدار برای فراخوانی‌های موجود (UI و تست‌ها) هستند
+  /// تا هیچ‌کدام نیاز به تغییر نداشته باشند. هیچ رفتار/Schema/فرمولی در این
+  /// جابه‌جایی تغییر نکرده است.
+  ProjectWorkflowService? _workflow;
+  ProjectWorkflowService get _projectWorkflow => _workflow ??= ProjectWorkflowService(this);
+
   Future<void> finalizeProject({
     required int projectId,
     required double finalAmount,
     required String date,
     String? note,
-  }) async {
-    final db = await database;
-    await db.transaction((txn) async {
-      final project = await getProject(projectId, txn);
-      if (project == null) throw Exception('پروژه یافت نشد.');
-      if (project.isFinalized) {
-        // Idempotency: نهایی‌سازی تکراری هرگز نباید سند دوم بسازد
-        throw Exception('این پروژه قبلاً نهایی شده است.');
-      }
-      if (project.status == kProjectStatusCancelled) {
-        // تکمیل همان Invariant که در updateProject تعریف شده: یک پروژه
-        // نمی‌تواند هم‌زمان لغوشده و نهایی‌شده باشد؛ این ترکیب حالت باید
-        // از هر دو مسیر (ویرایش عمومی و Workflow نهایی‌سازی) مسدود شود.
-        throw Exception('پروژه لغوشده قابل نهایی‌سازی نیست.');
-      }
-      final arAccount = await getReceivableAccount(txn);
-      final revenueAccount = await getProjectRevenueAccount(txn);
-      final advanceAccount = await getCustomerAdvanceAccount(txn);
-      if (arAccount == null || revenueAccount == null || advanceAccount == null) {
-        throw Exception('حساب‌های کنترلی موردنیاز (دریافتنی/درآمد پروژه/پیش‌دریافت) یافت نشدند.');
-      }
+  }) =>
+      _projectWorkflow.finalizeProject(
+          projectId: projectId, finalAmount: finalAmount, date: date, note: note);
 
-      final revenueEntry = JournalEntryModel(
-        date: date,
-        description: 'نهایی‌سازی پروژه «${project.title}» - شناسایی درآمد',
-        createdAt: todayJalaliString(),
-        source: kJournalSourceSystem,
-        lines: [
-          JournalLineModel(
-              accountId: arAccount.id!,
-              debit: finalAmount.round(),
-              projectId: projectId,
-              counterpartyId: project.counterpartyId),
-          JournalLineModel(
-              accountId: revenueAccount.id!,
-              credit: finalAmount.round(),
-              projectId: projectId,
-              counterpartyId: project.counterpartyId),
-        ],
-      );
-      await _validateJournalEntry(revenueEntry, txn);
-      await _writeJournalEntryRaw(txn, revenueEntry);
-
-      // انتقال مانده پیش‌دریافت موجود همین پروژه به حساب دریافتنی - با
-      // محافظت Overpayment: اگر پیش‌دریافت از مبلغ نهایی بیشتر باشد، مازاد
-      // به AR منفی تبدیل نمی‌شود، بلکه به «بستانکاری مشتری» می‌رود. مانده
-      // پیش‌دریافت از همین Transaction خوانده می‌شود، نه اتصال مستقل.
-      final advanceBalance = await projectAdvanceBalance(projectId, txn);
-      if (advanceBalance > 0) {
-        final creditLines = await _creditArWithOverflowGuard(
-          projectId: projectId,
-          counterpartyId: project.counterpartyId,
-          arAccountId: arAccount.id!,
-          amount: advanceBalance,
-          executor: txn,
-        );
-        final advanceEntry = JournalEntryModel(
-          date: date,
-          description: 'انتقال پیش‌دریافت به حساب دریافتنی - پروژه «${project.title}»',
-          createdAt: todayJalaliString(),
-          source: kJournalSourceSystem,
-          lines: [
-            JournalLineModel(
-                accountId: advanceAccount.id!,
-                debit: advanceBalance.round(),
-                projectId: projectId,
-                counterpartyId: project.counterpartyId),
-            ...creditLines,
-          ],
-        );
-        await _validateJournalEntry(advanceEntry, txn);
-        await _writeJournalEntryRaw(txn, advanceEntry);
-      }
-
-      final updatedProject = project.copyWith(
-        finalAmount: finalAmount,
-        finalizedDate: date,
-        finalizedNote: note,
-        status: kProjectStatusFinalized,
-      );
-      await txn.update('projects', updatedProject.toMap(), where: 'id = ?', whereArgs: [projectId]);
-    });
-  }
-
-  /// ثبت تخفیف نهایی - فقط پس از Finalization مجاز است. تخفیف مبلغ نهایی
-  /// اصلی را overwrite نمی‌کند؛ به‌صورت رویداد مستقل ذخیره و Journal می‌شود.
   Future<void> recordProjectDiscount({
     required int projectId,
     required double amount,
     String? reason,
     required String date,
-  }) async {
-    final db = await database;
-    await db.transaction((txn) async {
-      final project = await getProject(projectId, txn);
-      if (project == null || !project.isFinalized) {
-        throw Exception('تخفیف فقط پس از نهایی‌سازی پروژه قابل ثبت است.');
-      }
-      final arAccount = await getReceivableAccount(txn);
-      final discountAccount = await getServiceDiscountAccount(txn);
-      if (arAccount == null || discountAccount == null) {
-        throw Exception('حساب‌های کنترلی موردنیاز یافت نشدند.');
-      }
-      // تخفیف یک تصمیم عمدی کاربر است (نه دریافت پول از بیرون که باید جایی
-      // پارک شود)؛ پس اگر از مانده طلب بیشتر باشد، به‌جای مسیر دادن به یک
-      // حساب دیگر، به‌صراحت رد می‌شود تا کاربر عدد را اصلاح کند.
-      final currentAr = await projectReceivableBalance(projectId, txn);
-      if (amount > currentAr) {
-        throw Exception(
-            'مبلغ تخفیف (${formatMoney(amount)}) از مانده طلب فعلی این پروژه (${formatMoney(currentAr)}) بیشتر است.');
-      }
-      final entry = JournalEntryModel(
-        date: date,
-        description: reason?.isNotEmpty == true ? 'تخفیف: $reason' : 'تخفیف نهایی پروژه',
-        createdAt: todayJalaliString(),
-        source: kJournalSourceSystem,
-        lines: [
-          JournalLineModel(
-              accountId: discountAccount.id!,
-              debit: amount.round(),
-              projectId: projectId,
-              counterpartyId: project.counterpartyId),
-          JournalLineModel(
-              accountId: arAccount.id!,
-              credit: amount.round(),
-              projectId: projectId,
-              counterpartyId: project.counterpartyId),
-        ],
-      );
-      await _validateJournalEntry(entry, txn);
-      await _writeJournalEntryRaw(txn, entry);
-      await addProjectPriceEvent(
-        projectId: projectId,
-        type: kPriceEventDiscount,
-        amount: -amount,
-        reason: reason,
-        date: date,
-        executor: txn,
-      );
-    });
-  }
+  }) =>
+      _projectWorkflow.recordProjectDiscount(
+          projectId: projectId, amount: amount, reason: reason, date: date);
 
-  /// اصلاح مبلغ نهایی پس از Finalization (مثبت یا منفی) - Finalization قبلی
-  /// را overwrite نمی‌کند، یک رویداد و یک سند اصلاحی مستقل ایجاد می‌کند.
   Future<void> recordFinalAdjustment({
     required int projectId,
-    required double amount, // علامت‌دار: مثبت=افزایش درآمد، منفی=کاهش
+    required double amount,
     String? reason,
     required String date,
-  }) async {
-    if (amount == 0) return;
-    final db = await database;
-    await db.transaction((txn) async {
-      final project = await getProject(projectId, txn);
-      if (project == null || !project.isFinalized) {
-        throw Exception('اصلاح مبلغ نهایی فقط پس از نهایی‌سازی پروژه ممکن است.');
-      }
-      final arAccount = await getReceivableAccount(txn);
-      final revenueAccount = await getProjectRevenueAccount(txn);
-      if (arAccount == null || revenueAccount == null) {
-        throw Exception('حساب‌های کنترلی موردنیاز یافت نشدند.');
-      }
-      final magnitude = amount.abs().round();
-      // اصلاح کاهشی، AR را بستانکار (کاهش) می‌دهد؛ اگر از مانده فعلی بیشتر
-      // باشد، به‌جای منفی‌کردن AR، به‌صراحت رد می‌شود.
-      if (amount < 0) {
-        final currentAr = await projectReceivableBalance(projectId, txn);
-        if (magnitude > currentAr) {
-          throw Exception(
-              'مقدار کاهش (${formatMoney(magnitude)}) از مانده طلب فعلی این پروژه (${formatMoney(currentAr)}) بیشتر است.');
-        }
-      }
-      final entry = JournalEntryModel(
-        date: date,
-        description: reason?.isNotEmpty == true ? 'اصلاح مبلغ نهایی: $reason' : 'اصلاح مبلغ نهایی پروژه',
-        createdAt: todayJalaliString(),
-        source: kJournalSourceSystem,
-        lines: amount > 0
-            ? [
-                JournalLineModel(
-                    accountId: arAccount.id!,
-                    debit: magnitude,
-                    projectId: projectId,
-                    counterpartyId: project.counterpartyId),
-                JournalLineModel(
-                    accountId: revenueAccount.id!,
-                    credit: magnitude,
-                    projectId: projectId,
-                    counterpartyId: project.counterpartyId),
-              ]
-            : [
-                JournalLineModel(
-                    accountId: revenueAccount.id!,
-                    debit: magnitude,
-                    projectId: projectId,
-                    counterpartyId: project.counterpartyId),
-                JournalLineModel(
-                    accountId: arAccount.id!,
-                    credit: magnitude,
-                    projectId: projectId,
-                    counterpartyId: project.counterpartyId),
-              ],
-      );
-      await _validateJournalEntry(entry, txn);
-      await _writeJournalEntryRaw(txn, entry);
-      await addProjectPriceEvent(
-        projectId: projectId,
-        type: kPriceEventFinalAdjustment,
-        amount: amount,
-        reason: reason,
-        date: date,
-        executor: txn,
-      );
-    });
-  }
+  }) =>
+      _projectWorkflow.recordFinalAdjustment(
+          projectId: projectId, amount: amount, reason: reason, date: date);
 
-  /// دریافت وجه برای یک پروژه مشخص - مقصد بستانکار به‌صورت هوشمند تعیین
-  /// می‌شود: پیش از Finalization همیشه «پیش‌دریافت مشتری» (هرگز درآمد)،
-  /// پس از آن «حساب‌های دریافتنی» (تسویه طلب، نه درآمد جدید).
   Future<void> receiveProjectPayment({
     required int projectId,
     required int cashAccountId,
     required double amount,
     required String date,
     String? description,
-  }) async {
-    final project = await getProject(projectId);
-    if (project == null) throw Exception('پروژه یافت نشد.');
-    final targetAccount = project.isFinalized
-        ? await getReceivableAccount()
-        : await getCustomerAdvanceAccount();
-    if (targetAccount == null) {
-      throw Exception('حساب کنترلی موردنیاز یافت نشد.');
-    }
+  }) =>
+      _projectWorkflow.receiveProjectPayment(
+          projectId: projectId,
+          cashAccountId: cashAccountId,
+          amount: amount,
+          date: date,
+          description: description);
 
-    // پیش از Finalization، پیش‌دریافت باز و بدون سقف است (چون برآورد قطعی
-    // نیست)؛ پس از Finalization، دریافت مازاد بر مانده طلب باید به‌جای
-    // منفی‌کردن AR، به «بستانکاری مشتری» برود.
-    final creditLines = project.isFinalized
-        ? await _creditArWithOverflowGuard(
-            projectId: projectId,
-            counterpartyId: project.counterpartyId,
-            arAccountId: targetAccount.id!,
-            amount: amount,
-          )
-        : [
-            JournalLineModel(
-                accountId: targetAccount.id!,
-                credit: amount.round(),
-                projectId: projectId,
-                counterpartyId: project.counterpartyId),
-          ];
+  Future<int> reverseProjectReceipt(int originalEntryId, {String? date}) =>
+      _projectWorkflow.reverseProjectReceipt(originalEntryId, date: date);
 
-    await insertJournalEntry(JournalEntryModel(
-      date: date,
-      description: description?.isNotEmpty == true
-          ? description!
-          : (project.isFinalized ? 'دریافت طلب پروژه' : 'پیش‌دریافت پروژه'),
-      createdAt: todayJalaliString(),
-      source: kJournalSourceSystem,
-      lines: [
-        JournalLineModel(
-            accountId: cashAccountId,
-            debit: amount.round(),
-            projectId: projectId,
-            counterpartyId: project.counterpartyId),
-        ...creditLines,
-      ],
-    ));
-  }
+  Future<void> updateProjectReceipt({
+    required int entryId,
+    required int cashAccountId,
+    required double amount,
+    required String date,
+    String? description,
+  }) =>
+      _projectWorkflow.updateProjectReceipt(
+          entryId: entryId,
+          cashAccountId: cashAccountId,
+          amount: amount,
+          date: date,
+          description: description);
+
+  Future<void> convertReceiptToExpense({
+    required int entryId,
+    required int expenseAccountId,
+    required int cashAccountId,
+    required double amount,
+    required String date,
+    String? description,
+  }) =>
+      _projectWorkflow.convertReceiptToExpense(
+          entryId: entryId,
+          expenseAccountId: expenseAccountId,
+          cashAccountId: cashAccountId,
+          amount: amount,
+          date: date,
+          description: description);
+
+  Future<int> reverseProjectDiscount(int entryId) => _projectWorkflow.reverseProjectDiscount(entryId);
+
+  Future<int> reverseFinalAdjustment(int entryId) => _projectWorkflow.reverseFinalAdjustment(entryId);
+
+  Future<void> updateProjectDiscount({
+    required int entryId,
+    required double amount,
+    required String date,
+    String? reason,
+  }) =>
+      _projectWorkflow.updateProjectDiscount(entryId: entryId, amount: amount, date: date, reason: reason);
+
+  Future<void> updateFinalAdjustment({
+    required int entryId,
+    required double amount,
+    required String date,
+    String? reason,
+  }) =>
+      _projectWorkflow.updateFinalAdjustment(entryId: entryId, amount: amount, date: date, reason: reason);
 
   /// آیا پروژه از نظر مالی تسویه‌شده است؟ (مستقل از Finalized بودن) -
   /// هرگز cache نمی‌شود، همیشه زنده از Ledger محاسبه می‌شود.
@@ -2775,7 +2771,7 @@ class DatabaseHelper {
   /// این تابع برای رفع اثر جانبی allowChildren=true روی صندوق/بانک لازم
   /// شد: بدون آن، وصولی مستقیم به یک زیرحساب بانکی (مثل «بانک ملی») به
   /// اشتباه «سایر» طبقه‌بندی می‌شد، نه «وصولی نقدی».
-  bool _isCashOrBankById(int? accountId, Map<int, AccountModel> byId) {
+  bool isCashOrBankById(int? accountId, Map<int, AccountModel> byId) {
     var current = accountId != null ? byId[accountId] : null;
     while (current != null) {
       if (current.systemKey == kSystemKeyCash || current.systemKey == kSystemKeyBank) return true;
@@ -2783,6 +2779,251 @@ class DatabaseHelper {
       current = byId[current.parentId];
     }
     return false;
+  }
+
+  /// اسناد دقیقاً دوسطری با یک سمت نقد/بانکی بدهکار در بازه، به همراه طرف
+  /// مقابل - پایه مشترک برای مبلغ‌بندی (cashReceiptsBreakdown) و فهرست اسناد
+  /// (cashReceiptEntries) یک دسته، تا منطق طبقه‌بندی یک‌بار نوشته شود.
+  /// اسناد چندسطری (غیر دقیقاً دوسطری) به‌طور قطعی قابل طبقه‌بندی نیستند و
+  /// همیشه «سایر منابع» به‌حساب می‌آیند، دقیقاً مثل _classifyControlAccountMovement.
+  Future<List<Map<String, dynamic>>> _cashReceiptRows({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return [];
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(cashIds.length, '?').join(',');
+
+    String dateWhere = '';
+    final dateArgs = <Object?>[];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+
+    final allAccounts = await getAccounts();
+    final accountsById = {for (final a in allAccounts) if (a.id != null) a.id!: a};
+
+    final twoLineRows = await db.rawQuery('''
+      SELECT je.id as entryId, cl.debit as amount, cl.counterpartyId as counterpartyId,
+             other.accountId as otherAccountId
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      WHERE cl.accountId IN ($placeholders) AND cl.debit > 0
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $dateWhere
+    ''', [...cashIds, ...dateArgs]);
+
+    final result = <Map<String, dynamic>>[];
+    for (final row in twoLineRows) {
+      final otherAccountId = row['otherAccountId'] as int?;
+      final otherAccount = otherAccountId != null ? accountsById[otherAccountId] : null;
+      // انتقال بین دو حساب نقد/بانکی خودمان (مثلاً صندوق به بانک) دریافتی
+      // واقعی نیست - نباید در هیچ دسته‌ای شمرده شود.
+      if (otherAccount != null && isCashOrBankById(otherAccountId, accountsById)) continue;
+      CashReceiptCategory category;
+      if (otherAccount?.systemKey == kSystemKeyCustomerAdvance ||
+          otherAccount?.systemKey == kSystemKeyReceivable) {
+        category = CashReceiptCategory.projects;
+      } else if (otherAccount?.type == kAccountIncome) {
+        category = CashReceiptCategory.directIncome;
+      } else {
+        category = CashReceiptCategory.other;
+      }
+      result.add({
+        'entryId': row['entryId'] as int,
+        'amount': (row['amount'] as num).toDouble(),
+        'category': category,
+        'counterpartyId': row['counterpartyId'] as int?,
+      });
+    }
+
+    // اسناد غیر-دقیقاً-دوسطری: کامل و بدون طبقه‌بندی دقیق، در «سایر منابع».
+    final unclassified = await db.rawQuery('''
+      SELECT je.id as entryId, cl.debit as amount, cl.counterpartyId as counterpartyId
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      WHERE cl.accountId IN ($placeholders) AND cl.debit > 0
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) != 2
+        $dateWhere
+    ''', [...cashIds, ...dateArgs]);
+    for (final row in unclassified) {
+      result.add({
+        'entryId': row['entryId'] as int,
+        'amount': (row['amount'] as num).toDouble(),
+        'category': CashReceiptCategory.other,
+        'counterpartyId': row['counterpartyId'] as int?,
+      });
+    }
+
+    return result;
+  }
+
+  /// جمع دریافتی نقدی یک بازه، به تفکیک منبع - برای گزارش «دریافت و هزینه».
+  Future<Map<CashReceiptCategory, double>> cashReceiptsBreakdown(
+      {String? fromDate, String? toDate}) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final result = <CashReceiptCategory, double>{};
+    for (final row in rows) {
+      final category = row['category'] as CashReceiptCategory;
+      final amount = row['amount'] as double;
+      result[category] = (result[category] ?? 0) + amount;
+    }
+    return result;
+  }
+
+  /// اسناد دریافتی یک دسته مشخص در بازه - برای نمایش فهرست تک‌تک اسناد وقتی
+  /// کاربر روی یک دسته در گزارش «دریافت و هزینه» می‌زند.
+  Future<List<JournalEntryModel>> cashReceiptEntries({
+    required CashReceiptCategory category,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final entryIds = rows.where((r) => r['category'] == category).map((r) => r['entryId'] as int).toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
+  }
+
+  /// دریافتی نقدی دسته «پروژه‌ها» یک بازه، به تفکیک مشتری - برای گزارش
+  /// «دریافت و هزینه» که با زدن روی «دریافت از مشتریان/پروژه‌ها»، اول فهرست
+  /// مشتری‌ها را نشان می‌دهد نه فهرست تخت همه اسناد. counterpartyId=null
+  /// یعنی سند دریافتی بدون طرف‌حساب مشخص (نامشخص).
+  Future<List<Map<String, dynamic>>> cashReceiptsByCustomer({String? fromDate, String? toDate}) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final projectRows = rows.where((r) => r['category'] == CashReceiptCategory.projects);
+    final totals = <int?, double>{};
+    for (final row in projectRows) {
+      final cpId = row['counterpartyId'] as int?;
+      totals[cpId] = (totals[cpId] ?? 0) + (row['amount'] as double);
+    }
+    final counterparties = await getCounterparties(includeInactive: true);
+    final byId = {for (final c in counterparties) if (c.id != null) c.id!: c};
+    final result = <Map<String, dynamic>>[];
+    totals.forEach((cpId, total) {
+      result.add({
+        'counterpartyId': cpId,
+        'counterpartyName': cpId != null ? (byId[cpId]?.name ?? 'نامشخص') : 'نامشخص',
+        'total': total,
+      });
+    });
+    return result;
+  }
+
+  /// اسناد دریافتی دسته «پروژه‌ها» یک مشتری مشخص در بازه - برای فهرست تک‌تک
+  /// اسناد وقتی کاربر روی نام آن مشتری می‌زند.
+  Future<List<JournalEntryModel>> cashReceiptEntriesForCustomer({
+    required int? counterpartyId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _cashReceiptRows(fromDate: fromDate, toDate: toDate);
+    final entryIds = rows
+        .where((r) =>
+            r['category'] == CashReceiptCategory.projects && r['counterpartyId'] == counterpartyId)
+        .map((r) => r['entryId'] as int)
+        .toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
+  }
+
+  /// اسناد دقیقاً دوسطری با یک سمت نقد/بانکی بستانکار (کاهش نقد) در بازه که
+  /// طرف مقابلش بدهکار شدن یک حساب سرمایه است - یعنی برداشت واقعی مالک یا
+  /// یکی از شرکا. عمداً بر مبنای همان تراکنش نقدی خروجی است، نه مانده خالص
+  /// حساب سرمایه (accountBalanceWithDescendants) - چون آن، آورده و برداشت
+  /// یک شریک را در هم می‌شکند و اگر هر دو در یک بازه رخ داده باشند، برداشت
+  /// واقعی را دست‌کم نشان می‌دهد.
+  Future<List<Map<String, dynamic>>> _ownerDrawRows({String? fromDate, String? toDate}) async {
+    final db = await database;
+    final cashAccounts = await getCashAccounts();
+    if (cashAccounts.isEmpty) return [];
+    final cashIds = cashAccounts.map((a) => a.id).toList();
+    final placeholders = List.filled(cashIds.length, '?').join(',');
+
+    String dateWhere = '';
+    final dateArgs = <Object?>[];
+    if (fromDate != null) {
+      dateWhere += ' AND je.date >= ?';
+      dateArgs.add(fromDate);
+    }
+    if (toDate != null) {
+      dateWhere += ' AND je.date <= ?';
+      dateArgs.add(toDate);
+    }
+
+    final rows = await db.rawQuery('''
+      SELECT je.id as entryId, cl.credit as amount, other.accountId as otherAccountId
+      FROM journal_lines cl
+      JOIN journal_entries je ON je.id = cl.entryId
+      JOIN journal_lines other ON other.entryId = cl.entryId AND other.id != cl.id
+      JOIN accounts otherAcc ON otherAcc.id = other.accountId
+      WHERE cl.accountId IN ($placeholders) AND cl.credit > 0
+        AND otherAcc.type = ?
+        AND (SELECT COUNT(*) FROM journal_lines x WHERE x.entryId = cl.entryId) = 2
+        $dateWhere
+    ''', [...cashIds, kAccountEquity, ...dateArgs]);
+
+    return rows
+        .map((r) => {
+              'entryId': r['entryId'] as int,
+              'amount': (r['amount'] as num).toDouble(),
+              'accountId': r['otherAccountId'] as int,
+            })
+        .toList();
+  }
+
+  /// برداشت نقدی مالک/شرکا در یک بازه، به تفکیک حساب سرمایه هرکدام - برای
+  /// گزارش «دریافت و هزینه». چند شریک با چند زیرحساب برداشت جدا ممکن است
+  /// همزمان وجود داشته باشند؛ هرکدام یک ردیف مستقل است.
+  Future<List<Map<String, dynamic>>> ownerDrawBreakdown({String? fromDate, String? toDate}) async {
+    final rows = await _ownerDrawRows(fromDate: fromDate, toDate: toDate);
+    if (rows.isEmpty) return [];
+    final allEquity = await getAccounts(type: kAccountEquity);
+    final byId = {for (final a in allEquity) if (a.id != null) a.id!: a};
+    final totals = <int, double>{};
+    for (final row in rows) {
+      final id = row['accountId'] as int;
+      totals[id] = (totals[id] ?? 0) + (row['amount'] as double);
+    }
+    final result = <Map<String, dynamic>>[];
+    totals.forEach((id, total) {
+      final account = byId[id];
+      if (account != null) result.add({'account': account, 'total': total});
+    });
+    return result;
+  }
+
+  /// اسناد برداشت یک حساب سرمایه مشخص (یک شریک) در بازه - برای فهرست تک‌تک
+  /// اسناد وقتی کاربر روی نام آن شریک در گزارش «دریافت و هزینه» می‌زند.
+  Future<List<JournalEntryModel>> ownerDrawEntries({
+    required int accountId,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    final rows = await _ownerDrawRows(fromDate: fromDate, toDate: toDate);
+    final entryIds =
+        rows.where((r) => r['accountId'] == accountId).map((r) => r['entryId'] as int).toSet();
+    final entries = <JournalEntryModel>[];
+    for (final id in entryIds) {
+      final entry = await getJournalEntry(id);
+      if (entry != null) entries.add(entry);
+    }
+    entries.sort((a, b) => b.date.compareTo(a.date));
+    return entries;
   }
 
   Future<Map<String, double>> _classifyControlAccountMovement({
@@ -2853,7 +3094,7 @@ class DatabaseHelper {
         }
       }
       if (reduceAmount > 0) {
-        if (_isCashOrBankById(otherAccountId, accountsById)) {
+        if (isCashOrBankById(otherAccountId, accountsById)) {
           decreaseByCash += reduceAmount;
         } else if (otherKey == kSystemKeyServiceDiscount || otherKey == kSystemKeyProjectRevenue) {
           decreaseByAdjustment += reduceAmount;
@@ -2994,7 +3235,7 @@ class DatabaseHelper {
       final otherKey = row['otherSystemKey'] as String?;
       final otherAccountId = row['otherAccountId'] as int?;
       if (c > 0) {
-        if (_isCashOrBankById(otherAccountId, accountsById)) {
+        if (isCashOrBankById(otherAccountId, accountsById)) {
           newAdvances += c;
         } else {
           otherIncrease += c;
@@ -3072,6 +3313,19 @@ class DatabaseHelper {
     return {
       'debit': (r.first['d'] as num).toDouble(),
       'credit': (r.first['c'] as num).toDouble(),
+    };
+  }
+
+  /// جمع بدهکار و بستانکار هر حساب در یک کوئری (به‌جای یک کوئری به‌ازای هر
+  /// حساب) - فقط خواندنی؛ برای نمایش مانده کنار حساب‌ها در چارت حساب‌ها.
+  Future<Map<int, ({double debit, double credit})>> accountTotalsById() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+        'SELECT accountId, COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c '
+        'FROM journal_lines GROUP BY accountId');
+    return {
+      for (final r in rows)
+        r['accountId'] as int: (debit: (r['d'] as num).toDouble(), credit: (r['c'] as num).toDouble()),
     };
   }
 

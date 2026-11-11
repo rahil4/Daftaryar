@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
 import '../../models/account.dart';
+import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 
 class AccountFormScreen extends StatefulWidget {
@@ -91,12 +92,17 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? 'ویرایش حساب' : 'حساب جدید')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Form(
+      body: BlueprintGridBackground(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                // رجوع به توضیح مشابه در sms_draft_review_screen.dart: بدون
+                // این inset، دکمه ذخیره آخرین آیتم لیست پشت نوار ناوبری
+                // سیستمی گم می‌شود.
+                padding:
+                    EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
                 children: [
                   if (isSystem)
                     const Padding(
@@ -152,6 +158,7 @@ class _AccountFormScreenState extends State<AccountFormScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 }

@@ -18,6 +18,10 @@ class FinancialReportingService {
 
   // ================= Project Reports =================
 
+  /// بارگذاری دسته‌ای شاخص‌های همه پروژه‌ها - برای اشتراک بین چند گزارش در
+  /// یک بارگذاری (رجوع به FinancialMetricsService.loadSnapshot).
+  Future<ProjectMetricsSnapshot> loadSnapshot() => _metrics.loadSnapshot();
+
   Future<ProjectFinancialReport> getProjectReport(int projectId) async {
     final project = await _db.getProject(projectId);
     if (project == null) throw Exception('پروژه یافت نشد.');
@@ -80,19 +84,28 @@ class FinancialReportingService {
   /// گزارش چند پروژه با فیلترهای پشتیبانی‌شده توسط داده فعلی. فیلترهایی که
   /// داده فعلی امکان آن را نمی‌دهد (مثلاً فیلتر بر مبنای تاریخ فعالیت
   /// Ledger برای یک پروژه خاص) در این تابع اضافه نشدند تا حدس زده نشوند.
+  ///
+  /// [snapshot] اختیاری: نتیجه یک‌بار بارگذاری دسته‌ای (loadSnapshot) که
+  /// می‌تواند بین چند گزارشِ یک بارگذاری مشترک باشد. اگر داده نشود، همین‌جا
+  /// یک‌بار بارگذاری می‌شود - در هر دو حالت تعداد کوئری ثابت است، نه
+  /// متناسب با تعداد پروژه.
   Future<List<ProjectFinancialReport>> getProjectReports({
     int? counterpartyId,
     String? projectStatus,
     bool? finalizedOnly,
     bool? settledOnly,
+    ProjectMetricsSnapshot? snapshot,
   }) async {
-    final projects = await _db.getProjects(counterpartyId: counterpartyId);
+    final snap = snapshot ?? await _metrics.loadSnapshot();
+    final projects = counterpartyId == null
+        ? snap.projects
+        : snap.projects.where((p) => p.counterpartyId == counterpartyId).toList();
     final filteredByStatus =
         projectStatus == null ? projects : projects.where((p) => p.status == projectStatus).toList();
 
     final reports = <ProjectFinancialReport>[];
     for (final p in filteredByStatus) {
-      final m = await _metrics.getProjectMetrics(p.id!);
+      final m = snap.metricsById[p.id!]!;
       if (finalizedOnly == true && !m.isFinalized) continue;
       if (settledOnly == true && !m.isSettled) continue;
       reports.add(_buildProjectReport(p, m));
@@ -148,8 +161,11 @@ class FinancialReportingService {
 
   /// تحلیل اصلاحات پس از Finalization برای یک پروژه (Discount در این سه
   /// مقدار وارد نمی‌شود)
-  Future<Map<String, double>> getAdjustmentAnalysis(int projectId) async {
-    final events = await _db.getProjectPriceEvents(projectId);
+  Future<Map<String, double>> getAdjustmentAnalysis(int projectId,
+      {ProjectMetricsSnapshot? snapshot}) async {
+    final events = snapshot != null
+        ? (snapshot.eventsByProject[projectId] ?? const <ProjectPriceEventModel>[])
+        : await _db.getProjectPriceEvents(projectId);
     final adjustments = events.where((e) => e.type == kPriceEventFinalAdjustment);
     final positive = adjustments.where((e) => e.amount > 0).fold<double>(0, (s, e) => s + e.amount);
     final negative =
@@ -163,12 +179,15 @@ class FinancialReportingService {
 
   // ================= Customer Reports =================
 
-  Future<CustomerFinancialReport> getCustomerReport(int counterpartyId, {double? officeNetRevenue}) async {
-    final cm = await _metrics.getCustomerMetrics(counterpartyId);
-    final allProjects = await _db.getProjects(counterpartyId: counterpartyId);
+  Future<CustomerFinancialReport> getCustomerReport(int counterpartyId,
+      {double? officeNetRevenue, ProjectMetricsSnapshot? snapshot}) async {
+    final cm = await _metrics.getCustomerMetrics(counterpartyId, snapshot: snapshot);
+    final allProjects = snapshot != null
+        ? snapshot.projects.where((p) => p.counterpartyId == counterpartyId).toList()
+        : await _db.getProjects(counterpartyId: counterpartyId);
     int settledCount = 0, profitableCount = 0, lossCount = 0;
     for (final p in allProjects) {
-      final pm = await _metrics.getProjectMetrics(p.id!);
+      final pm = snapshot?.metricsById[p.id!] ?? await _metrics.getProjectMetrics(p.id!);
       if (pm.isSettled) settledCount++;
       final status = ProfitabilityThresholds.classify(pm.projectContribution, pm.contributionMargin);
       if (status == ProjectProfitabilityStatus.loss) {
@@ -208,14 +227,16 @@ class FinancialReportingService {
 
   /// گزارش همه مشتریان (طرف‌حساب‌هایی که حداقل یک پروژه دارند)، با سهم هرکدام
   /// از درآمد خالص دفتر، به‌همراه امکان مرتب‌سازی طبق [CustomerReportSort].
-  Future<List<CustomerFinancialReport>> getAllCustomerReports({CustomerReportSort? sortBy}) async {
-    final allProjects = await _db.getProjects();
-    final counterpartyIds = allProjects.map((p) => p.counterpartyId).toSet();
+  Future<List<CustomerFinancialReport>> getAllCustomerReports(
+      {CustomerReportSort? sortBy, ProjectMetricsSnapshot? snapshot}) async {
+    final snap = snapshot ?? await _metrics.loadSnapshot();
+    final counterpartyIds = snap.projects.map((p) => p.counterpartyId).toSet();
     final office = await _metrics.getOfficeMetrics();
 
     final reports = <CustomerFinancialReport>[];
     for (final cid in counterpartyIds) {
-      reports.add(await getCustomerReport(cid, officeNetRevenue: office.netRevenue));
+      reports.add(
+          await getCustomerReport(cid, officeNetRevenue: office.netRevenue, snapshot: snap));
     }
 
     if (sortBy == null) return reports;
@@ -248,8 +269,16 @@ class FinancialReportingService {
   /// تصمیم صریح مرحله Reporting Semantics (مورد ۸)، به‌جای ساختن یک نسخه
   /// Period-based با Attribution نامطمئن، این محدودیت آشکارا مستند و در UI
   /// اعلام می‌شود؛ حدسی برای «تمرکز مشتری این بازه» ساخته نشد.
-  Future<double?> getTopCustomersRevenueShare(int topN) async {
-    final reports = await getAllCustomerReports(sortBy: CustomerReportSort.netRevenue);
+  ///
+  /// [customerReports] اختیاری: اگر گزارش مشتریان در همین بارگذاری قبلاً
+  /// ساخته شده، همان استفاده می‌شود (به‌جای ساختن دوباره کل آن برای هر
+  /// مقدار topN). ترتیب ورودی مهم نیست؛ همین‌جا نزولی بر مبنای درآمد خالص
+  /// مرتب می‌شود.
+  Future<double?> getTopCustomersRevenueShare(int topN,
+      {List<CustomerFinancialReport>? customerReports}) async {
+    final reports = customerReports != null
+        ? ([...customerReports]..sort((a, b) => b.netRevenue.compareTo(a.netRevenue)))
+        : await getAllCustomerReports(sortBy: CustomerReportSort.netRevenue);
     if (reports.isEmpty) return null;
     final office = await _metrics.getOfficeMetrics();
     if (office.netRevenue == 0) return null;
@@ -260,12 +289,12 @@ class FinancialReportingService {
 
   /// سهم Top-N پروژه از درآمد خالص کل دفتر (تمرکز پروژه)
   Future<double?> getTopProjectsRevenueShare(int topN) async {
-    final allProjects = await _db.getProjects();
+    final snap = await _metrics.loadSnapshot();
     final office = await _metrics.getOfficeMetrics();
     if (office.netRevenue == 0) return null;
     final revenues = <double>[];
-    for (final p in allProjects) {
-      final m = await _metrics.getProjectMetrics(p.id!);
+    for (final p in snap.projects) {
+      final m = snap.metricsById[p.id!]!;
       if (m.netRevenue != null) revenues.add(m.netRevenue!);
     }
     revenues.sort((a, b) => b.compareTo(a));
@@ -333,11 +362,12 @@ class FinancialReportingService {
     String? previousToDate,
   }) async {
     final period = await getPeriodReport(fromDate: fromDate, toDate: toDate);
-    final allProjects = await _db.getProjects();
+    final snap = await _metrics.loadSnapshot();
+    final allProjects = snap.projects;
 
     int finalizedCount = 0, settledCount = 0, profitableCount = 0, lossCount = 0;
     for (final p in allProjects) {
-      final m = await _metrics.getProjectMetrics(p.id!);
+      final m = snap.metricsById[p.id!]!;
       if (m.isFinalized) finalizedCount++;
       if (m.isSettled) settledCount++;
       final status = ProfitabilityThresholds.classify(m.projectContribution, m.contributionMargin);
@@ -352,9 +382,10 @@ class FinancialReportingService {
     // مانده‌های تجمعی‌اند نه رویدادهای دوره‌ای
     double totalReceivable = 0, totalAdvance = 0, totalCredit = 0;
     for (final p in allProjects) {
-      totalReceivable += await _db.projectReceivableBalance(p.id!);
-      totalAdvance += await _db.projectAdvanceBalance(p.id!);
-      totalCredit += await _db.projectCustomerCreditBalance(p.id!);
+      final m = snap.metricsById[p.id!]!;
+      totalReceivable += m.receivableBalance;
+      totalAdvance += m.advanceBalance;
+      totalCredit += m.customerCredit ?? 0;
     }
 
     List<FinancialPeriodComparison> comparisons = [];
@@ -405,23 +436,29 @@ class FinancialReportingService {
   // ================= Diagnostics =================
 
   /// بررسی جامع سلامت داده مالی - هیچ ناسازگاری‌ای پنهان نمی‌شود.
-  Future<FinancialReportDiagnostics> getDiagnostics({String? fromDate, String? toDate}) async {
-    final allProjects = await _db.getProjects();
+  Future<FinancialReportDiagnostics> getDiagnostics(
+      {String? fromDate, String? toDate, ProjectMetricsSnapshot? snapshot}) async {
+    final snap = snapshot ?? await _metrics.loadSnapshot();
     final mismatchIds = <int>[];
     final negativeArIds = <int>[];
     final negativeAdvanceIds = <int>[];
     final negativeCreditIds = <int>[];
 
-    for (final p in allProjects) {
-      final reconciliation = await _metrics.reconcileProject(p.id!);
-      if (reconciliation.status == 'MISMATCH') mismatchIds.add(p.id!);
+    for (final p in snap.projects) {
+      final id = p.id!;
+      final m = snap.metricsById[id]!;
+      // همان قاعده FinancialMetricsService.reconcileProject: فقط پروژه
+      // نهایی‌شده تطبیق می‌شود (finalAmount + اصلاحات نهایی در برابر مانده
+      // واقعی حساب درآمد همان پروژه، با رواداری کمتر از ۱).
+      if (p.isFinalized) {
+        final calculatedGrossRevenue = m.effectiveFinalAmount!;
+        final ledgerRevenueBalance = snap.revenueLedgerByProject[id] ?? 0;
+        if ((calculatedGrossRevenue - ledgerRevenueBalance).abs() >= 1) mismatchIds.add(id);
+      }
 
-      final ar = await _db.projectReceivableBalance(p.id!);
-      if (ar < 0) negativeArIds.add(p.id!);
-      final advance = await _db.projectAdvanceBalance(p.id!);
-      if (advance < 0) negativeAdvanceIds.add(p.id!);
-      final credit = await _db.projectCustomerCreditBalance(p.id!);
-      if (credit < 0) negativeCreditIds.add(p.id!);
+      if (m.receivableBalance < 0) negativeArIds.add(id);
+      if (m.advanceBalance < 0) negativeAdvanceIds.add(id);
+      if ((m.customerCredit ?? 0) < 0) negativeCreditIds.add(id);
     }
 
     final cashReport = await getPeriodReport(fromDate: fromDate, toDate: toDate);

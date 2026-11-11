@@ -65,7 +65,7 @@ class _ManualSmsEntryScreenState extends State<ManualSmsEntryScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('افزودن دستی پیامک بانکی')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
         children: [
           const Text(
             'متن پیامک بانک را کامل کپی و اینجا بچسبانید. برنامه سعی می‌کند '

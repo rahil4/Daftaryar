@@ -3,6 +3,21 @@ import 'package:shamsi_date/shamsi_date.dart';
 import '../theme/app_theme.dart';
 import '../utils/formatters.dart';
 
+/// برگه انتخاب تاریخ شمسی؛ تاریخ انتخاب‌شده را به‌صورت yyyy/mm/dd برمی‌گرداند
+/// (یا null اگر کاربر بدون انتخاب ببندد). برای ردیف‌هایی که ظاهر فیلد
+/// استاندارد را ندارند (مثل ردیف «تاریخ» فرم دریافت وجه).
+Future<String?> pickJalaliDate(BuildContext context, String current) async {
+  final result = await showModalBottomSheet<Jalali>(
+    context: context,
+    backgroundColor: AppColors.surface,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (ctx) => _JalaliPickerSheet(initial: parseJalaliString(current) ?? Jalali.now()),
+  );
+  return result == null ? null : jalaliToString(result);
+}
+
 class JalaliDateField extends StatelessWidget {
   final String label;
   final String value; // yyyy/mm/dd
@@ -16,18 +31,8 @@ class JalaliDateField extends StatelessWidget {
   });
 
   Future<void> _pick(BuildContext context) async {
-    final current = parseJalaliString(value) ?? Jalali.now();
-    final result = await showModalBottomSheet<Jalali>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => _JalaliPickerSheet(initial: current),
-    );
-    if (result != null) {
-      onChanged(jalaliToString(result));
-    }
+    final result = await pickJalaliDate(context, value);
+    if (result != null) onChanged(result);
   }
 
   @override

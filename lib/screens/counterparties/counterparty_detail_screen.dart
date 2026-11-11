@@ -261,33 +261,28 @@ class _CounterpartyDetailScreenState extends State<CounterpartyDetailScreen> {
                         StatCard(
                           title: 'مجموع دریافتی',
                           value: formatMoney(_received),
-                          icon: Icons.south_west_rounded,
                           color: AppColors.positive,
                         ),
                         StatCard(
                           title: 'مجموع پرداختی',
                           value: formatMoney(_spent),
-                          icon: Icons.north_east_rounded,
                           color: AppColors.negative,
                         ),
                         StatCard(
                           title: net >= 0 ? 'مانده به نفع طرف حساب' : 'مانده بدهکار طرف حساب',
                           value: formatMoney(net.abs()),
-                          icon: Icons.account_balance_wallet_outlined,
                           color: net >= 0 ? AppColors.positive : AppColors.negative,
                         ),
                         if (_receivable != 0)
                           StatCard(
                             title: 'مانده مطالبات (طلب از او)',
                             value: formatMoney(_receivable),
-                            icon: Icons.request_quote_outlined,
                             color: AppColors.positive,
                           ),
                         if (_payable != 0)
                           StatCard(
                             title: 'مانده بدهی (بدهکاری به او)',
                             value: formatMoney(_payable),
-                            icon: Icons.payments_outlined,
                             color: AppColors.negative,
                           ),
                       ],

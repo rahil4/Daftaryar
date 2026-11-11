@@ -551,4 +551,99 @@ void main() {
     });
   });
 
+  group('مورد ۷ — ترتیب صدور حساب‌ها در فایل پشتیبان (رگرسیون FOREIGN KEY)', () {
+    test('زیرحساب بدون کد (مثل «آورده مالک» زیر «سرمایه») در فایل پشتیبان قبل از والدش نمی‌آید', () async {
+      // سناریوی واقعی گزارش‌شده: getAccounts() برای نمایش با 'type ASC,
+      // code ASC' مرتب می‌شود؛ چون این زیرحساب کد ندارد (NULL)، در آن ترتیب
+      // پیش از والدش («سرمایه» با کد ۳۰۰۰) می‌آمد. اگر collectBackupData
+      // همان ترتیب را مستقیم صادر کند، بازیابی به parentId والدی سند
+      // می‌زند که هنوز در دیتابیس تازه ساخته نشده - FOREIGN KEY constraint.
+      final equityAccounts = await db.getAccounts(type: kAccountEquity);
+      final capital = equityAccounts.firstWhere((a) => a.name == 'سرمایه');
+      await db.insertAccount(AccountModel(
+        name: 'آورده مالک',
+        type: kAccountEquity,
+        parentId: capital.id,
+        createdAt: '1404/01/01',
+      ));
+
+      final exportedJson = await backup.collectBackupData();
+      final accountsList = (exportedJson['accounts'] as List).cast<Map<String, dynamic>>();
+      final capitalIndex = accountsList.indexWhere((a) => a['name'] == 'سرمایه');
+      final drawIndex = accountsList.indexWhere((a) => a['name'] == 'آورده مالک');
+      expect(capitalIndex, lessThan(drawIndex),
+          reason: 'والد باید قبل از زیرحساب در فایل پشتیبان بیاید');
+
+      final tempFile = File('${Directory.systemTemp.path}/account_order_restore_test.json');
+      await tempFile.writeAsString(jsonEncode(exportedJson));
+
+      // نباید FOREIGN KEY constraint بدهد
+      await backup.importBackupFile(tempFile, replaceExisting: true);
+
+      final restoredAccounts = await db.getAccounts(type: kAccountEquity);
+      final restoredCapital = restoredAccounts.firstWhere((a) => a.name == 'سرمایه');
+      final restoredDraw = restoredAccounts.firstWhere((a) => a.name == 'آورده مالک');
+      expect(restoredDraw.parentId, restoredCapital.id,
+          reason: 'رابطه زیرحساب→والد باید صحیح بازیابی شده باشد، نه شکسته');
+
+      await tempFile.delete();
+    });
+
+    test('فایل پشتیبان قدیمی که از قبل زیرحساب را قبل از والدش دارد، هنوز با موفقیت بازیابی می‌شود'
+        ' (رفع مقاوم‌سازی سمت Restore - نه فقط جلوگیری در Export جدید)', () async {
+      // این دقیقاً سناریوی کاربری است که خطا را گزارش کرد: یک فایل پشتیبان
+      // که پیش از رفع باگ Export گرفته شده (و همچنان روی دستگاهش موجود
+      // است) نباید برای همیشه غیرقابل‌بازیابی بماند. اینجا عمداً یک زنجیره
+      // دو سطحی غیرسیستمی (زیرحساب زیر زیرحساب) با ترتیب معکوس در JSON
+      // ساخته می‌شود - بدون تکیه به collectBackupData - تا مقاوم‌سازی
+      // واقعی سمت importBackupFile (نه فقط رفع ترتیب صدور) تأیید شود.
+      final equityAccounts = await db.getAccounts(type: kAccountEquity);
+      final capital = equityAccounts.firstWhere((a) => a.name == 'سرمایه');
+      final drawId = await db.insertAccount(AccountModel(
+        name: 'آورده مالک',
+        type: kAccountEquity,
+        parentId: capital.id,
+        allowChildren: true,
+        createdAt: '1404/01/01',
+      ));
+      final subDrawId = await db.insertAccount(AccountModel(
+        name: 'آورده مالک - بانک',
+        type: kAccountEquity,
+        parentId: drawId,
+        createdAt: '1404/01/01',
+      ));
+
+      final allAccounts = await db.getAccounts();
+      final draw = allAccounts.firstWhere((a) => a.id == drawId);
+      final subDraw = allAccounts.firstWhere((a) => a.id == subDrawId);
+      final others = allAccounts.where((a) => a.id != drawId && a.id != subDrawId).toList();
+
+      // ترتیب عمداً معکوس: نوه قبل از فرزند قبل از سایر حساب‌ها (شبیه یک
+      // فایل قدیمی خراب، نه لزوماً همان الگوریتم قدیمی)
+      final maliciouslyOrderedAccounts = [subDraw, draw, ...others];
+
+      final backupJson = buildValidBackupJson(
+        counterparties: const [],
+        projects: const [],
+        accounts: maliciouslyOrderedAccounts.map((a) => a.toMap()).toList(),
+        journalEntries: const [],
+      );
+
+      final tempFile = File('${Directory.systemTemp.path}/legacy_reversed_accounts_test.json');
+      await tempFile.writeAsString(jsonEncode(backupJson));
+
+      // نباید FOREIGN KEY constraint بدهد، با این‌که ورودی عمداً معکوس است
+      await backup.importBackupFile(tempFile, replaceExisting: true);
+
+      final restored = await db.getAccounts(type: kAccountEquity);
+      final restoredCapital = restored.firstWhere((a) => a.name == 'سرمایه');
+      final restoredDraw = restored.firstWhere((a) => a.name == 'آورده مالک');
+      final restoredSubDraw = restored.firstWhere((a) => a.name == 'آورده مالک - بانک');
+      expect(restoredDraw.parentId, restoredCapital.id);
+      expect(restoredSubDraw.parentId, restoredDraw.id,
+          reason: 'زنجیره دو سطحی باید با ترتیب معکوس هم صحیح بازیابی شود');
+
+      await tempFile.delete();
+    });
+  });
 }

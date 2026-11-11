@@ -23,12 +23,14 @@ void main() {
       source = File('lib/screens/reports/reports_screen.dart').readAsStringSync();
     });
 
-    test('_pctChange دیگر فرمول رشد را مستقیم بازتولید نمی‌کند، بلکه از'
-        ' FinancialPeriodComparison.compute (منبع مرجع واحد) استفاده می‌کند', () {
-      expect(source.contains('FinancialPeriodComparison.compute'), true,
-          reason: 'باید از منبع مرجع واحد فرمول رشد استفاده کند');
-      // الگوی قدیمی تکراری (بازسازی مستقیم فرمول به‌جای فراخوانی منبع مرجع)
-      // دیگر نباید در تابع _pctChange وجود داشته باشد.
+    // تب «تحلیل و روند» (و تابع _pctChange درونش که این‌جا تست می‌شد) در
+    // بازچینی گزارش‌ها به FinancialOverviewScreen ادغام شد؛ آن صفحه اصلاً
+    // فرمول رشد را در UI بازسازی نمی‌کند - فقط KpiValue.growthRate آماده
+    // (که خودِ سرویس‌ها از همان FinancialPeriodComparison.compute پر
+    // کرده‌اند) را نمایش می‌دهد. پس این فایل دیگر هیچ فرمول رشدی ندارد که
+    // نگرانی تکرار برایش معنا داشته باشد؛ فقط اطمینان کافی است که الگوی
+    // قدیمی تکراری هم برنگشته باشد.
+    test('reports_screen.dart فرمول رشد را مستقیم بازتولید نمی‌کند', () {
       expect(source.contains('((now - prev) / prev.abs())'), false,
           reason: 'فرمول رشد نباید دوباره این‌جا به‌صورت مستقل بازسازی شود');
     });

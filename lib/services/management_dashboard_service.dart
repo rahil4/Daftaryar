@@ -13,12 +13,10 @@ import 'financial_reporting_service.dart';
 /// FinancialMetricsService → DatabaseHelper/Ledger.
 class ManagementDashboardService {
   final DatabaseHelper _db;
-  final FinancialMetricsService _metrics;
   final FinancialReportingService _reporting;
 
   ManagementDashboardService({DatabaseHelper? db, FinancialMetricsService? metrics, FinancialReportingService? reporting})
       : _db = db ?? DatabaseHelper.instance,
-        _metrics = metrics ?? FinancialMetricsService(db),
         _reporting = reporting ?? FinancialReportingService(db: db, metrics: metrics);
 
   Future<ManagementDashboardData> buildDashboard({
@@ -45,10 +43,14 @@ class ManagementDashboardService {
         : null;
     // موجودی فعلی هر حساب نقدی/بانکی - وضعیت فعلی (Current State)، مستقل
     // از بازه انتخابی، دقیقاً مثل closingCash کل.
-    final bankBalanceRows = await _db.bankBalances();
-    final bankBalances = bankBalanceRows
-        .map((row) => BankBalanceEntry(name: row['name'] as String, balance: row['balance'] as double))
-        .toList();
+    // همه حساب‌های نقدی/بانکی قابل‌ثبت (صندوق هم، نه فقط حساب‌های «بانک»)،
+    // تا ریز حساب‌ها با عدد کل موجودی بالای داشبورد جمع ببندد.
+    final cashAccounts = await _db.getCashAccounts();
+    final bankBalances = <BankBalanceEntry>[];
+    for (final account in cashAccounts) {
+      final bal = await _db.accountBalance(account.id!);
+      bankBalances.add(BankBalanceEntry(name: account.name, balance: bal['balance']!));
+    }
 
     // ---- داده‌های خلاصه داشبورد ساده‌شده ----
     // پروژه‌های در جریان + جمع مانده تخمینی: هر دو وضعیت فعلی‌اند (مستقل
@@ -89,7 +91,10 @@ class ManagementDashboardService {
     }
 
     // ---------- پروژه‌ها (Lifetime - مستقل از Period انتخاب‌شده) ----------
-    final allProjectReports = await _reporting.getProjectReports();
+    // شاخص‌های همه پروژه‌ها فقط یک‌بار (و دسته‌ای) بارگذاری می‌شوند و بین
+    // گزارش پروژه‌ها، مشتریان، قیمت‌گذاری و تشخیص‌ها مشترک‌اند.
+    final snapshot = await _reporting.loadSnapshot();
+    final allProjectReports = await _reporting.getProjectReports(snapshot: snapshot);
     final worst = _reporting.getWorstProjects(allProjectReports, ProjectReportSort.contribution);
     final best = _reporting.getBestProjects(allProjectReports, ProjectReportSort.contribution);
     final outstanding = allProjectReports.where((p) => p.receivableBalance > 0).toList()
@@ -105,8 +110,9 @@ class ManagementDashboardService {
     final unsettledCount = finalizedCount - settledCount;
 
     // ---------- مشتریان ----------
-    final customers = await _reporting.getAllCustomerReports(sortBy: CustomerReportSort.netRevenue);
-    final top5Share = await _reporting.getTopCustomersRevenueShare(5);
+    final customers = await _reporting.getAllCustomerReports(
+        sortBy: CustomerReportSort.netRevenue, snapshot: snapshot);
+    final top5Share = await _reporting.getTopCustomersRevenueShare(5, customerReports: customers);
 
     // ---------- قیمت‌گذاری و اصلاحات (جمع روی پروژه‌های Finalized، Lifetime) ----------
     double totalInitial = 0, totalFinal = 0, totalAdditions = 0, totalReductions = 0;
@@ -118,11 +124,11 @@ class ManagementDashboardService {
         totalFinal += p.finalAmount ?? 0;
         if (p.priceIncreaseRate != null) priceIncreaseRates.add(p.priceIncreaseRate!);
       }
-      final m = await _metrics.getProjectMetrics(p.projectId);
+      final m = snapshot.metricsById[p.projectId]!;
       totalAdditions += m.priceAdditions;
       totalReductions += m.priceReductions;
 
-      final adj = await _reporting.getAdjustmentAnalysis(p.projectId);
+      final adj = await _reporting.getAdjustmentAnalysis(p.projectId, snapshot: snapshot);
       totalPositiveAdj += adj['totalPositiveAdjustments']!;
       totalNegativeAdj += adj['totalNegativeAdjustments']!;
     }
@@ -147,24 +153,32 @@ class ManagementDashboardService {
 
     // ---------- روند ماهانه (Period-Based، نه Lifetime) ----------
     List<TrendPoint> revenueTrend = [];
+    List<TrendPoint> expenseTrend = [];
     List<TrendPoint> receiptsTrend = [];
     List<TrendPoint> operatingResultTrend = [];
     List<TrendPoint> cashFlowTrend = [];
     List<TrendPoint> marginTrend = [];
+    String? trendCaption;
     if (includeTrend) {
-      // یک «روند» ذاتاً به چند نقطه نیاز دارد. تقسیم بازه‌های کوتاه (مثل
-      // «امروز» یا «این ماه») فقط یک Bucket تولید می‌کند که نموداری با یک
-      // نقطهٔ تنها می‌سازد - عملاً بی‌فایده. در آن حالت به‌جایش ۶ ماه اخیر
-      // نمایش داده می‌شود تا نمودار واقعاً یک روند نشان دهد.
-      var buckets = DashboardPeriodResolver.monthlyBuckets(range.fromDate, range.toDate);
-      if (buckets.length < 2) {
-        buckets = DashboardPeriodResolver.lastNMonths(6);
-      }
-      for (final bucket in buckets) {
+      // محور افقی نمودار روند باید دقیقاً با واحد تقویمی بازه انتخابی
+      // هم‌راستا باشد (نه یک تقسیم دلخواه بر مبنای طول خام روز): هفته/این‌هفته
+      // → ۷ روز شنبه تا جمعه، این‌ماه/ماه‌قبل → روزهای همان ماه، فصل/سال →
+      // ماه‌های همان بازه. buildAxisPlan این تناظر را طبق preset (یا برای
+      // بازه سفارشی، طول واقعی بازه) تعیین می‌کند.
+      final axisPlan = DashboardPeriodResolver.buildAxisPlan(preset, range.fromDate, range.toDate);
+      trendCaption = axisPlan.caption;
+      for (final bucket in axisPlan.buckets) {
         final bucketReport =
             await _reporting.getPeriodReport(fromDate: bucket.fromDate, toDate: bucket.toDate);
         revenueTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netRevenue));
-        receiptsTrend.add(TrendPoint(label: bucket.label, value: bucketReport.totalInflows));
+        expenseTrend.add(TrendPoint(
+            label: bucket.label,
+            value: bucketReport.directProjectCost +
+                bucketReport.projectOverhead +
+                bucketReport.officeExpense));
+        receiptsTrend.add(TrendPoint(
+            label: bucket.label,
+            value: bucketReport.customerReceipts + bucketReport.otherCashInflows));
         operatingResultTrend.add(TrendPoint(label: bucket.label, value: bucketReport.operatingResult));
         cashFlowTrend.add(TrendPoint(label: bucket.label, value: bucketReport.netCashChange));
         final margin = bucketReport.netRevenue != 0
@@ -175,7 +189,8 @@ class ManagementDashboardService {
     }
 
     // ---------- Diagnostics و هشدارها ----------
-    final diagnostics = await _reporting.getDiagnostics(fromDate: range.fromDate, toDate: range.toDate);
+    final diagnostics = await _reporting.getDiagnostics(
+        fromDate: range.fromDate, toDate: range.toDate, snapshot: snapshot);
     final alerts = _buildAlerts(
       lossProjectsCount: lossProjects.length,
       outstandingProjectsCount: outstanding.length,
@@ -246,7 +261,9 @@ class ManagementDashboardService {
       totalNegativeAdjustments: totalNegativeAdj,
       netAdjustments: totalPositiveAdj - totalNegativeAdj,
       revenueTrend: revenueTrend,
+      expenseTrend: expenseTrend,
       receiptsTrend: receiptsTrend,
+      trendCaption: trendCaption,
       operatingResultTrend: operatingResultTrend,
       cashFlowTrend: cashFlowTrend,
       contributionMarginTrend: marginTrend,
@@ -289,7 +306,7 @@ class ManagementDashboardService {
     if (diagnostics.revenueLedgerMismatchCount > 0) {
       alerts.add(ManagementAlert(
         title: 'ناسازگاری تطبیق درآمد',
-        message: 'ناسازگاری بین درآمد محاسبه‌شده و Ledger شناسایی شد',
+        message: 'ناسازگاری بین درآمد محاسبه‌شده و دفتر شناسایی شد',
         severity: ManagementAlertSeverity.error,
       ));
     }

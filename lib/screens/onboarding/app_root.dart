@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database_helper.dart';
+import '../../navigation.dart';
 import '../../services/security_service.dart';
 import '../../services/sms_listener_service.dart';
 import '../../services/notification_service.dart';
@@ -18,17 +19,64 @@ class AppRoot extends StatefulWidget {
   State<AppRoot> createState() => _AppRootState();
 }
 
-class _AppRootState extends State<AppRoot> {
+/// اگر برنامه دست‌کم این مدت در پس‌زمینه بماند، هنگام برگشت دوباره قفل
+/// می‌شود. کوتاه‌تر از این، رفت‌وبرگشت‌های عادی (انتخاب عکس رسید، اشتراک
+/// فایل پشتیبان، پنجره اثر انگشت) هر بار پین می‌خواستند.
+const Duration kRelockAfterBackground = Duration(minutes: 1);
+
+class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   final _db = DatabaseHelper.instance;
   final _security = SecurityService();
   bool _loading = true;
   bool _locked = false;
   bool _configured = false;
+  DateTime? _backgroundedAt;
+  bool _relockRouteShown = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _check();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden) {
+      _backgroundedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      final since = _backgroundedAt;
+      _backgroundedAt = null;
+      if (since != null && DateTime.now().difference(since) >= kRelockAfterBackground) {
+        _relock();
+      }
+    }
+  }
+
+  /// قفل مجدد پس از برگشت از پس‌زمینه. صفحه قفل به‌صورت یک مسیر تمام‌صفحه
+  /// روی هر چیزی که باز است (صفحه، دیالوگ، شیت) می‌نشیند و با دکمه برگشت
+  /// بسته نمی‌شود؛ پس از ورود، کاربر دقیقاً به همان‌جایی که بود برمی‌گردد.
+  Future<void> _relock() async {
+    // قفل اولیه (هنگام بازشدن برنامه) را خودِ build مدیریت می‌کند.
+    if (_loading || _locked || _relockRouteShown) return;
+    if (!await _security.isLockEnabled()) return;
+    final navigator = rootNavigatorKey.currentState;
+    if (!mounted || navigator == null || _relockRouteShown) return;
+    _relockRouteShown = true;
+    await navigator.push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: LockScreen(onUnlocked: () => navigator.pop()),
+      ),
+    ));
+    _relockRouteShown = false;
   }
 
   Future<void> _check() async {
@@ -39,6 +87,7 @@ class _AppRootState extends State<AppRoot> {
       await NotificationService.requestPermission();
       SmsListenerService.startListening();
     }
+    if (!mounted) return;
     setState(() {
       _locked = lockEnabled;
       _configured = fyConfigured;

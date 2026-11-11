@@ -10,17 +10,65 @@ class AppColors {
   static const brass = Color(0xFFC9A227); // رنگ برند دفتریار — تنها لهجه رنگی اصلی
   static const brassLight = Color(0xFFE0C05C);
 
+  static const lineStrong = Color(0xFF3A3F4B); // جداکننده پررنگ‌تر (خط پایه نمودار، سطر جمع)
+
   static const textPrimary = Color(0xFFF1F5F9);
-  static const textSecondary = Color(0xFF8B93A1);
+  // کمی روشن‌تر از قبل (‎#8B93A1‎) تا برچسب‌های ریز ۱۱ پیکسلی روی سطح کارت هم
+  // کنتراست کافی داشته باشند.
+  static const textSecondary = Color(0xFF9AA3B2);
 
   static const positive = Color(0xFF22C55E); // سبز — دریافت/سود
   static const negative = Color(0xFFEF4444); // قرمز — پرداخت/زیان
   static const info = Color(0xFF3B82F6); // آبی — برای شاخص‌های خنثی مثل خالص ارزش
   static const teal = Color(0xFF14B8A6); // فیروزه‌ای — برای شاخص‌های ثانویه مثل حقوق سهام
+
+  // رنگ سری‌های نمودار. برنز برند برای میله نمودار روی زمینه تیره زیادی روشن
+  // است، پس یک پله تیره‌تر استفاده می‌شود؛ جفت برنزی/آبی برای کاربر کوررنگ
+  // هم از هم قابل تشخیص است (سبز/قرمز نیست).
+  static const chartIncome = Color(0xFFB08A1E);
+  static const chartExpense = Color(0xFF5B8DEF);
+  // پله‌های تک‌رنگ برنزی برای مقادیر ترتیبی (کم ← زیاد)
+  static const rampLow = Color(0xFF7D6718);
+  static const rampMid = Color(0xFFB08A1E);
+  static const rampHigh = Color(0xFFE0C05C);
+  // وضعیت «بحرانی» در نمودارها (مثل سهم پروژه‌های زیان‌ده)؛ از قرمز عمومی
+  // برنامه کم‌رنگ‌تر است تا کنار پله‌های برنزی روی زمینه تیره چشم را نزند.
+  static const statusCritical = Color(0xFFD03B3B);
 }
 
 /// نام خانواده فونت محلی که در assets/fonts باندل شده (بدون نیاز به اینترنت)
 const String kAppFontFamily = 'Vazirmatn';
+
+/// مقیاس تایپوگرافی مشترک - چند سایز/وزن نام‌گذاری‌شده به‌جای مقادیر دستی
+/// پراکنده (در حال حاضر نزدیک به ۱۸ مقدار متفاوت fontSize در کل برنامه، از
+/// ۸.۵ تا ۲۲، بدون هیچ الگوی مشترک). این کلاس فقط پایه را اضافه می‌کند؛
+/// جایگزینی تدریجی مقادیر دستی موجود با این‌ها یک گام جداست تا ریسک تغییر
+/// بصری ناخواسته در صفحاتی که در این محیط قابل تست بصری نیستند، به یک‌باره
+/// به کل برنامه تحمیل نشود.
+class AppTextStyles {
+  static const caption =
+      TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary);
+  static const label = TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600);
+  static const body = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500);
+  static const sectionTitle = TextStyle(fontSize: 15, fontWeight: FontWeight.w800);
+  static const pageHeading = TextStyle(fontSize: 18, fontWeight: FontWeight.w700);
+
+  /// عدد اصلی هر صفحه (موجودی، مانده طلب، سود ناخالص) - فقط یکی در هر صفحه.
+  static const heroNumber = TextStyle(
+    fontSize: 34,
+    fontWeight: FontWeight.w800,
+    height: 1.25,
+    color: AppColors.brassLight,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+  static const rowTitle = TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
+  static const rowAmount = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
+    fontFeatures: [FontFeature.tabularFigures()],
+  );
+  static const blockHeading = TextStyle(fontSize: 14, fontWeight: FontWeight.w800);
+}
 
 class AppTheme {
   static ThemeData get theme {

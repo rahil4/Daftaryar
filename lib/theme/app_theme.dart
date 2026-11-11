@@ -31,6 +31,9 @@ class AppColors {
   static const rampLow = Color(0xFF7D6718);
   static const rampMid = Color(0xFFB08A1E);
   static const rampHigh = Color(0xFFE0C05C);
+  // وضعیت «بحرانی» در نمودارها (مثل سهم پروژه‌های زیان‌ده)؛ از قرمز عمومی
+  // برنامه کم‌رنگ‌تر است تا کنار پله‌های برنزی روی زمینه تیره چشم را نزند.
+  static const statusCritical = Color(0xFFD03B3B);
 }
 
 /// نام خانواده فونت محلی که در assets/fonts باندل شده (بدون نیاز به اینترنت)

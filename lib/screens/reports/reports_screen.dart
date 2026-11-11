@@ -11,7 +11,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../utils/reloadable.dart';
 import '../journal/journal_entry_detail_screen.dart';
-import '../settings/settings_screen.dart';
+import '../../widgets/page_header.dart';
 import '../../widgets/jalali_date_field.dart';
 import 'widgets/operational_performance_tab.dart';
 
@@ -81,16 +81,9 @@ class _ReportsScreenState extends State<ReportsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('گزارش‌ها'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'تنظیمات',
-            onPressed: () =>
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
-          ),
-        ],
+      appBar: pageHeader(
+        context,
+        title: 'گزارش‌ها',
         bottom: TabBar(
           controller: _tab,
           isScrollable: true,
@@ -98,7 +91,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           tabs: const [
             Tab(text: 'دریافت و هزینه'),
             Tab(text: 'سود مشتریان'),
-            Tab(text: 'عملکرد عملیاتی'),
+            Tab(text: 'عملکرد'),
           ],
         ),
       ),

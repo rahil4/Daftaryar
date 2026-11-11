@@ -285,14 +285,8 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
       child: const Icon(Icons.add),
     );
 
-    if (widget.embedded) {
-      return Stack(
-        children: [
-          content,
-          Positioned(bottom: 16, left: 16, child: fab),
-        ],
-      );
-    }
+    // داخل پوسته اصلی، ثبت جدید از دکمه «+» نوار پایین انجام می‌شود.
+    if (widget.embedded) return content;
 
     return Scaffold(
       appBar: AppBar(title: const Text('اسناد حسابداری')),

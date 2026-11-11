@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../models/management_dashboard_data.dart';
 import '../../../theme/app_theme.dart';
 import '../../../utils/formatters.dart';
+import '../../../widgets/metric_strip.dart';
 
 /// نمودار ترکیبی درآمد/هزینه/دریافتی داشبورد - دو سری تعهدی (درآمد، هزینه)
 /// به‌صورت ستون کنار هم، و دریافتی نقدی به‌صورت خط روی همان نمودار؛ با محور
@@ -33,6 +34,10 @@ class ComboTrendChartWidget extends StatelessWidget {
   final List<TrendPoint> receipts;
   final String? caption;
 
+  /// جمع دریافتی نقدی بازه - کنار برچسب «دریافتی» در راهنمای نمودار نمایش
+  /// داده می‌شود (درآمد و هزینه بازه در ردیف شاخص‌های بالای نمودار هستند).
+  final double? receiptsTotal;
+
   const ComboTrendChartWidget({
     super.key,
     required this.title,
@@ -40,9 +45,12 @@ class ComboTrendChartWidget extends StatelessWidget {
     required this.expense,
     required this.receipts,
     this.caption,
+    this.receiptsTotal,
   });
 
-  double _sum(List<TrendPoint> pts) => pts.fold(0.0, (s, p) => s + (p.value ?? 0));
+  /// رنگ خط دریافتی: خنثی و روشن، تا از دو سری ستونی (برنزی/آبی) جدا بماند
+  /// و معنای «خوب/بد» القا نکند.
+  static const Color receiptsColor = AppColors.textPrimary;
 
   @override
   Widget build(BuildContext context) {
@@ -51,39 +59,35 @@ class ComboTrendChartWidget extends StatelessWidget {
         expense.any((p) => p.value != null) ||
         receipts.any((p) => p.value != null);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
+    return SurfaceBox(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
-                    child: _SummaryTile(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'دریافتی',
-                        value: _sum(receipts),
-                        color: AppColors.positive)),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: _SummaryTile(
-                        icon: Icons.bar_chart_rounded,
-                        label: 'درآمد',
-                        value: _sum(income),
-                        color: AppColors.info)),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: _SummaryTile(
-                        icon: Icons.remove_circle_outline,
-                        label: 'هزینه',
-                        value: _sum(expense),
-                        color: AppColors.negative)),
+                  child: Text(caption == null ? title : '$title · $caption',
+                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 14,
+              runSpacing: 4,
+              children: [
+                const _LegendDot(color: AppColors.chartIncome, label: 'درآمد'),
+                const _LegendDot(color: AppColors.chartExpense, label: 'هزینه'),
+                _LegendLine(
+                  color: receiptsColor,
+                  label: receiptsTotal == null
+                      ? 'دریافتی نقدی'
+                      : 'دریافتی نقدی ${formatMoney(receiptsTotal!, withSuffix: false)}',
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             if (!hasAnyData)
               const SizedBox(
                 height: 100,
@@ -105,69 +109,8 @@ class ComboTrendChartWidget extends StatelessWidget {
                   ),
                 ),
               ),
-            if (caption != null) ...[
-              const SizedBox(height: 6),
-              Center(
-                child: Text(
-                  caption!,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            const Wrap(
-              spacing: 14,
-              runSpacing: 4,
-              children: [
-                _LegendDot(color: AppColors.info, label: 'درآمد'),
-                _LegendDot(color: AppColors.negative, label: 'هزینه'),
-                _LegendLine(color: AppColors.positive, label: 'دریافتی'),
-              ],
-            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _SummaryTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final double value;
-  final Color color;
-  const _SummaryTile({required this.icon, required this.label, required this.value, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 26,
-            height: 26,
-            decoration:
-                BoxDecoration(color: color.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, size: 15, color: color),
-          ),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
-          const SizedBox(height: 2),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(formatMoneyCompact(value),
-                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: color)),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -183,7 +126,8 @@ class _LegendDot extends StatelessWidget {
       Container(
           width: 10, height: 10, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
       const SizedBox(width: 5),
-      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      // Flexible: در صفحه باریک یا فونت بزرگ، برچسب می‌شکند به‌جای بیرون‌زدن.
+      Flexible(child: Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))),
     ]);
   }
 }
@@ -200,7 +144,8 @@ class _LegendLine extends StatelessWidget {
       const SizedBox(width: 4),
       Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
       const SizedBox(width: 5),
-      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      // Flexible: در صفحه باریک یا فونت بزرگ، برچسب می‌شکند به‌جای بیرون‌زدن.
+      Flexible(child: Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary))),
     ]);
   }
 }
@@ -258,10 +203,14 @@ class _ComboChartPainter extends CustomPainter {
       ..color = AppColors.gridLine.withValues(alpha: 0.6)
       ..strokeWidth = 0.6;
 
+    final basePaint = Paint()
+      ..color = AppColors.lineStrong
+      ..strokeWidth = 1;
+
     for (var t = 0; t <= tickCount; t++) {
       final value = step * t;
       final y = plotBottom - (value / axisMax) * plotHeight;
-      canvas.drawLine(Offset(plotLeft, y), Offset(plotRight, y), gridPaint);
+      canvas.drawLine(Offset(plotLeft, y), Offset(plotRight, y), t == 0 ? basePaint : gridPaint);
       _drawText(
         canvas,
         value == 0 ? '۰' : formatMoneyCompact(value),
@@ -275,7 +224,7 @@ class _ComboChartPainter extends CustomPainter {
 
     final slotWidth = plotWidth / count;
     final barWidth = math.min(16.0, slotWidth * 0.26);
-    const barGap = 4.0;
+    const barGap = 2.0;
 
     final linePoints = <Offset?>[];
 
@@ -291,11 +240,11 @@ class _ComboChartPainter extends CustomPainter {
         final barLeft = centerX - barGap / 2 - barWidth;
         final rect = Rect.fromLTWH(barLeft, plotBottom - h, barWidth, h);
         canvas.drawRRect(
-          RRect.fromRectAndCorners(rect, topLeft: const Radius.circular(2), topRight: const Radius.circular(2)),
-          Paint()..color = AppColors.info,
+          RRect.fromRectAndCorners(rect, topLeft: const Radius.circular(4), topRight: const Radius.circular(4)),
+          Paint()..color = AppColors.chartIncome,
         );
         _drawText(canvas, formatMoneyCompact(incomeV), Offset(barLeft + barWidth / 2, plotBottom - h - 4),
-            const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: AppColors.info),
+            const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             anchorY: 1);
       }
 
@@ -305,11 +254,11 @@ class _ComboChartPainter extends CustomPainter {
         final barLeft = centerX + barGap / 2;
         final rect = Rect.fromLTWH(barLeft, plotBottom - h, barWidth, h);
         canvas.drawRRect(
-          RRect.fromRectAndCorners(rect, topLeft: const Radius.circular(2), topRight: const Radius.circular(2)),
-          Paint()..color = AppColors.negative,
+          RRect.fromRectAndCorners(rect, topLeft: const Radius.circular(4), topRight: const Radius.circular(4)),
+          Paint()..color = AppColors.chartExpense,
         );
         _drawText(canvas, formatMoneyCompact(expenseV), Offset(barLeft + barWidth / 2, plotBottom - h - 4),
-            const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: AppColors.negative),
+            const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
             anchorY: 1);
       }
 
@@ -322,7 +271,7 @@ class _ComboChartPainter extends CustomPainter {
     // خط دریافتی - پیوسته بین نقاط متوالی غیر-null، با شکست روی null
     // (بدون درون‌یابی ساختگی روی Bucketهای بدون داده).
     final linePaint = Paint()
-      ..color = AppColors.positive
+      ..color = ComboTrendChartWidget.receiptsColor
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
@@ -338,12 +287,12 @@ class _ComboChartPainter extends CustomPainter {
     for (var i = 0; i < linePoints.length; i++) {
       final p = linePoints[i];
       if (p == null) continue;
-      canvas.drawCircle(p, 3.2, Paint()..color = AppColors.positive);
+      canvas.drawCircle(p, 3.2, Paint()..color = ComboTrendChartWidget.receiptsColor);
       canvas.drawCircle(
           p, 3.2, Paint()..color = AppColors.surface..style = PaintingStyle.stroke..strokeWidth = 1.2);
       final v = _valueAt(receipts, i)!;
       _drawText(canvas, formatMoneyCompact(v), Offset(p.dx, p.dy - 8),
-          const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: AppColors.positive),
+          const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w700, color: ComboTrendChartWidget.receiptsColor),
           anchorY: 1);
     }
   }

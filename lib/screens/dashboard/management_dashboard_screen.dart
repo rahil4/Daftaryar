@@ -12,17 +12,15 @@ import '../../utils/formatters.dart';
 import '../../utils/reloadable.dart';
 import '../counterparties/counterparty_form_screen.dart';
 import '../journal/quick_receipt_screen.dart';
-import '../journal/quick_expense_screen.dart';
 import '../journal/journal_entry_detail_screen.dart';
-import '../journal/journal_form_screen.dart';
 import '../projects/project_form_screen.dart';
 import '../projects/projects_screen.dart';
 import '../reports/receivables_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/settings_screen.dart';
 import '../sms_drafts/sms_drafts_screen.dart';
-import '../../widgets/stat_card.dart';
-import 'widgets/dashboard_sections.dart';
+import '../../widgets/metric_strip.dart';
+import '../../widgets/page_header.dart';
 import '../../widgets/period_segmented_control.dart';
 import 'widgets/combo_trend_chart_widget.dart';
 
@@ -134,78 +132,48 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
     return Jalali.now().julianDayNumber - date.julianDayNumber;
   }
 
+  bool get _backupDue =>
+      !_isNewUser &&
+      (_daysSinceLastBackup == null || _daysSinceLastBackup! >= kBackupReminderThresholdDays);
+
+  Future<void> _push(Widget screen) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('داشبورد مدیریتی'),
-            Text('وضعیت مالی و عملکرد دفتر',
-                style: TextStyle(
-                    fontSize: 11, color: AppColors.textSecondary.withValues(alpha: 0.9), fontWeight: FontWeight.w400)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'به‌روزرسانی',
-            onPressed: _loading ? null : _load,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'تنظیمات',
-            onPressed: () =>
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
-          ),
-        ],
-      ),
+      appBar: pageHeader(context, title: 'داشبورد'),
       body: BlueprintGridBackground(
         child: RefreshIndicator(
           onRefresh: _load,
           child: ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
             children: [
+              // هنگام تازه‌سازی، داده قبلی روی صفحه می‌ماند و فقط یک نوار
+              // باریک پیشرفت بالای آن می‌آید؛ چرخنده تمام‌صفحه فقط برای اولین
+              // بارگذاری است که هنوز چیزی برای نمایش نیست.
+              SizedBox(
+                height: 2,
+                child: (_loading && _data != null) ? const LinearProgressIndicator(minHeight: 2) : null,
+              ),
               // بنر سلامت داده در بالاترین نقطه: اگر یکپارچگی ساختاری
               // مشکل دارد، کاربر نباید پیش از دیدن این هشدار تراکنش جدید
               // ثبت کند یا به اعداد داشبورد تکیه کند.
               if (_health != null && !_health!.isHealthy) ...[
+                const SizedBox(height: 8),
                 _HealthBanner(result: _health!),
-                const SizedBox(height: 12),
               ],
               // راهنمای شروع کار: پیش از هر چیز دیگر، چون بدون طرف‌حساب/
               // پروژه، بقیه داشبورد فقط اعداد صفر بی‌معنا نشان می‌دهد.
-              if (_isNewUser) _OnboardingCard(onDone: _load),
-              _QuickActionsRow(onDone: _load),
-              if (_pendingSmsDrafts > 0) ...[
-                const SizedBox(height: 10),
-                _PendingSmsBanner(count: _pendingSmsDrafts, onTap: _load),
+              if (_isNewUser) ...[
+                const SizedBox(height: 8),
+                _OnboardingCard(onDone: _load),
               ],
-              // یادآور پشتیبان‌گیری فقط بعد از رد شدن از مرحله کاربر تازه
-              // نمایش داده می‌شود؛ وگرنه برای کاربری که هنوز حتی اولین
-              // طرف‌حساب/پروژه‌اش را ثبت نکرده، همزمان با راهنمای شروع کار
-              // نشان داده می‌شد - توصیه بی‌موقعی («داده‌ات را پشتیبان بگیر»)
-              // درباره داده‌ای که هنوز وجود ندارد.
-              if (!_isNewUser &&
-                  (_daysSinceLastBackup == null ||
-                      _daysSinceLastBackup! >= kBackupReminderThresholdDays)) ...[
-                const SizedBox(height: 10),
-                _BackupReminderBanner(daysSince: _daysSinceLastBackup, onTap: _load),
-              ],
-              const SizedBox(height: 16),
-              // هنگام تازه‌سازی، داده قبلی روی صفحه می‌ماند و فقط یک نوار
-              // باریک پیشرفت بالای آن می‌آید؛ چرخنده تمام‌صفحه فقط برای اولین
-              // بارگذاری است که هنوز چیزی برای نمایش نیست.
-              if (_data != null) ...[
-                SizedBox(
-                  height: 2,
-                  child: _loading ? const LinearProgressIndicator(minHeight: 2) : null,
-                ),
-                const SizedBox(height: 6),
-                _buildContent(_data!),
-              ] else if (_loading)
+              if (_data != null)
+                _buildContent(_data!)
+              else if (_loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 60),
                   child: Center(child: CircularProgressIndicator()),
@@ -223,44 +191,41 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
     );
   }
 
+  /// تغییر یک شاخص نسبت به دوره قبل، به درصد؛ جهت از مقایسه مستقیم دو مقدار
+  /// می‌آید (نه از علامت مقدار قبلی) تا بهبود یک عدد منفی هم «رو به بالا»
+  /// دیده شود. null وقتی مقدار قبلی صفر یا نامعلوم است.
+  double? _change(double? current, double? previous) {
+    if (current == null || previous == null || previous == 0) return null;
+    return (current - previous) / previous.abs() * 100;
+  }
+
   Widget _buildContent(ManagementDashboardData data) {
+    final expenseNow = (data.directProjectCost.value ?? 0) +
+        (data.projectOverhead.value ?? 0) +
+        (data.officeExpense.value ?? 0);
+    final prevParts = [
+      data.directProjectCost.previousValue,
+      data.projectOverhead.previousValue,
+      data.officeExpense.previousValue,
+    ];
+    final expensePrev =
+        prevParts.any((v) => v == null) ? null : prevParts.fold<double>(0, (s, v) => s + v!);
+
+    final followUps = _followUpRows(data);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ---------- موجودی حساب‌ها (وضعیت فعلی، مستقل از بازه) ----------
-        _label('موجودی حساب‌ها · الان'),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-            child: Column(
-              children: [
-                for (final b in data.bankBalances)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(b.name, style: const TextStyle(fontSize: 12.5)),
-                        Text(formatMoney(b.balance, withSuffix: false),
-                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                if (data.bankBalances.isNotEmpty) const Divider(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('جمع کل',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.brass)),
-                    Text(formatMoney(data.closingCash, withSuffix: false),
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.brass)),
-                  ],
-                ),
-              ],
-            ),
-          ),
+        // ---------- موجودی (وضعیت فعلی، مستقل از بازه) ----------
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 14),
+          child: HeroAmount(label: 'موجودی نقد و بانک · الان', amount: data.closingCash, fontSize: 36),
         ),
+        if (data.bankBalances.isNotEmpty) ...[
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          _AccountBalancesGrid(balances: data.bankBalances),
+        ],
         const SizedBox(height: 18),
 
         // ---------- انتخاب‌گر بازه ----------
@@ -280,214 +245,288 @@ class _ManagementDashboardScreenState extends State<ManagementDashboardScreen>
             _load();
           },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
 
         // ---------- عملکرد این بازه ----------
-        _label('عملکرد این بازه'),
-        // نمودار ترکیبی: درآمد/هزینه (تعهدی، ستون) + دریافتی (نقدی، خط) -
-        // جایگزین ردیف قبلی «دریافتی/پرداختی» و MultiTrendChartWidget که
-        // جدا از هم بودند؛ سه کارت خلاصه بالای خودِ نمودار، دقیقاً هم‌رنگ با
-        // سه سری نمودار زیرشان.
+        SurfaceBox(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              MetricStrip(
+                framed: false,
+                items: [
+                  MetricItem(
+                    label: 'درآمد',
+                    value: _moneyOrDash(data.netRevenue.value),
+                    footer: DeltaLabel(
+                        percent: _change(data.netRevenue.value, data.netRevenue.previousValue)),
+                  ),
+                  MetricItem(
+                    label: 'هزینه',
+                    value: formatMoney(expenseNow, withSuffix: false),
+                    footer: DeltaLabel(percent: _change(expenseNow, expensePrev)),
+                  ),
+                  MetricItem(
+                    label: 'سود عملیاتی',
+                    value: _moneyOrDash(data.operatingResult.value),
+                    footer: DeltaLabel(
+                        percent:
+                            _change(data.operatingResult.value, data.operatingResult.previousValue)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text('درصدها: تغییر نسبت به دوره هم‌طول قبل',
+                  style: TextStyle(fontSize: 10.5, color: AppColors.textSecondary)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // نمودار ترکیبی: درآمد/هزینه (تعهدی، ستون) + دریافتی (نقدی، خط).
         ComboTrendChartWidget(
           title: 'درآمد و هزینه',
           income: data.revenueTrend,
           expense: data.expenseTrend,
           receipts: data.receiptsTrend,
           caption: data.trendCaption,
-        ),
-        const SizedBox(height: 16),
-
-        // ---------- هزینه‌های این بازه (تفکیک پروژه/دفتر) ----------
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('هزینه‌های این بازه',
-                    style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                const SizedBox(height: 6),
-                // چهار ردیف زیر دقیقاً با «پرداختی» بالای همین کارت جمع
-                // می‌بندد (projectPayments + projectOverheadPayments +
-                // officePayments + otherCashOutflows) - قبلاً فقط دو ردیف
-                // اول بود و عدد این کارت با «پرداختی» همخوانی نداشت.
-                _kv('پروژه‌ها', formatMoney(data.projectPayments, withSuffix: false)),
-                _kv('سربار پروژه‌ها', formatMoney(data.projectOverheadPayments, withSuffix: false)),
-                _kv('دفتر', formatMoney(data.officePayments, withSuffix: false)),
-                if (data.otherCashOutflows != 0)
-                  _kv('سایر', formatMoney(data.otherCashOutflows, withSuffix: false)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // ---------- طلب و پیش‌دریافت ----------
-        _label('طلب و پیش‌دریافت'),
-        // مطالبات (بدهی رسمی، پروژه‌های نهایی‌شده) و مانده تخمینی (بدهی
-        // غیررسمی، پروژه‌های در جریان) هر دو یک مفهوم‌اند - «چقدر پول
-        // طلبکاریم» - فقط با درجه قطعیت متفاوت؛ در یک کارت با هم دیده
-        // می‌شوند تا کارت جدا و ناوبری تکراری نداشته باشیم. هر دو به تب
-        // «سود مشتریان» می‌روند - جایی که این دو عدد به تفکیک مشتری/پروژه
-        // دیده می‌شود (جایگزین صفحه حذف‌شده «طلب‌های باز»).
-        _ReceivablesCard(
-          receivable: data.receivableBalance,
-          estimatedRemaining: data.estimatedRemainingTotal,
-          onTap: () => Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const ReportsScreen(initialTabIndex: 1))),
+          receiptsTotal: data.customerReceipts + data.otherCashInflows,
         ),
         const SizedBox(height: 10),
+        _CashOutBreakdown(data: data),
 
-        // ---------- پروژه در جریان + پیش‌دریافت ----------
-        Row(
-          children: [
-            Expanded(
-                child: StatCard(
-                    title: 'پروژه در جریان ›',
-                    value: pn(data.openProjectsCount),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ProjectsScreen(onlyOpenFinancially: true))))),
-            const SizedBox(width: 8),
-            Expanded(
-                child: StatCard(
-                    title: 'پیش‌دریافت ›',
-                    value: formatMoneyCompact(data.advanceBalance),
-                    emphasize: true,
-                    color: AppColors.brass,
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ReportsScreen(
-                                initialTabIndex: 1, sortCustomersByUrgency: true))))),
-          ],
+        // ---------- نیاز به پیگیری ----------
+        const BlockHeading('نیاز به پیگیری'),
+        SurfaceBox(
+          padding: EdgeInsets.zero,
+          child: followUps.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('فعلاً موردی برای پیگیری نیست.',
+                      style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+                )
+              : Column(
+                  children: [
+                    for (var i = 0; i < followUps.length; i++) ...[
+                      if (i > 0) const Divider(height: 1),
+                      followUps[i],
+                    ],
+                  ],
+                ),
         ),
-        const SizedBox(height: 18),
 
         // ---------- آخرین تراکنش‌ها ----------
         if (data.recentEntries.isNotEmpty) ...[
-          _label('آخرین تراکنش‌ها'),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              child: Column(
-                children: [
-                  for (final e in data.recentEntries)
-                    InkWell(
-                      onTap: () async {
-                        await Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.entryId)));
-                        _load();
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(e.description,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 12.5)),
-                                  const SizedBox(height: 2),
-                                  Text(formatJalaliLong(e.date),
-                                      style: const TextStyle(
-                                          fontSize: 10, color: AppColors.textSecondary)),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              '${e.isInflow ? '+' : '-'}${formatMoneyCompact(e.amount)}',
-                              style: TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: e.isInflow ? AppColors.positive : AppColors.negative),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+          const BlockHeading('آخرین تراکنش‌ها'),
+          for (var i = 0; i < data.recentEntries.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            _RecentEntryRow(
+              entry: data.recentEntries[i],
+              onTap: () => _push(JournalEntryDetailScreen(entryId: data.recentEntries[i].entryId)),
             ),
-          ),
+          ],
         ],
-
-        // ---------- هشدارها (فقط اگر وجود داشته باشند) ----------
-        if (data.alerts.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          AlertsSection(
-            data: data,
-            onOutstandingReceivablesTap: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const ReceivablesScreen())),
-          ),
-        ],
-        const SizedBox(height: 24),
       ],
     );
   }
 
-  Widget _label(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-    );
-  }
+  String _moneyOrDash(double? v) => v == null ? '—' : formatMoney(v, withSuffix: false);
 
-  Widget _kv(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 12)),
-          Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+  /// ردیف‌های «نیاز به پیگیری»: هر چیزی که کاربر باید درباره‌اش کاری بکند،
+  /// در یک فهرست واحد (به‌جای بنرها و کارت‌های پراکنده قبلی).
+  List<Widget> _followUpRows(ManagementDashboardData data) {
+    final rows = <Widget>[];
+    if (data.receivableBalance > 0) {
+      rows.add(_FollowUpRow(
+        icon: Icons.receipt_long_outlined,
+        title: 'مطالبات باز',
+        subtitle: '${pn(data.outstandingProjects.length)} پروژه نهایی‌شده',
+        amount: data.receivableBalance,
+        onTap: () => _push(const ReceivablesScreen()),
+      ));
+    }
+    if (data.openProjectsCount > 0) {
+      rows.add(_FollowUpRow(
+        icon: Icons.work_outline,
+        title: 'مانده تخمینی پروژه‌های در جریان',
+        subtitle: '${pn(data.openProjectsCount)} پروژه',
+        amount: data.estimatedRemainingTotal,
+        onTap: () => _push(const ProjectsScreen(onlyOpenFinancially: true)),
+      ));
+    }
+    if (data.advanceBalance > 0) {
+      rows.add(_FollowUpRow(
+        icon: Icons.savings_outlined,
+        title: 'پیش‌دریافت مشتریان',
+        subtitle: 'دریافت‌شده پیش از نهایی‌شدن پروژه',
+        amount: data.advanceBalance,
+        onTap: () => _push(const ReportsScreen(initialTabIndex: 1, sortCustomersByUrgency: true)),
+      ));
+    }
+    if (_pendingSmsDrafts > 0) {
+      rows.add(_FollowUpRow(
+        icon: Icons.sms_outlined,
+        title: 'پیش‌نویس پیامکی',
+        subtitle: '${pn(_pendingSmsDrafts)} مورد در انتظار تأیید',
+        onTap: () => _push(const SmsDraftsScreen()),
+      ));
+    }
+    if (_backupDue) {
+      rows.add(_FollowUpRow(
+        icon: Icons.cloud_upload_outlined,
+        title: 'پشتیبان‌گیری',
+        subtitle: _daysSinceLastBackup == null
+            ? 'هنوز هیچ پشتیبانی تهیه نکرده‌اید'
+            : 'آخرین پشتیبان ${pn(_daysSinceLastBackup!)} روز پیش',
+        onTap: () => _push(const SettingsScreen()),
+      ));
+    }
+    for (final a in data.alerts) {
+      // «مطالبات باز» همان ردیف اول این فهرست است؛ دوباره تکرار نمی‌شود.
+      if (a.title == 'مطالبات باز') continue;
+      final isError = a.severity == ManagementAlertSeverity.error;
+      rows.add(_FollowUpRow(
+        icon: isError ? Icons.error_outline : Icons.warning_amber_rounded,
+        iconColor: isError
+            ? AppColors.negative
+            : (a.severity == ManagementAlertSeverity.warning ? AppColors.brass : AppColors.textSecondary),
+        title: a.title,
+        subtitle: a.message,
+      ));
+    }
+    return rows;
+  }
+}
+
+/// موجودی هر حساب نقدی/بانکی، سه‌تا در هر ردیف با خط جداکننده بین‌شان.
+class _AccountBalancesGrid extends StatelessWidget {
+  final List<BankBalanceEntry> balances;
+  const _AccountBalancesGrid({required this.balances});
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var start = 0; start < balances.length; start += 3) {
+      final chunk = balances.skip(start).take(3).toList();
+      if (start > 0) rows.add(const SizedBox(height: 12));
+      rows.add(MetricStrip(
+        framed: false,
+        items: [
+          for (final b in chunk)
+            MetricItem(label: b.name, value: formatMoney(b.balance, withSuffix: false), valueSize: 13),
+          // ردیف ناقص با خانه خالی پر می‌شود تا عرض ستون‌ها یکسان بماند.
+          for (var i = chunk.length; i < 3; i++) const MetricItem(label: '', value: ''),
         ],
+      ));
+    }
+    return Column(children: rows);
+  }
+}
+
+/// تفکیک پرداخت‌های نقدی بازه (پروژه/سربار/دفتر/سایر) - پیش‌فرض بسته، چون
+/// جزئیات ثانویه است.
+class _CashOutBreakdown extends StatelessWidget {
+  final ManagementDashboardData data;
+  const _CashOutBreakdown({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = data.projectPayments +
+        data.projectOverheadPayments +
+        data.officePayments +
+        data.otherCashOutflows;
+    Widget kv(String label, double value) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+              Text(formatMoney(value, withSuffix: false), style: AppTextStyles.rowAmount),
+            ],
+          ),
+        );
+    return SurfaceBox(
+      padding: EdgeInsets.zero,
+      // Material شفاف: تا موج لمس ردیف روی سطح کارت دیده شود.
+      child: Material(
+        type: MaterialType.transparency,
+        child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+          childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+          iconColor: AppColors.textSecondary,
+          collapsedIconColor: AppColors.textSecondary,
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text('پرداخت‌های نقدی این بازه', style: AppTextStyles.rowTitle),
+              ),
+              Text(formatMoney(total, withSuffix: false), style: AppTextStyles.rowAmount),
+            ],
+          ),
+          children: [
+            kv('پروژه‌ها', data.projectPayments),
+            kv('سربار پروژه‌ها', data.projectOverheadPayments),
+            kv('دفتر', data.officePayments),
+            if (data.otherCashOutflows != 0) kv('سایر', data.otherCashOutflows),
+          ],
+        ),
+        ),
       ),
     );
   }
 }
 
-/// کارت واحد «مطالبات + مانده تخمینی» - جایگزین دو StatCard جدا که هر دو
-/// به یک مقصد می‌رفتند؛ چون هر دو یک مفهوم‌اند (پول طلبکاری، با درجه قطعیت
-/// متفاوت)، یک کارت با دو ستون منطقی‌تر از دو کارت جدا با ناوبری تکراری
-/// است. محتوای هر ستون از همان StatCard.content مشترک می‌آید تا چیدمان
-/// برچسب/مقدار این‌جا و در StatCard یک‌بار پیاده‌سازی شود، نه دوبار.
-class _ReceivablesCard extends StatelessWidget {
-  final double receivable;
-  final double estimatedRemaining;
-  final VoidCallback onTap;
-  const _ReceivablesCard(
-      {required this.receivable, required this.estimatedRemaining, required this.onTap});
+class _FollowUpRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final double? amount;
+  final VoidCallback? onTap;
+
+  const _FollowUpRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.iconColor = AppColors.brassLight,
+    this.amount,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.brass, width: 0.8),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 60),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             children: [
+              Icon(icon, size: 20, color: iconColor),
+              const SizedBox(width: 12),
               Expanded(
-                  child: StatCard.content(
-                      title: 'مطالبات ›', value: formatMoneyCompact(receivable), color: AppColors.brass)),
-              Container(width: 1, height: 34, margin: const EdgeInsets.symmetric(horizontal: 12), color: AppColors.gridLine),
-              Expanded(
-                  child: StatCard.content(
-                      title: 'مانده تخمینی ›',
-                      value: formatMoneyCompact(estimatedRemaining),
-                      color: AppColors.brass)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title, style: AppTextStyles.rowTitle),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              if (amount != null) ...[
+                const SizedBox(width: 8),
+                Text(formatMoney(amount!, withSuffix: false), style: AppTextStyles.rowAmount),
+              ],
+              if (onTap != null) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.chevron_left, size: 18, color: AppColors.textSecondary),
+              ],
             ],
           ),
         ),
@@ -496,138 +535,61 @@ class _ReceivablesCard extends StatelessWidget {
   }
 }
 
-/// ردیف دو دکمه اقدام سریع (دریافت/پرداخت)
-class _QuickActionsRow extends StatelessWidget {
-  final VoidCallback onDone;
-  const _QuickActionsRow({required this.onDone});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickActionButton(
-            label: 'دریافت',
-            icon: Icons.south_west_rounded,
-            color: AppColors.positive,
-            onTap: () async {
-              final result =
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const QuickReceiptScreen()));
-              if (result == true) onDone();
-            },
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _QuickActionButton(
-            label: 'پرداخت',
-            icon: Icons.north_east_rounded,
-            color: AppColors.negative,
-            onTap: () async {
-              final result =
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const QuickExpenseScreen()));
-              if (result == true) onDone();
-            },
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _QuickActionButton(
-            label: 'سند',
-            icon: Icons.receipt_long_outlined,
-            color: AppColors.brass,
-            onTap: () async {
-              final result =
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const JournalFormScreen()));
-              if (result == true) onDone();
-            },
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _QuickActionButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
+class _RecentEntryRow extends StatelessWidget {
+  final RecentEntryView entry;
   final VoidCallback onTap;
-  const _QuickActionButton({required this.label, required this.icon, required this.color, required this.onTap});
+  const _RecentEntryRow({required this.entry, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final inflow = entry.isInflow;
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.gridLine),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 17, color: color),
-            const SizedBox(width: 7),
-            // در صفحه باریک یا با فونت بزرگ سیستم، برچسب کوچک می‌شود به‌جای
-            // این‌که از دکمه بیرون بزند.
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(label,
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: color)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.gridLine),
+                ),
+                // جهت با شکل پیکان و علامت +/− هم گفته می‌شود، نه فقط با رنگ.
+                child: Icon(
+                  inflow ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                  size: 16,
+                  color: inflow ? AppColors.positive : AppColors.negative,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(entry.description,
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTextStyles.rowTitle),
+                    const SizedBox(height: 2),
+                    Text(formatJalaliLong(entry.date),
+                        style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('${inflow ? '+' : '−'} ${formatMoney(entry.amount, withSuffix: false)}',
+                  style: AppTextStyles.rowAmount),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// بنر پیش‌نویس‌های پیامکی در انتظار تأیید
-class _PendingSmsBanner extends StatelessWidget {
-  final int count;
-  final VoidCallback onTap;
-  const _PendingSmsBanner({required this.count, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () async {
-        await Navigator.push(context, MaterialPageRoute(builder: (_) => const SmsDraftsScreen()));
-        onTap();
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.brass.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.brass),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              '${pn(count)} پیش‌نویس پیامکی در انتظار تأیید',
-              style: const TextStyle(fontSize: 13, color: AppColors.brass, fontWeight: FontWeight.w700),
-            ),
-            const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// بنر یادآور پشتیبان‌گیری - وقتی هرگز پشتیبان گرفته نشده یا مدتی طولانی
-/// (kBackupReminderThresholdDays) از آخرین پشتیبان موفق گذشته باشد. طبق
-/// همان درسِ STABILITY.md: «پشتیبانی که هرگز گرفته نشده، پشتیبان نیست».
 /// راهنمای شروع کار - فقط برای کاربر تازه (بدون هیچ طرف‌حساب/پروژه‌ای)
 /// نمایش داده می‌شود؛ به محض افزودن اولین طرف‌حساب یا پروژه، خودش دیگر
 /// هرگز دیده نمی‌شود (تصمیم بر مبنای همان دو شمارش در _load، بدون هیچ
@@ -644,9 +606,9 @@ class _OnboardingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         side: const BorderSide(color: AppColors.brass, width: 0.8),
       ),
       child: Padding(
@@ -737,47 +699,6 @@ class _OnboardingStep extends StatelessWidget {
               ),
             ),
             const Icon(Icons.chevron_left, color: AppColors.brass, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BackupReminderBanner extends StatelessWidget {
-  final int? daysSince; // null یعنی هرگز پشتیبان گرفته نشده
-  final VoidCallback onTap;
-  const _BackupReminderBanner({required this.daysSince, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final message = daysSince == null
-        ? 'هنوز هیچ پشتیبانی تهیه نکرده‌اید'
-        : '${pn(daysSince!)} روز از آخرین پشتیبان‌گیری گذشته';
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () async {
-        await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
-        onTap();
-      },
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.brass.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.brass),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Text(
-                '$message — همین حالا یک نسخه تهیه کنید',
-                style: const TextStyle(fontSize: 13, color: AppColors.brass, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const Text('‹', style: TextStyle(color: AppColors.brass, fontSize: 16)),
           ],
         ),
       ),

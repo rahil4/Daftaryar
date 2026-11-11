@@ -8,7 +8,6 @@ import '../../services/financial_metrics_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../utils/reloadable.dart';
-import 'project_form_screen.dart';
 import 'project_detail_screen.dart';
 import '../counterparties/counterparties_screen.dart';
 
@@ -221,14 +220,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> with Reloadable<Project
             ),
           ],
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const ProjectFormScreen()));
-          if (result == true) _load();
-        },
-        child: const Icon(Icons.add),
       ),
     );
   }

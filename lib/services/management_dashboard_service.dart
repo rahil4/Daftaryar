@@ -43,10 +43,14 @@ class ManagementDashboardService {
         : null;
     // موجودی فعلی هر حساب نقدی/بانکی - وضعیت فعلی (Current State)، مستقل
     // از بازه انتخابی، دقیقاً مثل closingCash کل.
-    final bankBalanceRows = await _db.bankBalances();
-    final bankBalances = bankBalanceRows
-        .map((row) => BankBalanceEntry(name: row['name'] as String, balance: row['balance'] as double))
-        .toList();
+    // همه حساب‌های نقدی/بانکی قابل‌ثبت (صندوق هم، نه فقط حساب‌های «بانک»)،
+    // تا ریز حساب‌ها با عدد کل موجودی بالای داشبورد جمع ببندد.
+    final cashAccounts = await _db.getCashAccounts();
+    final bankBalances = <BankBalanceEntry>[];
+    for (final account in cashAccounts) {
+      final bal = await _db.accountBalance(account.id!);
+      bankBalances.add(BankBalanceEntry(name: account.name, balance: bal['balance']!));
+    }
 
     // ---- داده‌های خلاصه داشبورد ساده‌شده ----
     // پروژه‌های در جریان + جمع مانده تخمینی: هر دو وضعیت فعلی‌اند (مستقل

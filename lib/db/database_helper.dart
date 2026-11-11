@@ -1259,7 +1259,7 @@ class DatabaseHelper {
       args.add(toDate);
     }
     return db.rawQuery('''
-      SELECT l.id as lineId, l.debit, l.credit, l.description as lineDescription,
+      SELECT l.id as lineId, l.accountId as accountId, l.debit, l.credit, l.description as lineDescription,
              e.id as entryId, e.date, e.description as entryDescription, l.projectId
       FROM journal_lines l
       JOIN journal_entries e ON e.id = l.entryId
@@ -3313,6 +3313,19 @@ class DatabaseHelper {
     return {
       'debit': (r.first['d'] as num).toDouble(),
       'credit': (r.first['c'] as num).toDouble(),
+    };
+  }
+
+  /// جمع بدهکار و بستانکار هر حساب در یک کوئری (به‌جای یک کوئری به‌ازای هر
+  /// حساب) - فقط خواندنی؛ برای نمایش مانده کنار حساب‌ها در چارت حساب‌ها.
+  Future<Map<int, ({double debit, double credit})>> accountTotalsById() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+        'SELECT accountId, COALESCE(SUM(debit),0) as d, COALESCE(SUM(credit),0) as c '
+        'FROM journal_lines GROUP BY accountId');
+    return {
+      for (final r in rows)
+        r['accountId'] as int: (debit: (r['d'] as num).toDouble(), credit: (r['c'] as num).toDouble()),
     };
   }
 

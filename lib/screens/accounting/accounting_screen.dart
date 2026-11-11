@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
 import '../../utils/reloadable.dart';
+import '../../widgets/page_header.dart';
+import '../../widgets/segmented_switch.dart';
+import '../accounts/account_form_screen.dart';
 import '../accounts/accounts_screen.dart';
 import '../journal/journal_list_screen.dart';
-import '../settings/settings_screen.dart';
 
 enum _AccountingView { ledger, chart }
 
@@ -39,83 +41,56 @@ class _AccountingScreenState extends State<AccountingScreen> with Reloadable<Acc
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('حسابداری'),
+      appBar: pageHeader(
+        context,
+        title: 'حسابداری',
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'تنظیمات',
-            onPressed: () =>
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(52),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: _ViewSwitcher(
-              selected: _view,
-              onChanged: _switchView,
+          // ساخت حساب فقط در نمای چارت حساب‌ها معنا دارد.
+          if (_view == _AccountingView.chart)
+            TextButton.icon(
+              onPressed: () async {
+                final result =
+                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountFormScreen()));
+                if (result == true && mounted) triggerReload(_accountsKey);
+              },
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('حساب جدید', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.brassLight,
+                minimumSize: const Size(44, 44),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: AppColors.gridLine),
+                ),
+                backgroundColor: AppColors.surface,
+              ),
             ),
-          ),
-        ),
+        ],
       ),
       body: BlueprintGridBackground(
-        child: IndexedStack(
-          index: _view.index,
+        child: Column(
           children: [
-            JournalListScreen(key: _journalKey, embedded: true),
-            AccountsScreen(key: _accountsKey, embedded: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+              child: SegmentedSwitch<_AccountingView>(
+                options: const {
+                  _AccountingView.ledger: 'دفترکل',
+                  _AccountingView.chart: 'چارت حساب‌ها',
+                },
+                selected: _view,
+                onChanged: _switchView,
+              ),
+            ),
+            Expanded(
+              child: IndexedStack(
+                index: _view.index,
+                children: [
+                  JournalListScreen(key: _journalKey, embedded: true),
+                  AccountsScreen(key: _accountsKey, embedded: true),
+                ],
+              ),
+            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// سوییچ دوحالته دفترکل/چارت حساب‌ها به‌شکل Pill، مطابق ماکت تأییدشده
-class _ViewSwitcher extends StatelessWidget {
-  final _AccountingView selected;
-  final ValueChanged<_AccountingView> onChanged;
-  const _ViewSwitcher({required this.selected, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.gridLine),
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Row(
-        children: [
-          Expanded(child: _segment('دفترکل', _AccountingView.ledger)),
-          Expanded(child: _segment('چارت حساب‌ها', _AccountingView.chart)),
-        ],
-      ),
-    );
-  }
-
-  Widget _segment(String label, _AccountingView value) {
-    final active = selected == value;
-    return GestureDetector(
-      onTap: () => onChanged(value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? AppColors.brass : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w700,
-            color: active ? const Color(0xFF15100A) : AppColors.textSecondary,
-          ),
         ),
       ),
     );

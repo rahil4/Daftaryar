@@ -209,6 +209,93 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
     }
   }
 
+  /// برگه «فیلتر»: پروژه و بازه تاریخ - دو فیلتر کم‌استفاده‌تر که دیگر روی
+  /// صفحه چیپ جدا نمی‌گیرند.
+  Future<void> _openFilterSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('فیلتر اسناد', style: AppTextStyles.blockHeading),
+              const SizedBox(height: 8),
+              _filterRow(
+                icon: Icons.work_outline,
+                label: 'پروژه',
+                value: _projectFilter == null
+                    ? 'همه پروژه‌ها'
+                    : (_projects.where((p) => p.id == _projectFilter).firstOrNull?.title ?? 'پروژه'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _openProjectFilterSheet();
+                },
+              ),
+              const Divider(height: 1),
+              _filterRow(
+                icon: Icons.date_range_outlined,
+                label: 'بازه تاریخ',
+                value: _fromDate == null
+                    ? 'بدون محدودیت'
+                    : '${formatJalaliLong(_fromDate!)} تا ${formatJalaliLong(_toDate!)}',
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _openDateFilterSheet();
+                },
+              ),
+              if (_hasActiveFilters) ...[
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _resetFilters();
+                  },
+                  child: const Text('پاک کردن فیلترها'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _filterRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppColors.textSecondary),
+            const SizedBox(width: 12),
+            Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(value,
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(width: 6),
+            const Icon(Icons.chevron_left, size: 18, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final filtered = _filtered;
@@ -216,20 +303,51 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
     final content = Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: TextField(
-            decoration: const InputDecoration(
-              hintText: 'جستجو در شرح، حساب یا پروژه...',
-              prefixIcon: Icon(Icons.search, size: 20),
-            ),
-            onChanged: (v) => setState(() => _search = v),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'جستجو در شرح، حساب یا پروژه',
+                    prefixIcon: Icon(Icons.search, size: 20),
+                  ),
+                  onChanged: (v) => setState(() => _search = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Badge(
+                isLabelVisible: _projectFilter != null || _fromDate != null,
+                smallSize: 9,
+                backgroundColor: AppColors.brass,
+                child: Material(
+                  color: AppColors.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: const BorderSide(color: AppColors.gridLine),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _openFilterSheet,
+                    child: const Tooltip(
+                      message: 'فیلتر پروژه و بازه تاریخ',
+                      child: SizedBox(
+                        width: 48,
+                        height: 48,
+                        child: Icon(Icons.tune, size: 20, color: AppColors.textSecondary),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         SizedBox(
-          height: 38,
+          height: 56,
           child: ListView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
             children: [
               _filterChip('همه', _typeFilter == _TypeFilter.all, () {
                 setState(() => _typeFilter = _TypeFilter.all);
@@ -240,49 +358,37 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
               _filterChip('پرداخت', _typeFilter == _TypeFilter.payment, () {
                 setState(() => _typeFilter = _TypeFilter.payment);
               }),
-              _filterChip(
-                _projectFilter == null
-                    ? 'پروژه'
-                    : (_projects.where((p) => p.id == _projectFilter).firstOrNull?.title ?? 'پروژه'),
-                _projectFilter != null,
-                _openProjectFilterSheet,
-                icon: Icons.work_outline,
-              ),
-              _filterChip(
-                _fromDate == null ? 'بازه تاریخ' : 'تاریخ: ${formatJalaliLong(_fromDate!)}—${formatJalaliLong(_toDate!)}',
-                _fromDate != null,
-                _openDateFilterSheet,
-                icon: Icons.date_range_outlined,
-              ),
-              if (_hasActiveFilters)
+              _filterChip('سایر اسناد', _typeFilter == _TypeFilter.other, () {
+                setState(() => _typeFilter = _TypeFilter.other);
+              }),
+              if (_hasActiveFilters && _typeFilter == _TypeFilter.all)
                 _filterChip('پاک کردن فیلترها', false, _resetFilters, icon: Icons.close),
             ],
           ),
         ),
-        const SizedBox(height: 6),
+        SizedBox(
+          height: 2,
+          child: (_loading && _entries.isNotEmpty) ? const LinearProgressIndicator(minHeight: 2) : null,
+        ),
         Expanded(
-          child: _loading
+          child: (_loading && _entries.isEmpty)
               ? const Center(child: CircularProgressIndicator())
               : filtered.isEmpty
                   ? Center(
                       child: Text(
-                          _hasActiveFilters ? 'سندی با این فیلترها یافت نشد' : 'هنوز سندی ثبت نشده است',
+                          (_hasActiveFilters || _search.trim().isNotEmpty)
+                              ? 'سندی با این فیلترها یافت نشد'
+                              : 'هنوز سندی ثبت نشده است',
                           style: const TextStyle(color: AppColors.textSecondary)))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                         children: _buildGroupedRows(filtered),
                       ),
                     ),
         ),
       ],
-    );
-
-    final fab = FloatingActionButton(
-      heroTag: 'journal_fab',
-      onPressed: () => showQuickAddSheet(context, onDone: _load),
-      child: const Icon(Icons.add),
     );
 
     // داخل پوسته اصلی، ثبت جدید از دکمه «+» نوار پایین انجام می‌شود.
@@ -291,39 +397,51 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
     return Scaffold(
       appBar: AppBar(title: const Text('اسناد حسابداری')),
       body: BlueprintGridBackground(child: content),
-      floatingActionButton: fab,
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'journal_fab',
+        onPressed: () => showQuickAddSheet(context, onDone: _load),
+        child: const Icon(Icons.add),
+      ),
     );
   }
 
   Widget _filterChip(String label, bool active, VoidCallback onTap, {IconData? icon}) {
     return Padding(
-      padding: const EdgeInsets.only(left: 8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: active ? AppColors.brass.withValues(alpha: 0.15) : AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: active ? AppColors.brass : AppColors.gridLine),
+      padding: const EdgeInsetsDirectional.only(end: 8),
+      child: Semantics(
+        button: true,
+        selected: active,
+        child: Material(
+          color: active ? AppColors.brass.withValues(alpha: 0.14) : AppColors.surface,
+          shape: StadiumBorder(
+            side: BorderSide(color: active ? AppColors.brass : AppColors.gridLine, width: active ? 1.5 : 1),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 14, color: active ? AppColors.brass : AppColors.textSecondary),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: active ? AppColors.brass : AppColors.textSecondary,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.normal,
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (icon != null) ...[
+                      Icon(icon, size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: active ? AppColors.brassLight : AppColors.textPrimary,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -334,36 +452,52 @@ class _JournalListScreenState extends State<JournalListScreen> with Reloadable<J
   List<Widget> _buildGroupedRows(List<JournalEntryModel> entries) {
     final widgets = <Widget>[];
     String? lastDate;
-    for (final e in entries) {
-      if (e.date != lastDate) {
+    for (var i = 0; i < entries.length; i++) {
+      final e = entries[i];
+      final isGroupStart = e.date != lastDate;
+      if (isGroupStart) {
         widgets.add(Padding(
-          padding: const EdgeInsets.only(top: 14, bottom: 6),
+          padding: const EdgeInsets.only(top: 14, bottom: 4),
           child: Text(
             formatJalaliLong(e.date),
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.brass),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.brassLight),
           ),
         ));
         lastDate = e.date;
       }
+      final isGroupEnd = i == entries.length - 1 || entries[i + 1].date != e.date;
       widgets.add(_JournalRow(
         entry: e,
         type: _entryType(e),
-        projectTitle: e.lines
-            .map((l) => l.projectId)
-            .whereType<int>()
-            .map((id) => _projects.where((p) => p.id == id).firstOrNull?.title)
-            .whereType<String>()
-            .firstOrNull,
+        accountSummary: _accountSummary(e),
+        showDivider: !isGroupEnd,
         onTap: () async {
           await Navigator.push(
             context,
             MaterialPageRoute(builder: (_) => JournalEntryDetailScreen(entryId: e.id!)),
           );
-          _load();
+          if (mounted) _load();
         },
       ));
     }
     return widgets;
+  }
+
+  /// خلاصه «بد … · بس …» یک سند: نام اولین حساب هر طرف، و اگر بیشتر از یک
+  /// حساب باشد، تعداد بقیه.
+  String _accountSummary(JournalEntryModel e) {
+    String side(bool debit) {
+      final names = <String>[];
+      for (final l in e.lines) {
+        if ((debit ? l.debit : l.credit) <= 0) continue;
+        final name = _accountsById[l.accountId]?.name;
+        if (name != null && !names.contains(name)) names.add(name);
+      }
+      if (names.isEmpty) return '—';
+      return names.length == 1 ? names.first : '${names.first} و ${pn(names.length - 1)} حساب دیگر';
+    }
+
+    return 'بد ${side(true)} · بس ${side(false)}';
   }
 }
 
@@ -371,78 +505,98 @@ extension _FirstOrNull<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
 }
 
-/// ردیف یک سند در فهرست - سبک متنی سنتی، بدون کارت
+/// ردیف یک سند در فهرست - سبک متنی سنتی، بدون کارت. جهت (دریافت/پرداخت)
+/// با شکل پیکان هم گفته می‌شود، نه فقط رنگ.
 class _JournalRow extends StatelessWidget {
   final JournalEntryModel entry;
   final _TypeFilter type;
-  final String? projectTitle;
+  final String accountSummary;
+  final bool showDivider;
   final VoidCallback onTap;
 
   const _JournalRow({
     required this.entry,
     required this.type,
-    required this.projectTitle,
+    required this.accountSummary,
+    required this.showDivider,
     required this.onTap,
   });
 
-  Color get _typeColor {
-    switch (type) {
-      case _TypeFilter.receipt:
-        return AppColors.positive;
-      case _TypeFilter.payment:
-        return AppColors.negative;
-      default:
-        return AppColors.textPrimary;
-    }
-  }
-
-  String get _typeLabel {
-    switch (type) {
-      case _TypeFilter.receipt:
-        return 'دریافت';
-      case _TypeFilter.payment:
-        return 'پرداخت';
-      default:
-        return 'سند';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    final IconData icon;
+    final Color color;
+    switch (type) {
+      case _TypeFilter.receipt:
+        icon = Icons.arrow_downward_rounded;
+        color = AppColors.positive;
+      case _TypeFilter.payment:
+        icon = Icons.arrow_upward_rounded;
+        color = AppColors.negative;
+      default:
+        icon = Icons.receipt_long_outlined;
+        color = AppColors.textSecondary;
+    }
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 11),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppColors.gridLine)),
+        constraints: const BoxConstraints(minHeight: 62),
+        decoration: BoxDecoration(
+          border: showDivider ? const Border(bottom: BorderSide(color: AppColors.gridLine)) : null,
         ),
         child: Row(
           children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.gridLine)),
+              child: Icon(icon, size: 16, color: color),
+            ),
+            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.description ?? 'سند شماره ${pn(entry.id!)}',
-                    style: const TextStyle(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    '$_typeLabel${projectTitle != null ? ' · $projectTitle' : ''}',
-                    style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            entry.description ?? 'سند شماره ${pn(entry.id!)}',
+                            style: AppTextStyles.rowTitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (entry.source == kJournalSourceManual) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: AppColors.lineStrong),
+                            ),
+                            child: const Text('دستی',
+                                style: TextStyle(
+                                    fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      accountSummary,
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            Text(
-              formatMoney(entry.totalDebit),
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _typeColor),
-            ),
-            const SizedBox(width: 4),
-            const Text('‹', style: TextStyle(fontSize: 15, color: AppColors.textSecondary)),
+            Text(formatMoney(entry.totalDebit, withSuffix: false), style: AppTextStyles.rowAmount),
           ],
         ),
       ),
